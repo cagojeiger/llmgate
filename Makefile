@@ -1,4 +1,4 @@
-.PHONY: test tidy probe build clean run e2e-probe-via-gate e2e-probe-via-gate-stream
+.PHONY: test tidy probe build clean run e2e-probe-via-gate e2e-probe-via-gate-stream e2e
 
 test:
 	go test ./...
@@ -20,6 +20,9 @@ e2e-probe-via-gate:
 
 e2e-probe-via-gate-stream:
 	uv run scripts/probe_upstream.py --via-gate --stream
+
+e2e:
+	cd tests/e2e && uv run pytest
 
 clean:
 	rm -rf bin/

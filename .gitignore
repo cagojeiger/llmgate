@@ -4,3 +4,7 @@ bin/
 .repos/
 *.log
 .DS_Store
+.venv/
+.pytest_cache/
+__pycache__/
+uv.lock

@@ -1,0 +1,76 @@
+package provider
+
+import (
+	"errors"
+	"fmt"
+	"time"
+)
+
+type Kind string
+
+const (
+	KindAuth          Kind = "auth"
+	KindRateLimit     Kind = "rate_limit"
+	KindBadRequest    Kind = "bad_request"
+	KindContextLength Kind = "context_length"
+	KindContentFilter Kind = "content_filter"
+	KindUpstream      Kind = "upstream"
+	KindTimeout       Kind = "timeout"
+	KindNetwork       Kind = "network"
+	KindEmpty         Kind = "empty_response"
+	KindUnknown       Kind = "unknown"
+)
+
+type Error struct {
+	Kind       Kind
+	Provider   string
+	Message    string
+	StatusCode int
+	RetryAfter time.Duration
+	Cause      error
+	Raw        []byte
+}
+
+func (e *Error) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	if e.Provider != "" {
+		return fmt.Sprintf("%s/%s: %s", e.Provider, e.Kind, e.Message)
+	}
+	return fmt.Sprintf("%s: %s", e.Kind, e.Message)
+}
+
+func (e *Error) Unwrap() error { return e.Cause }
+
+func (e *Error) Is(target error) bool {
+	var t *Error
+	if !errors.As(target, &t) {
+		return false
+	}
+	if t.Kind == "" {
+		return false
+	}
+	return e.Kind == t.Kind
+}
+
+func (e *Error) Retryable() bool {
+	switch e.Kind {
+	case KindRateLimit, KindUpstream, KindTimeout, KindNetwork:
+		return true
+	}
+	return false
+}
+
+var (
+	ErrAuth          = &Error{Kind: KindAuth}
+	ErrRateLimit     = &Error{Kind: KindRateLimit}
+	ErrBadRequest    = &Error{Kind: KindBadRequest}
+	ErrContextLength = &Error{Kind: KindContextLength}
+	ErrContentFilter = &Error{Kind: KindContentFilter}
+	ErrUpstream      = &Error{Kind: KindUpstream}
+	ErrTimeout       = &Error{Kind: KindTimeout}
+	ErrNetwork       = &Error{Kind: KindNetwork}
+	ErrEmpty         = &Error{Kind: KindEmpty}
+	ErrUnknown       = &Error{Kind: KindUnknown}
+)

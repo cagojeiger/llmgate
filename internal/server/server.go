@@ -11,7 +11,7 @@ import (
 	"llmgate/internal/config"
 )
 
-func New(cfg *config.Server, log *slog.Logger, fwd *Forwarder) *http.Server {
+func New(cfg *config.Server, log *slog.Logger, h *Handler) *http.Server {
 	r := chi.NewRouter()
 	r.Use(requestIDMiddleware)
 	r.Use(accessLogMiddleware(log))
@@ -23,7 +23,7 @@ func New(cfg *config.Server, log *slog.Logger, fwd *Forwarder) *http.Server {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("{\"status\":\"ok\"}"))
 	})
-	r.Post("/v1/chat/completions", fwd.ServeHTTP)
+	r.Post("/v1/chat/completions", h.ServeHTTP)
 
 	return &http.Server{
 		Addr:              cfg.Addr,

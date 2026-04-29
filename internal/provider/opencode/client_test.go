@@ -3,17 +3,21 @@ package opencode
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"llmgate/internal/provider"
 )
 
 func TestComplete_Success(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("method = %s, want POST", r.Method)
 		}
@@ -25,6 +29,12 @@ func TestComplete_Success(t *testing.T) {
 		}
 		if got := r.Header.Get("Content-Type"); got != "application/json" {
 			t.Errorf("Content-Type = %q, want application/json", got)
+		}
+		if got := r.Header.Get("Accept"); got != "application/json" {
+			t.Errorf("Accept = %q, want application/json", got)
+		}
+		if got := r.Header.Get("User-Agent"); got != userAgent {
+			t.Errorf("User-Agent = %q, want %q", got, userAgent)
 		}
 
 		body, _ := io.ReadAll(r.Body)
@@ -38,26 +48,32 @@ func TestComplete_Success(t *testing.T) {
 		if len(got.Messages) != 1 || got.Messages[0].Content != "ping" {
 			t.Errorf("messages = %+v, want [{user,ping}]", got.Messages)
 		}
+		if string(got.Extra["vendor_request"]) != `"keep"` {
+			t.Errorf("vendor_request extra = %s, want keep", got.Extra["vendor_request"])
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
 			"id": "chat-1",
+			"object": "chat.completion",
 			"model": "deepseek-v4-flash",
 			"choices": [{
 				"index": 0,
-				"message": {"role": "assistant", "content": "pong"},
+				"message": {"role": "assistant", "content": "pong", "reasoning_content": "because", "vendor_msg": 1},
 				"finish_reason": "stop"
 			}],
-			"usage": {"prompt_tokens": 5, "completion_tokens": 1, "total_tokens": 6}
+			"usage": {"prompt_tokens": 5, "completion_tokens": 1, "total_tokens": 6, "prompt_cache_hit_tokens": 4},
+			"cost": 0.001
 		}`))
 	}))
 	defer server.Close()
 
-	c := New("test-key", WithBaseURL(server.URL))
+	c := New("test-key", WithBaseURL(server.URL), WithHTTPClient(server.Client))
 	resp, err := c.Complete(context.Background(), &provider.Request{
 		Model:     "deepseek-v4-flash",
 		Messages:  []provider.Message{{Role: "user", Content: "ping"}},
 		MaxTokens: 32,
+		Extra:     map[string]json.RawMessage{"vendor_request": json.RawMessage(`"keep"`)},
 	})
 	if err != nil {
 		t.Fatalf("Complete returned error: %v", err)
@@ -71,20 +87,29 @@ func TestComplete_Success(t *testing.T) {
 	if resp.Choices[0].Message.Content != "pong" {
 		t.Errorf("content = %q, want pong", resp.Choices[0].Message.Content)
 	}
+	if resp.Choices[0].Message.ReasoningContent != "because" {
+		t.Errorf("reasoning_content = %q, want because", resp.Choices[0].Message.ReasoningContent)
+	}
 	if resp.Usage == nil || resp.Usage.TotalTokens != 6 {
 		t.Errorf("usage = %+v, want TotalTokens=6", resp.Usage)
+	}
+	if string(resp.Extra["cost"]) != "0.001" {
+		t.Errorf("cost extra = %s, want 0.001", resp.Extra["cost"])
+	}
+	if string(resp.Usage.Extra["prompt_cache_hit_tokens"]) != "4" {
+		t.Errorf("usage extra = %s, want 4", resp.Usage.Extra["prompt_cache_hit_tokens"])
 	}
 }
 
 func TestComplete_UpstreamErrorEnvelope(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"error":{"message":"invalid api key","type":"authentication_error"}}`))
 	}))
 	defer server.Close()
 
-	c := New("bad-key", WithBaseURL(server.URL))
+	c := New("bad-key", WithBaseURL(server.URL), WithHTTPClient(server.Client))
 	_, err := c.Complete(context.Background(), &provider.Request{
 		Model:    "deepseek-v4-flash",
 		Messages: []provider.Message{{Role: "user", Content: "ping"}},
@@ -92,29 +117,29 @@ func TestComplete_UpstreamErrorEnvelope(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	perr, ok := err.(*provider.Error)
-	if !ok {
-		t.Fatalf("err type = %T, want *provider.Error", err)
+	perr := requireProviderError(t, err)
+	if perr.Kind != provider.KindAuth {
+		t.Errorf("Kind = %q, want %q", perr.Kind, provider.KindAuth)
 	}
 	if !strings.Contains(perr.Message, "invalid api key") {
 		t.Errorf("Message = %q, want substring 'invalid api key'", perr.Message)
 	}
-	if perr.Type != "authentication_error" {
-		t.Errorf("Type = %q, want authentication_error", perr.Type)
+	if perr.Provider != "opencode" {
+		t.Errorf("Provider = %q, want opencode", perr.Provider)
 	}
-	if perr.Status != http.StatusUnauthorized {
-		t.Errorf("Status = %d, want 401", perr.Status)
+	if perr.StatusCode != http.StatusUnauthorized {
+		t.Errorf("StatusCode = %d, want 401", perr.StatusCode)
 	}
 }
 
 func TestComplete_UpstreamErrorNonJSON(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 		_, _ = w.Write([]byte("upstream gateway down"))
 	}))
 	defer server.Close()
 
-	c := New("k", WithBaseURL(server.URL))
+	c := New("k", WithBaseURL(server.URL), WithHTTPClient(server.Client))
 	_, err := c.Complete(context.Background(), &provider.Request{
 		Model:    "deepseek-v4-flash",
 		Messages: []provider.Message{{Role: "user", Content: "ping"}},
@@ -122,12 +147,9 @@ func TestComplete_UpstreamErrorNonJSON(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	perr, ok := err.(*provider.Error)
-	if !ok {
-		t.Fatalf("err type = %T, want *provider.Error", err)
-	}
-	if perr.Type != "upstream_error" {
-		t.Errorf("Type = %q, want upstream_error", perr.Type)
+	perr := requireProviderError(t, err)
+	if perr.Kind != provider.KindUpstream {
+		t.Errorf("Kind = %q, want %q", perr.Kind, provider.KindUpstream)
 	}
 	if !strings.Contains(perr.Message, "upstream gateway down") {
 		t.Errorf("Message = %q, want substring 'upstream gateway down'", perr.Message)
@@ -146,9 +168,248 @@ func TestComplete_ValidationErrors(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := c.Complete(context.Background(), tc.req); err == nil {
+			_, err := c.Complete(context.Background(), tc.req)
+			if err == nil {
 				t.Fatal("expected validation error, got nil")
+			}
+			perr := requireProviderError(t, err)
+			if perr.Kind != provider.KindBadRequest {
+				t.Fatalf("Kind = %q, want %q", perr.Kind, provider.KindBadRequest)
 			}
 		})
 	}
 }
+
+func TestCompleteStream_Success(t *testing.T) {
+	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Accept"); got != "text/event-stream" {
+			t.Errorf("Accept = %q, want text/event-stream", got)
+		}
+
+		body, _ := io.ReadAll(r.Body)
+		var raw map[string]any
+		if err := json.Unmarshal(body, &raw); err != nil {
+			t.Fatalf("unmarshal request: %v", err)
+		}
+		if raw["stream"] != true {
+			t.Fatalf("stream = %v, want true", raw["stream"])
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		writeSSEChunk(t, w, `{"id":"chat-1","choices":[{"index":0,"role":"assistant","content":"hel"}]}`)
+		writeSSEChunk(t, w, `{"id":"chat-1","choices":[{"index":0,"content":"lo","reasoning_content":"r1"}]}`)
+		writeSSEChunk(t, w, `{"id":"chat-1","choices":[{"index":0,"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}`)
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	c := New("test-key", WithBaseURL(server.URL), WithHTTPClient(server.Client))
+	stream, err := c.CompleteStream(context.Background(), &provider.Request{
+		Model:    "deepseek-v4-flash",
+		Messages: []provider.Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("CompleteStream returned error: %v", err)
+	}
+	defer stream.Close()
+
+	var content strings.Builder
+	var reasoning strings.Builder
+	var finishReason string
+	chunks := 0
+	for {
+		event, err := stream.Recv()
+		if errors.Is(err, provider.ErrStreamDone) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Recv() error = %v", err)
+		}
+		chunks++
+		if len(event.Choices) > 0 {
+			content.WriteString(event.Choices[0].Content)
+			reasoning.WriteString(event.Choices[0].ReasoningContent)
+			if event.Choices[0].FinishReason != "" {
+				finishReason = event.Choices[0].FinishReason
+			}
+		}
+	}
+
+	if chunks != 3 {
+		t.Fatalf("chunks = %d, want 3", chunks)
+	}
+	if content.String() != "hello" {
+		t.Fatalf("content = %q, want hello", content.String())
+	}
+	if reasoning.String() != "r1" {
+		t.Fatalf("reasoning = %q, want r1", reasoning.String())
+	}
+	if finishReason != "stop" {
+		t.Fatalf("finishReason = %q, want stop", finishReason)
+	}
+}
+
+func TestCompleteStream_StreamErrorMidFlight(t *testing.T) {
+	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		writeSSEChunk(t, w, `{"choices":[{"index":0,"content":"a"}]}`)
+		writeSSEChunk(t, w, `{"error":{"message":"stream exploded","type":"upstream_error"}}`)
+	}))
+	defer server.Close()
+
+	c := New("test-key", WithBaseURL(server.URL), WithHTTPClient(server.Client))
+	stream, err := c.CompleteStream(context.Background(), &provider.Request{
+		Model:    "deepseek-v4-flash",
+		Messages: []provider.Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("CompleteStream returned error: %v", err)
+	}
+	defer stream.Close()
+
+	if _, err := stream.Recv(); err != nil {
+		t.Fatalf("first Recv() error = %v", err)
+	}
+	_, err = stream.Recv()
+	perr := requireProviderError(t, err)
+	if perr.Kind != provider.KindUpstream {
+		t.Fatalf("Kind = %q, want %q", perr.Kind, provider.KindUpstream)
+	}
+	if !strings.Contains(perr.Message, "stream exploded") {
+		t.Fatalf("Message = %q, want stream exploded", perr.Message)
+	}
+}
+
+func TestCompleteStream_Truncated(t *testing.T) {
+	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		writeSSEChunk(t, w, `{"choices":[{"index":0,"content":"a"}]}`)
+	}))
+	defer server.Close()
+
+	c := New("test-key", WithBaseURL(server.URL), WithHTTPClient(server.Client))
+	stream, err := c.CompleteStream(context.Background(), &provider.Request{
+		Model:    "deepseek-v4-flash",
+		Messages: []provider.Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("CompleteStream returned error: %v", err)
+	}
+	defer stream.Close()
+
+	if _, err := stream.Recv(); err != nil {
+		t.Fatalf("first Recv() error = %v", err)
+	}
+	_, err = stream.Recv()
+	perr := requireProviderError(t, err)
+	if perr.Kind != provider.KindUpstream {
+		t.Fatalf("Kind = %q, want %q", perr.Kind, provider.KindUpstream)
+	}
+	if !strings.Contains(perr.Message, "stream ended without [DONE]") {
+		t.Fatalf("Message = %q, want truncated stream message", perr.Message)
+	}
+}
+
+func writeSSEChunk(t *testing.T, w http.ResponseWriter, payload string) {
+	t.Helper()
+
+	_, err := w.Write([]byte("data: " + payload + "\n\n"))
+	if err != nil {
+		t.Fatalf("write SSE chunk: %v", err)
+	}
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+	time.Sleep(time.Millisecond)
+}
+
+func requireProviderError(t *testing.T, err error) *provider.Error {
+	t.Helper()
+
+	var perr *provider.Error
+	if !errors.As(err, &perr) {
+		t.Fatalf("err type = %T, want *provider.Error", err)
+	}
+	return perr
+}
+
+type localServer struct {
+	*httptest.Server
+	Client *http.Client
+}
+
+func newLocalServer(handler http.Handler) *localServer {
+	listener := newPipeListener()
+	server := &httptest.Server{
+		Listener: listener,
+		Config:   &http.Server{Handler: handler},
+	}
+	server.Start()
+
+	transport := &http.Transport{DialContext: listener.DialContext}
+	return &localServer{
+		Server: server,
+		Client: &http.Client{Transport: transport},
+	}
+}
+
+func (s *localServer) Close() {
+	if transport, ok := s.Client.Transport.(*http.Transport); ok {
+		transport.CloseIdleConnections()
+	}
+	s.Server.Close()
+}
+
+type pipeListener struct {
+	conns  chan net.Conn
+	closed chan struct{}
+	once   sync.Once
+}
+
+func newPipeListener() *pipeListener {
+	return &pipeListener{
+		conns:  make(chan net.Conn),
+		closed: make(chan struct{}),
+	}
+}
+
+func (l *pipeListener) Accept() (net.Conn, error) {
+	select {
+	case conn := <-l.conns:
+		return conn, nil
+	case <-l.closed:
+		return nil, net.ErrClosed
+	}
+}
+
+func (l *pipeListener) Close() error {
+	l.once.Do(func() {
+		close(l.closed)
+	})
+	return nil
+}
+
+func (l *pipeListener) Addr() net.Addr {
+	return pipeAddr("pipe")
+}
+
+func (l *pipeListener) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	clientConn, serverConn := net.Pipe()
+	select {
+	case l.conns <- serverConn:
+		return clientConn, nil
+	case <-ctx.Done():
+		_ = clientConn.Close()
+		_ = serverConn.Close()
+		return nil, ctx.Err()
+	case <-l.closed:
+		_ = clientConn.Close()
+		_ = serverConn.Close()
+		return nil, net.ErrClosed
+	}
+}
+
+type pipeAddr string
+
+func (a pipeAddr) Network() string { return "pipe" }
+func (a pipeAddr) String() string  { return string(a) }

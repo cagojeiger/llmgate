@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/joho/godotenv"
@@ -35,6 +37,7 @@ func run() error {
 	prompt := flag.String("prompt", "", "user prompt; if omitted, reads OpenAI request JSON from stdin")
 	maxTokens := flag.Int("max-tokens", 128, "max_tokens for the request")
 	rawOut := flag.Bool("raw", false, "print only the assistant text (no JSON envelope)")
+	streamOut := flag.Bool("stream", false, "stream tokens as server-sent events arrive")
 	flag.Parse()
 
 	cfg, err := config.LoadProvider()
@@ -51,6 +54,10 @@ func run() error {
 	defer stop()
 
 	p := opencode.New(cfg.OpenCodeAPIKey, opencode.WithBaseURL(cfg.OpenCodeBaseURL))
+	if *streamOut {
+		return runStream(ctx, p, req)
+	}
+
 	resp, err := p.Complete(ctx, req)
 	if err != nil {
 		return err
@@ -67,6 +74,78 @@ func run() error {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(resp)
+}
+
+func runStream(ctx context.Context, p provider.Provider, req *provider.Request) error {
+	stream, err := p.CompleteStream(ctx, req)
+	if err != nil {
+		return err
+	}
+	defer stream.Close()
+
+	out := bufio.NewWriter(os.Stdout)
+	var reasoning strings.Builder
+	var finishReason string
+	chunks := 0
+	contentChunks := 0
+	reasoningChunks := 0
+
+	for {
+		event, err := stream.Recv()
+		if errors.Is(err, provider.ErrStreamDone) {
+			break
+		}
+		if err != nil {
+			return err
+		}
+
+		chunks++
+		if len(event.Choices) == 0 {
+			continue
+		}
+		choice := event.Choices[0]
+		if choice.Content != "" {
+			contentChunks++
+			if _, err := fmt.Fprint(out, choice.Content); err != nil {
+				return err
+			}
+			if err := out.Flush(); err != nil {
+				return err
+			}
+		}
+		if choice.ReasoningContent != "" {
+			reasoningChunks++
+			reasoning.WriteString(choice.ReasoningContent)
+		}
+		if choice.FinishReason != "" {
+			finishReason = choice.FinishReason
+		}
+	}
+
+	if _, err := fmt.Fprintln(out); err != nil {
+		return err
+	}
+	if reasoning.Len() > 0 {
+		if _, err := fmt.Fprintf(out, "\nreasoning (truncated to 400 chars): %s\n", truncateRunes(reasoning.String(), 400)); err != nil {
+			return err
+		}
+	}
+	_, err = fmt.Fprintf(out,
+		"chunks: %d\nchunks w/ content: %d\nchunks w/ reasoning: %d\nfinish_reason: %s\n",
+		chunks, contentChunks, reasoningChunks, finishReason,
+	)
+	if err != nil {
+		return err
+	}
+	return out.Flush()
+}
+
+func truncateRunes(s string, limit int) string {
+	runes := []rune(s)
+	if len(runes) <= limit {
+		return s
+	}
+	return string(runes[:limit])
 }
 
 func buildRequest(cfg *config.Provider, model, prompt string, maxTokens int) (*provider.Request, error) {

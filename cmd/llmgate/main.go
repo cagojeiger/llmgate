@@ -12,6 +12,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"llmgate/internal/config"
+	"llmgate/internal/provider/opencode"
 	"llmgate/internal/server"
 )
 
@@ -36,11 +37,9 @@ func run() error {
 	)
 	slog.SetDefault(logger)
 
-	fwd, err := server.NewForwarder(&cfg.Provider, logger)
-	if err != nil {
-		return err
-	}
-	srv := server.New(cfg, logger, fwd)
+	client := opencode.New(cfg.OpenCodeAPIKey, opencode.WithBaseURL(cfg.OpenCodeBaseURL))
+	handler := server.NewHandler(client, logger)
+	srv := server.New(cfg, logger, handler)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

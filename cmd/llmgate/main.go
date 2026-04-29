@@ -15,6 +15,7 @@ import (
 	"llmgate/internal/catalog"
 	"llmgate/internal/config"
 	"llmgate/internal/provider"
+	"llmgate/internal/provider/anthropic"
 	"llmgate/internal/provider/openai"
 	"llmgate/internal/server"
 )
@@ -51,7 +52,8 @@ func run() error {
 	)
 
 	factories := map[string]provider.AdapterFactory{
-		"openai": openaiFactory,
+		"openai":    openaiFactory,
+		"anthropic": anthropicFactory,
 	}
 
 	router, err := provider.NewRouter(cat, factories, logger)
@@ -91,6 +93,16 @@ func run() error {
 
 func openaiFactory(ep *catalog.Endpoint) (provider.Provider, error) {
 	return openai.New(openai.Config{
+		BaseURL:      ep.BaseURL,
+		APIKey:       ep.APIKey,
+		AuthScheme:   ep.AuthScheme,
+		ExtraHeaders: ep.ExtraHeaders,
+		Name:         ep.Vendor,
+	})
+}
+
+func anthropicFactory(ep *catalog.Endpoint) (provider.Provider, error) {
+	return anthropic.New(anthropic.Config{
 		BaseURL:      ep.BaseURL,
 		APIKey:       ep.APIKey,
 		AuthScheme:   ep.AuthScheme,

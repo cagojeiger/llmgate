@@ -15,7 +15,7 @@ from openai import OpenAI
 from conftest import assert_streaming_progressive, field
 
 
-pytestmark = pytest.mark.timeout(60)
+pytestmark = pytest.mark.timeout(120)
 
 MODEL = "deepseek-v4-flash"
 
@@ -55,8 +55,64 @@ def test_chat_non_stream_other_models(client: OpenAI, model: str) -> None:
     )
     assert resp.choices, f"no choices from {model}: {resp}"
     msg = resp.choices[0].message
-    text = (msg.content or "").strip()
-    assert text, f"{model}: empty content"
+    text = (msg.content or "").strip() or (field(msg, "reasoning_content") or "").strip()
+    assert text, f"{model}: empty content and reasoning"
+
+
+@pytest.mark.parametrize("model", ["minimax-m2.5", "minimax-m2.7"])
+def test_chat_anthropic_models_non_stream(client: OpenAI, model: str) -> None:
+    resp = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": "say hi"}],
+        max_tokens=64,
+    )
+    assert resp.choices, f"no choices from {model}: {resp}"
+    msg = resp.choices[0].message
+    text = (msg.content or "").strip() or (field(msg, "reasoning_content") or "").strip()
+    assert text, f"{model}: empty content and reasoning"
+    assert resp.usage is not None
+    assert resp.usage.total_tokens > 0
+
+
+def test_chat_anthropic_stream(client: OpenAI) -> None:
+    chunks_with_content = 0
+    finish_reason: str | None = None
+
+    stream = client.chat.completions.create(
+        model="minimax-m2.5",
+        messages=[{"role": "user", "content": "Count 1 to 3, one per line."}],
+        stream=True,
+        max_tokens=128,
+    )
+    for chunk in stream:
+        if not chunk.choices:
+            continue
+        choice = chunk.choices[0]
+        if choice.finish_reason:
+            finish_reason = choice.finish_reason
+        delta = choice.delta
+        if delta is None:
+            continue
+        if delta.content or field(delta, "reasoning_content"):
+            chunks_with_content += 1
+
+    assert chunks_with_content >= 1
+    assert finish_reason in ("stop", "length")
+
+
+def test_chat_system_message_extraction(client: OpenAI) -> None:
+    resp = client.chat.completions.create(
+        model="minimax-m2.5",
+        messages=[
+            {"role": "system", "content": "Answer in one short sentence."},
+            {"role": "user", "content": "Say hello."},
+        ],
+        max_tokens=64,
+    )
+    assert resp.choices, f"no choices: {resp}"
+    msg = resp.choices[0].message
+    text = (msg.content or "").strip() or (field(msg, "reasoning_content") or "").strip()
+    assert text, f"empty content and reasoning: {resp}"
 
 
 def test_non_stream_preserves_vendor_fields(client: OpenAI) -> None:

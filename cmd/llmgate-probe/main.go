@@ -20,7 +20,7 @@ import (
 
 	"llmgate/internal/config"
 	"llmgate/internal/provider"
-	"llmgate/internal/provider/opencode"
+	"llmgate/internal/provider/openai"
 )
 
 func main() {
@@ -53,7 +53,14 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	p := opencode.New(cfg.OpenCodeAPIKey, opencode.WithBaseURL(cfg.OpenCodeBaseURL))
+	p, err := openai.New(openai.Config{
+		BaseURL: cfg.OpenCodeBaseURL,
+		APIKey:  cfg.OpenCodeAPIKey,
+		Name:    "opencode",
+	})
+	if err != nil {
+		return err
+	}
 	if *streamOut {
 		return runStream(ctx, p, req)
 	}

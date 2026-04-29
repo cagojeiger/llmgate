@@ -1,4 +1,4 @@
-package opencode
+package openai
 
 import (
 	"context"
@@ -17,7 +17,7 @@ import (
 // classify maps HTTP status + upstream error envelope into a typed
 // *provider.Error. Order: explicit envelope message > status-code mapping
 // > generic fallback.
-func classify(status int, body []byte, retryAfterHeader string) *provider.Error {
+func (c *Client) classify(status int, body []byte, retryAfterHeader string) *provider.Error {
 	message := envelopeMessage(body)
 	if message == "" {
 		if len(body) > 0 {
@@ -47,7 +47,7 @@ func classify(status int, body []byte, retryAfterHeader string) *provider.Error 
 
 	return &provider.Error{
 		Kind:       kind,
-		Provider:   "opencode",
+		Provider:   c.name,
 		Message:    message,
 		StatusCode: status,
 		RetryAfter: parseRetryAfter(retryAfterHeader),
@@ -109,7 +109,7 @@ func parseRetryAfter(header string) time.Duration {
 // lowLevelError wraps a transport-level error (DNS, TLS, conn refused,
 // timeout) into a *provider.Error with the right Kind so callers can
 // switch on it without sniffing strings.
-func lowLevelError(message string, cause error) *provider.Error {
+func (c *Client) lowLevelError(message string, cause error) *provider.Error {
 	kind := provider.KindNetwork
 	if errors.Is(cause, context.DeadlineExceeded) {
 		kind = provider.KindTimeout
@@ -121,35 +121,34 @@ func lowLevelError(message string, cause error) *provider.Error {
 	}
 	return &provider.Error{
 		Kind:     kind,
-		Provider: "opencode",
+		Provider: c.name,
 		Message:  message + ": " + cause.Error(),
 		Cause:    cause,
 	}
 }
 
-func badRequest(message string, cause error, raw []byte) *provider.Error {
+func (c *Client) badRequest(message string, cause error, raw []byte) *provider.Error {
 	return &provider.Error{
 		Kind:     provider.KindBadRequest,
-		Provider: "opencode",
+		Provider: c.name,
 		Message:  message + ": " + cause.Error(),
 		Cause:    cause,
 		Raw:      firstBytes(raw),
 	}
 }
 
-// withProvider stamps "opencode" onto a *provider.Error coming from a
-// shared helper (e.g. provider.NewSSEReader) so callers always see the
-// originating adapter.
-func withProvider(err error) error {
+// stampProvider stamps the configured adapter name onto errors from shared
+// helpers so callers always see the originating adapter.
+func stampProvider(err error, name string) error {
 	var perr *provider.Error
 	if !errors.As(err, &perr) {
 		return err
 	}
-	if perr.Provider == "opencode" {
+	if perr.Provider == name {
 		return perr
 	}
 	stamped := *perr
-	stamped.Provider = "opencode"
+	stamped.Provider = name
 	return &stamped
 }
 

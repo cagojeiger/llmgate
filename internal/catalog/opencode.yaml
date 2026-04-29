@@ -1,0 +1,29 @@
+vendor: opencode
+base_url: https://opencode.ai/zen/go/v1
+auth_env: LLMGATE_OPENCODE_API_KEY
+
+protocols:
+  openai:
+    auth_scheme: bearer
+    models:
+      - id: glm-5.1
+      - id: glm-5
+      - id: kimi-k2.5
+      - id: kimi-k2.6
+      - id: deepseek-v4-pro
+      - id: deepseek-v4-flash
+      - id: mimo-v2-pro
+      - id: mimo-v2-omni
+      - id: mimo-v2.5-pro
+      - id: mimo-v2.5
+      - id: qwen3.6-plus
+      - id: qwen3.5-plus
+
+  anthropic:
+    auth_scheme: x-api-key
+    models:
+      - id: minimax-m2.7
+      - id: minimax-m2.5
+
+defaults:
+  model: deepseek-v4-flash

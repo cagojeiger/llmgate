@@ -1,4 +1,4 @@
-package opencode
+package openai
 
 import (
 	"context"
@@ -33,8 +33,8 @@ func TestComplete_Success(t *testing.T) {
 		if got := r.Header.Get("Accept"); got != "application/json" {
 			t.Errorf("Accept = %q, want application/json", got)
 		}
-		if got := r.Header.Get("User-Agent"); got != userAgent {
-			t.Errorf("User-Agent = %q, want %q", got, userAgent)
+		if got := r.Header.Get("User-Agent"); got != defaultUserAgent {
+			t.Errorf("User-Agent = %q, want %q", got, defaultUserAgent)
 		}
 
 		body, _ := io.ReadAll(r.Body)
@@ -68,7 +68,7 @@ func TestComplete_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := New("test-key", WithBaseURL(server.URL), WithHTTPClient(server.Client))
+	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
 	resp, err := c.Complete(context.Background(), &provider.Request{
 		Model:     "deepseek-v4-flash",
 		Messages:  []provider.Message{{Role: "user", Content: "ping"}},
@@ -109,7 +109,7 @@ func TestComplete_UpstreamErrorEnvelope(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := New("bad-key", WithBaseURL(server.URL), WithHTTPClient(server.Client))
+	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "bad-key", HTTPClient: server.Client, Name: "opencode"})
 	_, err := c.Complete(context.Background(), &provider.Request{
 		Model:    "deepseek-v4-flash",
 		Messages: []provider.Message{{Role: "user", Content: "ping"}},
@@ -139,7 +139,7 @@ func TestComplete_UpstreamErrorNonJSON(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := New("k", WithBaseURL(server.URL), WithHTTPClient(server.Client))
+	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "k", HTTPClient: server.Client, Name: "opencode"})
 	_, err := c.Complete(context.Background(), &provider.Request{
 		Model:    "deepseek-v4-flash",
 		Messages: []provider.Message{{Role: "user", Content: "ping"}},
@@ -157,7 +157,7 @@ func TestComplete_UpstreamErrorNonJSON(t *testing.T) {
 }
 
 func TestComplete_ValidationErrors(t *testing.T) {
-	c := New("k")
+	c := mustNew(t, Config{BaseURL: "http://example.invalid", APIKey: "k", Name: "opencode"})
 	cases := []struct {
 		name string
 		req  *provider.Request
@@ -203,7 +203,7 @@ func TestCompleteStream_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := New("test-key", WithBaseURL(server.URL), WithHTTPClient(server.Client))
+	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
 	stream, err := c.CompleteStream(context.Background(), &provider.Request{
 		Model:    "deepseek-v4-flash",
 		Messages: []provider.Message{{Role: "user", Content: "ping"}},
@@ -257,7 +257,7 @@ func TestCompleteStream_StreamErrorMidFlight(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := New("test-key", WithBaseURL(server.URL), WithHTTPClient(server.Client))
+	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
 	stream, err := c.CompleteStream(context.Background(), &provider.Request{
 		Model:    "deepseek-v4-flash",
 		Messages: []provider.Message{{Role: "user", Content: "ping"}},
@@ -287,7 +287,7 @@ func TestCompleteStream_Truncated(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := New("test-key", WithBaseURL(server.URL), WithHTTPClient(server.Client))
+	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
 	stream, err := c.CompleteStream(context.Background(), &provider.Request{
 		Model:    "deepseek-v4-flash",
 		Messages: []provider.Message{{Role: "user", Content: "ping"}},
@@ -331,6 +331,16 @@ func requireProviderError(t *testing.T, err error) *provider.Error {
 		t.Fatalf("err type = %T, want *provider.Error", err)
 	}
 	return perr
+}
+
+func mustNew(t *testing.T, cfg Config) *Client {
+	t.Helper()
+
+	c, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	return c
 }
 
 type localServer struct {

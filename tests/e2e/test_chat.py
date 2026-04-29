@@ -46,6 +46,19 @@ def test_chat_non_stream(client: OpenAI) -> None:
     assert resp.usage.total_tokens > 0
 
 
+@pytest.mark.parametrize("model", ["kimi-k2.6", "glm-5.1", "mimo-v2.5-pro"])
+def test_chat_non_stream_other_models(client: OpenAI, model: str) -> None:
+    resp = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": "say hi"}],
+        max_tokens=64,
+    )
+    assert resp.choices, f"no choices from {model}: {resp}"
+    msg = resp.choices[0].message
+    text = (msg.content or "").strip()
+    assert text, f"{model}: empty content"
+
+
 def test_non_stream_preserves_vendor_fields(client: OpenAI) -> None:
     """Regression: cost / prompt_cache_*_tokens must survive the typed gate.
 
@@ -124,3 +137,14 @@ def test_client_authorization_header_is_stripped(client: OpenAI) -> None:
         max_tokens=64,
     )
     assert resp.choices, f"call failed despite dummy client key — auth not replaced: {resp}"
+
+
+def test_unknown_model_fails(client: OpenAI) -> None:
+    import openai as openai_pkg
+
+    with pytest.raises(openai_pkg.BadRequestError):
+        client.chat.completions.create(
+            model="nonexistent-model-123",
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=32,
+        )

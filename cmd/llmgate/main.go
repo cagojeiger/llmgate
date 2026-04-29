@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -11,8 +12,10 @@ import (
 
 	"github.com/joho/godotenv"
 
+	"llmgate/internal/catalog"
 	"llmgate/internal/config"
-	"llmgate/internal/provider/opencode"
+	"llmgate/internal/provider"
+	"llmgate/internal/provider/openai"
 	"llmgate/internal/server"
 )
 
@@ -37,8 +40,26 @@ func run() error {
 	)
 	slog.SetDefault(logger)
 
-	client := opencode.New(cfg.OpenCodeAPIKey, opencode.WithBaseURL(cfg.OpenCodeBaseURL))
-	handler := server.NewHandler(client, logger)
+	cat, err := catalog.Load()
+	if err != nil {
+		return fmt.Errorf("load catalog: %w", err)
+	}
+	logger.Info("catalog loaded",
+		slog.Int("endpoints", len(cat.Endpoints)),
+		slog.Int("models", len(cat.Models)),
+		slog.String("default_model", cat.Defaults.Model),
+	)
+
+	factories := map[string]provider.AdapterFactory{
+		"openai": openaiFactory,
+	}
+
+	router, err := provider.NewRouter(cat, factories, logger)
+	if err != nil {
+		return err
+	}
+
+	handler := server.NewHandler(router, logger)
 	srv := server.New(cfg, logger, handler)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -66,6 +87,16 @@ func run() error {
 		return serveErr
 	}
 	return nil
+}
+
+func openaiFactory(ep *catalog.Endpoint) (provider.Provider, error) {
+	return openai.New(openai.Config{
+		BaseURL:      ep.BaseURL,
+		APIKey:       ep.APIKey,
+		AuthScheme:   ep.AuthScheme,
+		ExtraHeaders: ep.ExtraHeaders,
+		Name:         ep.Vendor,
+	})
 }
 
 func shutdown(srv *http.Server, cfg *config.Server, log *slog.Logger) {

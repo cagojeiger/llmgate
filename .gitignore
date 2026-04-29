@@ -1,0 +1,6 @@
+bin/
+.env
+.omc/
+.repos/
+*.log
+.DS_Store

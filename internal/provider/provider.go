@@ -98,12 +98,20 @@ type Event struct {
 }
 
 type ChoiceDelta struct {
-	Index            int             `json:"index"`
-	Role             string          `json:"role,omitempty"`
-	Content          string          `json:"content,omitempty"`
-	ReasoningContent string          `json:"reasoning_content,omitempty"`
-	FinishReason     string          `json:"finish_reason,omitempty"`
-	Logprobs         json.RawMessage `json:"logprobs,omitempty"`
+	Index        int             `json:"index"`
+	Delta        Delta           `json:"delta"`
+	FinishReason string          `json:"finish_reason,omitempty"`
+	Logprobs     json.RawMessage `json:"logprobs,omitempty"`
+}
+
+// Delta is the inner object of a streaming choice — role/content/etc. arrive
+// here, not on ChoiceDelta itself, matching the OpenAI chunk wire format.
+type Delta struct {
+	Role             string `json:"role,omitempty"`
+	Content          string `json:"content,omitempty"`
+	ReasoningContent string `json:"reasoning_content,omitempty"`
+
+	Extra map[string]json.RawMessage `json:"-"`
 }
 
 var ErrStreamDone = io.EOF

@@ -12,6 +12,7 @@ var (
 	responseJSONFields = knownJSONFields(reflect.TypeOf(Response{}))
 	usageJSONFields    = knownJSONFields(reflect.TypeOf(Usage{}))
 	eventJSONFields    = knownJSONFields(reflect.TypeOf(Event{}))
+	deltaJSONFields    = knownJSONFields(reflect.TypeOf(Delta{}))
 )
 
 func (r *Request) UnmarshalJSON(data []byte) error {
@@ -112,6 +113,26 @@ func (e *Event) UnmarshalJSON(data []byte) error {
 func (e Event) MarshalJSON() ([]byte, error) {
 	type event Event
 	return marshalWithExtra(event(e), e.Extra)
+}
+
+func (d *Delta) UnmarshalJSON(data []byte) error {
+	type delta Delta
+	var out delta
+	if err := json.Unmarshal(data, &out); err != nil {
+		return err
+	}
+	extra, err := extraFields(data, deltaJSONFields)
+	if err != nil {
+		return err
+	}
+	out.Extra = extra
+	*d = Delta(out)
+	return nil
+}
+
+func (d Delta) MarshalJSON() ([]byte, error) {
+	type delta Delta
+	return marshalWithExtra(delta(d), d.Extra)
 }
 
 func knownJSONFields(t reflect.Type) map[string]struct{} {

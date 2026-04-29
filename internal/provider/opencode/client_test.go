@@ -196,9 +196,9 @@ func TestCompleteStream_Success(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "text/event-stream")
-		writeSSEChunk(t, w, `{"id":"chat-1","choices":[{"index":0,"role":"assistant","content":"hel"}]}`)
-		writeSSEChunk(t, w, `{"id":"chat-1","choices":[{"index":0,"content":"lo","reasoning_content":"r1"}]}`)
-		writeSSEChunk(t, w, `{"id":"chat-1","choices":[{"index":0,"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}`)
+		writeSSEChunk(t, w, `{"id":"chat-1","choices":[{"index":0,"delta":{"role":"assistant","content":"hel"}}]}`)
+		writeSSEChunk(t, w, `{"id":"chat-1","choices":[{"index":0,"delta":{"content":"lo","reasoning_content":"r1"}}]}`)
+		writeSSEChunk(t, w, `{"id":"chat-1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}`)
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	}))
 	defer server.Close()
@@ -227,8 +227,8 @@ func TestCompleteStream_Success(t *testing.T) {
 		}
 		chunks++
 		if len(event.Choices) > 0 {
-			content.WriteString(event.Choices[0].Content)
-			reasoning.WriteString(event.Choices[0].ReasoningContent)
+			content.WriteString(event.Choices[0].Delta.Content)
+			reasoning.WriteString(event.Choices[0].Delta.ReasoningContent)
 			if event.Choices[0].FinishReason != "" {
 				finishReason = event.Choices[0].FinishReason
 			}
@@ -252,7 +252,7 @@ func TestCompleteStream_Success(t *testing.T) {
 func TestCompleteStream_StreamErrorMidFlight(t *testing.T) {
 	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		writeSSEChunk(t, w, `{"choices":[{"index":0,"content":"a"}]}`)
+		writeSSEChunk(t, w, `{"choices":[{"index":0,"delta":{"content":"a"}}]}`)
 		writeSSEChunk(t, w, `{"error":{"message":"stream exploded","type":"upstream_error"}}`)
 	}))
 	defer server.Close()
@@ -283,7 +283,7 @@ func TestCompleteStream_StreamErrorMidFlight(t *testing.T) {
 func TestCompleteStream_Truncated(t *testing.T) {
 	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		writeSSEChunk(t, w, `{"choices":[{"index":0,"content":"a"}]}`)
+		writeSSEChunk(t, w, `{"choices":[{"index":0,"delta":{"content":"a"}}]}`)
 	}))
 	defer server.Close()
 

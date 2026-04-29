@@ -81,9 +81,7 @@ func TestExtraRoundTripEvent(t *testing.T) {
 		"system_fingerprint":"fp_1",
 		"choices":[{
 			"index":0,
-			"role":"assistant",
-			"content":"po",
-			"reasoning_content":"thinking",
+			"delta":{"role":"assistant","content":"po","reasoning_content":"thinking","delta_vendor":{"x":1}},
 			"finish_reason":"stop",
 			"logprobs":{"tokens":[]}
 		}],
@@ -97,6 +95,18 @@ func TestExtraRoundTripEvent(t *testing.T) {
 	}`
 
 	roundTripEqual[Event](t, input)
+}
+
+func TestExtraRoundTripDelta(t *testing.T) {
+	input := `{
+		"role":"assistant",
+		"content":"po",
+		"reasoning_content":"thinking",
+		"refusal":null,
+		"tool_calls":[{"id":"x","type":"function"}]
+	}`
+
+	roundTripEqual[Delta](t, input)
 }
 
 func roundTripEqual[T any](t *testing.T, input string) {

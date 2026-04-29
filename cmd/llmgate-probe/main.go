@@ -104,18 +104,18 @@ func runStream(ctx context.Context, p provider.Provider, req *provider.Request) 
 			continue
 		}
 		choice := event.Choices[0]
-		if choice.Content != "" {
+		if choice.Delta.Content != "" {
 			contentChunks++
-			if _, err := fmt.Fprint(out, choice.Content); err != nil {
+			if _, err := fmt.Fprint(out, choice.Delta.Content); err != nil {
 				return err
 			}
 			if err := out.Flush(); err != nil {
 				return err
 			}
 		}
-		if choice.ReasoningContent != "" {
+		if choice.Delta.ReasoningContent != "" {
 			reasoningChunks++
-			reasoning.WriteString(choice.ReasoningContent)
+			reasoning.WriteString(choice.Delta.ReasoningContent)
 		}
 		if choice.FinishReason != "" {
 			finishReason = choice.FinishReason

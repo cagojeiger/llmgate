@@ -12,6 +12,7 @@ import (
 
 	"github.com/joho/godotenv"
 
+	"llmgate/internal/audit"
 	"llmgate/internal/catalog"
 	"llmgate/internal/config"
 	"llmgate/internal/provider"
@@ -61,7 +62,14 @@ func run() error {
 		return err
 	}
 
-	handler := server.NewHandler(router, logger)
+	recorder := audit.Composite{audit.NewLogRecorder(logger)}
+	defer func() {
+		if err := recorder.Close(); err != nil {
+			logger.Warn("recorder close failed", slog.String("err", err.Error()))
+		}
+	}()
+
+	handler := server.NewHandler(router, logger, recorder)
 	srv := server.New(cfg, logger, handler)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

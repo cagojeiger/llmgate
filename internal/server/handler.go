@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"time"
 
+	"llmgate/internal/audit"
 	"llmgate/internal/provider"
 )
 
@@ -19,62 +20,110 @@ const maxChatRequestBytes = 1 << 20
 type Handler struct {
 	provider provider.Provider
 	log      *slog.Logger
+	recorder audit.Recorder
 }
 
-func NewHandler(p provider.Provider, log *slog.Logger) *Handler {
+func NewHandler(p provider.Provider, log *slog.Logger, recorder audit.Recorder) *Handler {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Handler{provider: p, log: log}
+	if recorder == nil {
+		recorder = audit.Nop{}
+	}
+	return &Handler{provider: p, log: log, recorder: recorder}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	rec := &audit.Record{
+		Timestamp: start,
+		RequestID: RequestIDFromContext(r.Context()),
+		Method:    "chat.completions",
+	}
+	defer func() {
+		rec.DurationMS = time.Since(start).Milliseconds()
+		h.recorder.Record(r.Context(), rec)
+	}()
+
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxChatRequestBytes))
 	if err != nil {
-		writeError(w, &provider.Error{Kind: provider.KindBadRequest, Message: "read request body: " + err.Error()})
+		perr := &provider.Error{Kind: provider.KindBadRequest, Message: "read request body: " + err.Error()}
+		rec.ErrorKind = perr.Kind
+		rec.StatusCode = errStatus(perr)
+		writeError(w, perr)
 		return
 	}
+	rec.RequestBytes = int64(len(body))
 
 	var raw map[string]any
 	if err := json.Unmarshal(body, &raw); err != nil {
-		writeError(w, &provider.Error{Kind: provider.KindBadRequest, Message: "decode request JSON: " + err.Error()})
+		perr := &provider.Error{Kind: provider.KindBadRequest, Message: "decode request JSON: " + err.Error()}
+		rec.ErrorKind = perr.Kind
+		rec.StatusCode = errStatus(perr)
+		writeError(w, perr)
 		return
 	}
 
 	req := &provider.Request{}
 	if err := json.Unmarshal(body, req); err != nil {
-		writeError(w, &provider.Error{Kind: provider.KindBadRequest, Message: "decode request: " + err.Error()})
+		perr := &provider.Error{Kind: provider.KindBadRequest, Message: "decode request: " + err.Error()}
+		rec.ErrorKind = perr.Kind
+		rec.StatusCode = errStatus(perr)
+		writeError(w, perr)
 		return
 	}
+	rec.Model = req.Model
 
 	streaming, _ := raw["stream"].(bool)
 	if streaming {
-		h.serveStream(w, r, req)
+		rec.Method = "chat.completions.stream"
+		h.serveStream(w, r, req, rec)
 		return
 	}
-	h.serveComplete(w, r, req)
+	h.serveComplete(w, r, req, rec)
 }
 
-func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *provider.Request) {
+func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *provider.Request, rec *audit.Record) {
 	resp, err := h.provider.Complete(r.Context(), req)
 	if err != nil {
+		var perr *provider.Error
+		if errors.As(err, &perr) {
+			rec.ErrorKind = perr.Kind
+		}
+		rec.StatusCode = errStatus(err)
 		writeError(w, err)
 		return
 	}
 
 	out, err := json.Marshal(resp)
 	if err != nil {
-		writeError(w, &provider.Error{Kind: provider.KindUnknown, Message: "encode response: " + err.Error(), Cause: err})
+		perr := &provider.Error{Kind: provider.KindUnknown, Message: "encode response: " + err.Error(), Cause: err}
+		rec.ErrorKind = perr.Kind
+		rec.StatusCode = errStatus(perr)
+		writeError(w, perr)
 		return
 	}
+
+	rec.StatusCode = http.StatusOK
+	rec.Usage = resp.Usage
+	if cost, ok := resp.Extra["cost"]; ok && len(cost) > 0 {
+		rec.VendorCost = string(cost)
+	}
+	rec.ResponseBytes = int64(len(out))
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(out)
 }
 
-func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *provider.Request) {
+func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *provider.Request, rec *audit.Record) {
 	stream, err := h.provider.CompleteStream(r.Context(), req)
 	if err != nil {
+		var perr *provider.Error
+		if errors.As(err, &perr) {
+			rec.ErrorKind = perr.Kind
+		}
+		rec.StatusCode = errStatus(err)
 		writeError(w, err)
 		return
 	}
@@ -82,7 +131,10 @@ func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *provi
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		writeError(w, &provider.Error{Kind: provider.KindUnknown, Message: "streaming unsupported"})
+		perr := &provider.Error{Kind: provider.KindUnknown, Message: "streaming unsupported"}
+		rec.ErrorKind = perr.Kind
+		rec.StatusCode = errStatus(perr)
+		writeError(w, perr)
 		return
 	}
 
@@ -92,33 +144,51 @@ func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *provi
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
+	rec.StatusCode = http.StatusOK
 
 	for {
 		event, err := stream.Recv()
 		if errors.Is(err, io.EOF) {
-			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+			n, _ := w.Write([]byte("data: [DONE]\n\n"))
+			rec.ResponseBytes += int64(n)
 			flusher.Flush()
 			return
 		}
 		if err != nil {
+			var perr *provider.Error
+			if errors.As(err, &perr) {
+				rec.ErrorKind = perr.Kind
+			}
 			h.log.LogAttrs(r.Context(), slog.LevelWarn, "stream receive failed",
 				slog.String("provider", h.provider.Name()),
 				slog.String("err", err.Error()),
 			)
 			writeSSEError(w, err)
-			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+			n, _ := w.Write([]byte("data: [DONE]\n\n"))
+			rec.ResponseBytes += int64(n)
 			flusher.Flush()
 			return
 		}
 
+		if event.Usage != nil {
+			rec.Usage = event.Usage
+		}
+		if cost, ok := event.Extra["cost"]; ok && len(cost) > 0 {
+			rec.VendorCost = string(cost)
+		}
+
 		out, err := json.Marshal(event)
 		if err != nil {
-			writeSSEError(w, &provider.Error{Kind: provider.KindUnknown, Message: "encode stream event: " + err.Error(), Cause: err})
-			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+			perr := &provider.Error{Kind: provider.KindUnknown, Message: "encode stream event: " + err.Error(), Cause: err}
+			rec.ErrorKind = perr.Kind
+			writeSSEError(w, perr)
+			n, _ := w.Write([]byte("data: [DONE]\n\n"))
+			rec.ResponseBytes += int64(n)
 			flusher.Flush()
 			return
 		}
-		_, _ = fmt.Fprintf(w, "data: %s\n\n", out)
+		n, _ := fmt.Fprintf(w, "data: %s\n\n", out)
+		rec.ResponseBytes += int64(n)
 		flusher.Flush()
 	}
 }
@@ -136,6 +206,11 @@ func writeError(w http.ResponseWriter, err error) {
 func writeSSEError(w http.ResponseWriter, err error) {
 	_, _, payload := errorPayload(err)
 	_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
+}
+
+func errStatus(err error) int {
+	status, _, _ := errorPayload(err)
+	return status
 }
 
 func errorPayload(err error) (int, time.Duration, []byte) {

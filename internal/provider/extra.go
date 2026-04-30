@@ -7,12 +7,14 @@ import (
 )
 
 var (
-	requestJSONFields  = knownJSONFields(reflect.TypeOf(Request{}))
-	messageJSONFields  = knownJSONFields(reflect.TypeOf(Message{}))
-	responseJSONFields = knownJSONFields(reflect.TypeOf(Response{}))
-	usageJSONFields    = knownJSONFields(reflect.TypeOf(Usage{}))
-	eventJSONFields    = knownJSONFields(reflect.TypeOf(Event{}))
-	deltaJSONFields    = knownJSONFields(reflect.TypeOf(Delta{}))
+	requestJSONFields     = knownJSONFields(reflect.TypeOf(Request{}))
+	messageJSONFields     = knownJSONFields(reflect.TypeOf(Message{}))
+	responseJSONFields    = knownJSONFields(reflect.TypeOf(Response{}))
+	usageJSONFields       = knownJSONFields(reflect.TypeOf(Usage{}))
+	eventJSONFields       = knownJSONFields(reflect.TypeOf(Event{}))
+	deltaJSONFields       = knownJSONFields(reflect.TypeOf(Delta{}))
+	choiceJSONFields      = knownJSONFields(reflect.TypeOf(Choice{}))
+	choiceDeltaJSONFields = knownJSONFields(reflect.TypeOf(ChoiceDelta{}))
 )
 
 func (r *Request) UnmarshalJSON(data []byte) error {
@@ -133,6 +135,46 @@ func (d *Delta) UnmarshalJSON(data []byte) error {
 func (d Delta) MarshalJSON() ([]byte, error) {
 	type delta Delta
 	return marshalWithExtra(delta(d), d.Extra)
+}
+
+func (c *Choice) UnmarshalJSON(data []byte) error {
+	type choice Choice
+	var out choice
+	if err := json.Unmarshal(data, &out); err != nil {
+		return err
+	}
+	extra, err := extraFields(data, choiceJSONFields)
+	if err != nil {
+		return err
+	}
+	out.Extra = extra
+	*c = Choice(out)
+	return nil
+}
+
+func (c Choice) MarshalJSON() ([]byte, error) {
+	type choice Choice
+	return marshalWithExtra(choice(c), c.Extra)
+}
+
+func (c *ChoiceDelta) UnmarshalJSON(data []byte) error {
+	type choiceDelta ChoiceDelta
+	var out choiceDelta
+	if err := json.Unmarshal(data, &out); err != nil {
+		return err
+	}
+	extra, err := extraFields(data, choiceDeltaJSONFields)
+	if err != nil {
+		return err
+	}
+	out.Extra = extra
+	*c = ChoiceDelta(out)
+	return nil
+}
+
+func (c ChoiceDelta) MarshalJSON() ([]byte, error) {
+	type choiceDelta ChoiceDelta
+	return marshalWithExtra(choiceDelta(c), c.Extra)
 }
 
 func knownJSONFields(t reflect.Type) map[string]struct{} {

@@ -61,10 +61,12 @@ def test_chat_non_stream_other_models(client: OpenAI, model: str) -> None:
 
 @pytest.mark.parametrize("model", ["minimax-m2.5", "minimax-m2.7"])
 def test_chat_anthropic_models_non_stream(client: OpenAI, model: str) -> None:
+    # minimax can be a reasoning model — give enough budget that the
+    # reply doesn't get truncated mid-thinking.
     resp = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": "say hi"}],
-        max_tokens=64,
+        max_tokens=256,
     )
     assert resp.choices, f"no choices from {model}: {resp}"
     msg = resp.choices[0].message

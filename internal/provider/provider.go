@@ -74,6 +74,8 @@ type Choice struct {
 	Message      Message         `json:"message"`
 	FinishReason string          `json:"finish_reason"`
 	Logprobs     json.RawMessage `json:"logprobs,omitempty"`
+
+	Extra map[string]json.RawMessage `json:"-"`
 }
 
 type Usage struct {
@@ -102,6 +104,8 @@ type ChoiceDelta struct {
 	Delta        Delta           `json:"delta"`
 	FinishReason string          `json:"finish_reason,omitempty"`
 	Logprobs     json.RawMessage `json:"logprobs,omitempty"`
+
+	Extra map[string]json.RawMessage `json:"-"`
 }
 
 // Delta is the inner object of a streaming choice — role/content/etc. arrive

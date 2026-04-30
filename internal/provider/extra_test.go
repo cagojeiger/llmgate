@@ -109,6 +109,31 @@ func TestExtraRoundTripDelta(t *testing.T) {
 	roundTripEqual[Delta](t, input)
 }
 
+func TestExtraRoundTripChoice(t *testing.T) {
+	input := `{
+		"index":0,
+		"message":{"role":"assistant","content":"pong"},
+		"finish_reason":"stop",
+		"logprobs":{"tokens":[]},
+		"safety_ratings":[{"category":"hate","probability":"NEGLIGIBLE"}],
+		"vendor_choice_meta":{"x":1}
+	}`
+
+	roundTripEqual[Choice](t, input)
+}
+
+func TestExtraRoundTripChoiceDelta(t *testing.T) {
+	input := `{
+		"index":0,
+		"delta":{"role":"assistant","content":"po"},
+		"finish_reason":"stop",
+		"logprobs":{"tokens":[]},
+		"vendor_chunk_meta":{"y":2}
+	}`
+
+	roundTripEqual[ChoiceDelta](t, input)
+}
+
 func roundTripEqual[T any](t *testing.T, input string) {
 	t.Helper()
 

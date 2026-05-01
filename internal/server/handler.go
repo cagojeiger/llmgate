@@ -143,6 +143,22 @@ func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *provi
 		return
 	}
 	defer stream.Close()
+	// Drain end-of-stream usage / vendor cost from the adapter's own
+	// accumulator instead of parsing each event inline. defer LIFO runs
+	// this before Close — Summary is callable any time but reads cleanest
+	// while the stream object is still live.
+	defer func() {
+		sum := stream.Summary()
+		if sum == nil {
+			return
+		}
+		if sum.Usage != nil {
+			rec.Usage = sum.Usage
+		}
+		if sum.VendorCost != "" {
+			rec.VendorCost = sum.VendorCost
+		}
+	}()
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -183,13 +199,6 @@ func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *provi
 			rec.ResponseBytes += int64(n)
 			flusher.Flush()
 			return
-		}
-
-		if event.Usage != nil {
-			rec.Usage = event.Usage
-		}
-		if cost, ok := event.Extra["cost"]; ok && len(cost) > 0 {
-			rec.VendorCost = string(cost)
 		}
 
 		out, err := json.Marshal(event)

@@ -72,7 +72,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, perr)
 		return
 	}
-	rec.Model = req.Model
+	rec.ModelRequested = req.Model
 
 	streaming, _ := raw["stream"].(bool)
 	if streaming {

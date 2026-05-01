@@ -17,164 +17,103 @@ var (
 	choiceDeltaJSONFields = knownJSONFields(reflect.TypeOf(ChoiceDelta{}))
 )
 
-func (r *Request) UnmarshalJSON(data []byte) error {
-	type request Request
-	var out request
-	if err := json.Unmarshal(data, &out); err != nil {
-		return err
-	}
-	extra, err := extraFields(data, requestJSONFields)
-	if err != nil {
-		return err
-	}
-	out.Extra = extra
-	*r = Request(out)
-	return nil
+func (r *Request) UnmarshalJSON(b []byte) error {
+	type a Request
+	return unmarshalWithExtra(b, (*a)(r), requestJSONFields)
 }
 
 func (r Request) MarshalJSON() ([]byte, error) {
-	type request Request
-	return marshalWithExtra(request(r), r.Extra)
+	type a Request
+	return marshalWithExtra(a(r), r.Extra)
 }
 
-func (m *Message) UnmarshalJSON(data []byte) error {
-	type message Message
-	var out message
-	if err := json.Unmarshal(data, &out); err != nil {
-		return err
-	}
-	extra, err := extraFields(data, messageJSONFields)
-	if err != nil {
-		return err
-	}
-	out.Extra = extra
-	*m = Message(out)
-	return nil
+func (m *Message) UnmarshalJSON(b []byte) error {
+	type a Message
+	return unmarshalWithExtra(b, (*a)(m), messageJSONFields)
 }
 
 func (m Message) MarshalJSON() ([]byte, error) {
-	type message Message
-	return marshalWithExtra(message(m), m.Extra)
+	type a Message
+	return marshalWithExtra(a(m), m.Extra)
 }
 
-func (r *Response) UnmarshalJSON(data []byte) error {
-	type response Response
-	var out response
-	if err := json.Unmarshal(data, &out); err != nil {
-		return err
-	}
-	extra, err := extraFields(data, responseJSONFields)
-	if err != nil {
-		return err
-	}
-	out.Extra = extra
-	*r = Response(out)
-	return nil
+func (r *Response) UnmarshalJSON(b []byte) error {
+	type a Response
+	return unmarshalWithExtra(b, (*a)(r), responseJSONFields)
 }
 
 func (r Response) MarshalJSON() ([]byte, error) {
-	type response Response
-	return marshalWithExtra(response(r), r.Extra)
+	type a Response
+	return marshalWithExtra(a(r), r.Extra)
 }
 
-func (u *Usage) UnmarshalJSON(data []byte) error {
-	type usage Usage
-	var out usage
-	if err := json.Unmarshal(data, &out); err != nil {
-		return err
-	}
-	extra, err := extraFields(data, usageJSONFields)
-	if err != nil {
-		return err
-	}
-	out.Extra = extra
-	*u = Usage(out)
-	return nil
+func (u *Usage) UnmarshalJSON(b []byte) error {
+	type a Usage
+	return unmarshalWithExtra(b, (*a)(u), usageJSONFields)
 }
 
 func (u Usage) MarshalJSON() ([]byte, error) {
-	type usage Usage
-	return marshalWithExtra(usage(u), u.Extra)
+	type a Usage
+	return marshalWithExtra(a(u), u.Extra)
 }
 
-func (e *Event) UnmarshalJSON(data []byte) error {
-	type event Event
-	var out event
-	if err := json.Unmarshal(data, &out); err != nil {
-		return err
-	}
-	extra, err := extraFields(data, eventJSONFields)
-	if err != nil {
-		return err
-	}
-	out.Extra = extra
-	*e = Event(out)
-	return nil
+func (e *Event) UnmarshalJSON(b []byte) error {
+	type a Event
+	return unmarshalWithExtra(b, (*a)(e), eventJSONFields)
 }
 
 func (e Event) MarshalJSON() ([]byte, error) {
-	type event Event
-	return marshalWithExtra(event(e), e.Extra)
+	type a Event
+	return marshalWithExtra(a(e), e.Extra)
 }
 
-func (d *Delta) UnmarshalJSON(data []byte) error {
-	type delta Delta
-	var out delta
-	if err := json.Unmarshal(data, &out); err != nil {
-		return err
-	}
-	extra, err := extraFields(data, deltaJSONFields)
-	if err != nil {
-		return err
-	}
-	out.Extra = extra
-	*d = Delta(out)
-	return nil
+func (d *Delta) UnmarshalJSON(b []byte) error {
+	type a Delta
+	return unmarshalWithExtra(b, (*a)(d), deltaJSONFields)
 }
 
 func (d Delta) MarshalJSON() ([]byte, error) {
-	type delta Delta
-	return marshalWithExtra(delta(d), d.Extra)
+	type a Delta
+	return marshalWithExtra(a(d), d.Extra)
 }
 
-func (c *Choice) UnmarshalJSON(data []byte) error {
-	type choice Choice
-	var out choice
-	if err := json.Unmarshal(data, &out); err != nil {
-		return err
-	}
-	extra, err := extraFields(data, choiceJSONFields)
-	if err != nil {
-		return err
-	}
-	out.Extra = extra
-	*c = Choice(out)
-	return nil
+func (c *Choice) UnmarshalJSON(b []byte) error {
+	type a Choice
+	return unmarshalWithExtra(b, (*a)(c), choiceJSONFields)
 }
 
 func (c Choice) MarshalJSON() ([]byte, error) {
-	type choice Choice
-	return marshalWithExtra(choice(c), c.Extra)
+	type a Choice
+	return marshalWithExtra(a(c), c.Extra)
 }
 
-func (c *ChoiceDelta) UnmarshalJSON(data []byte) error {
-	type choiceDelta ChoiceDelta
-	var out choiceDelta
-	if err := json.Unmarshal(data, &out); err != nil {
-		return err
-	}
-	extra, err := extraFields(data, choiceDeltaJSONFields)
-	if err != nil {
-		return err
-	}
-	out.Extra = extra
-	*c = ChoiceDelta(out)
-	return nil
+func (c *ChoiceDelta) UnmarshalJSON(b []byte) error {
+	type a ChoiceDelta
+	return unmarshalWithExtra(b, (*a)(c), choiceDeltaJSONFields)
 }
 
 func (c ChoiceDelta) MarshalJSON() ([]byte, error) {
-	type choiceDelta ChoiceDelta
-	return marshalWithExtra(choiceDelta(c), c.Extra)
+	type a ChoiceDelta
+	return marshalWithExtra(a(c), c.Extra)
+}
+
+// unmarshalWithExtra decodes data into target (which must be a pointer
+// to a method-less alias of a struct that has an Extra map field) and
+// populates Extra with any unrecognized JSON keys. The alias trick
+// suppresses recursion into the original type's UnmarshalJSON.
+func unmarshalWithExtra(data []byte, target any, known map[string]struct{}) error {
+	if err := json.Unmarshal(data, target); err != nil {
+		return err
+	}
+	extra, err := extraFields(data, known)
+	if err != nil {
+		return err
+	}
+	if extra == nil {
+		return nil
+	}
+	reflect.ValueOf(target).Elem().FieldByName("Extra").Set(reflect.ValueOf(extra))
+	return nil
 }
 
 func knownJSONFields(t reflect.Type) map[string]struct{} {

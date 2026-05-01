@@ -41,27 +41,7 @@ type Record struct {
 	Usage      *provider.Usage
 	VendorCost string
 
-	Attempts []Attempt
-}
-
-// Attempt records one upstream call within a single gateway request. A
-// non-fallback request produces exactly one Attempt; a fallback chain
-// produces N — typically N-1 with errors followed by one success.
-//
-// Usage may be nil when the upstream rejected before generation (4xx,
-// pre-stream 5xx). For mid-stream truncation, adapters surface partial
-// usage via Stream.Summary so the value here can be non-nil even with
-// a non-success ErrorKind.
-type Attempt struct {
-	Vendor       string
-	Model        string
-	StartedAt    time.Time
-	DurationMS   int64
-	StatusCode   int
-	ErrorKind    provider.Kind
-	Usage        *provider.Usage
-	VendorCost   string
-	StreamChunks int
+	Attempts []provider.Attempt
 }
 
 // Recorder receives one Record per gateway request. Implementations must

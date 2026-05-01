@@ -108,7 +108,7 @@ func TestLogRecorder_FallbackFields(t *testing.T) {
 		ModelUsed:      "deepseek-v4-flash",
 		StatusCode:     200,
 		Usage:          &provider.Usage{PromptTokens: 5, CompletionTokens: 7, TotalTokens: 12},
-		Attempts: []Attempt{
+		Attempts: []provider.Attempt{
 			{Vendor: "opencode", Model: "deepseek-v4-pro", DurationMS: 80, ErrorKind: provider.KindRateLimit, StatusCode: 429},
 			{Vendor: "opencode", Model: "deepseek-v4-flash", DurationMS: 200, StatusCode: 200, Usage: &provider.Usage{PromptTokens: 5, CompletionTokens: 7, TotalTokens: 12}},
 		},
@@ -145,7 +145,7 @@ func TestLogRecorder_OmitsAttemptsWhenSingle(t *testing.T) {
 		Vendor:         "opencode",
 		ModelUsed:      "deepseek-v4-flash",
 		StatusCode:     200,
-		Attempts: []Attempt{
+		Attempts: []provider.Attempt{
 			{Vendor: "opencode", Model: "deepseek-v4-flash", StatusCode: 200},
 		},
 	})

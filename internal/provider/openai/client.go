@@ -24,53 +24,37 @@ type Config struct {
 }
 
 type Client struct {
-	baseURL      string
-	apiKey       string
-	authScheme   string
-	userAgent    string
-	extraHeaders map[string]string
-	name         string
-	http         *http.Client
+	cfg  Config
+	http *http.Client
 }
 
 func New(cfg Config) (*Client, error) {
-	baseURL := strings.TrimRight(cfg.BaseURL, "/")
-	if baseURL == "" {
+	cfg.BaseURL = strings.TrimRight(cfg.BaseURL, "/")
+	if cfg.BaseURL == "" {
 		return nil, errors.New("openai: BaseURL is required")
 	}
 	if cfg.APIKey == "" {
 		return nil, errors.New("openai: APIKey is required")
 	}
-	authScheme := strings.ToLower(cfg.AuthScheme)
-	if authScheme == "" {
-		authScheme = "bearer"
+	cfg.AuthScheme = strings.ToLower(cfg.AuthScheme)
+	if cfg.AuthScheme == "" {
+		cfg.AuthScheme = "bearer"
 	}
-	if authScheme != "bearer" && authScheme != "x-api-key" {
+	if cfg.AuthScheme != "bearer" && cfg.AuthScheme != "x-api-key" {
 		return nil, fmt.Errorf("openai: unsupported AuthScheme %q", cfg.AuthScheme)
 	}
-	userAgent := cfg.UserAgent
-	if userAgent == "" {
-		userAgent = defaultUserAgent
+	if cfg.UserAgent == "" {
+		cfg.UserAgent = defaultUserAgent
 	}
-	name := cfg.Name
-	if name == "" {
-		name = "openai"
+	if cfg.Name == "" {
+		cfg.Name = "openai"
 	}
+	cfg.ExtraHeaders = copyHeaders(cfg.ExtraHeaders)
 	httpClient := cfg.HTTPClient
 	if httpClient == nil {
 		httpClient = defaultHTTPClient()
 	}
-
-	c := &Client{
-		baseURL:      baseURL,
-		apiKey:       cfg.APIKey,
-		authScheme:   authScheme,
-		userAgent:    userAgent,
-		extraHeaders: copyHeaders(cfg.ExtraHeaders),
-		name:         name,
-		http:         httpClient,
-	}
-	return c, nil
+	return &Client{cfg: cfg, http: httpClient}, nil
 }
 
 func defaultHTTPClient() *http.Client {
@@ -98,24 +82,24 @@ func copyHeaders(in map[string]string) map[string]string {
 	return out
 }
 
-func (c *Client) Name() string { return c.name }
+func (c *Client) Name() string { return c.cfg.Name }
 
 func (c *Client) newRequest(ctx context.Context, accept string, body []byte) (*http.Request, error) {
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", accept)
-	httpReq.Header.Set("User-Agent", c.userAgent)
-	for k, v := range c.extraHeaders {
+	httpReq.Header.Set("User-Agent", c.cfg.UserAgent)
+	for k, v := range c.cfg.ExtraHeaders {
 		httpReq.Header.Set(k, v)
 	}
-	switch c.authScheme {
+	switch c.cfg.AuthScheme {
 	case "bearer":
-		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+		httpReq.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
 	case "x-api-key":
-		httpReq.Header.Set("X-Api-Key", c.apiKey)
+		httpReq.Header.Set("X-Api-Key", c.cfg.APIKey)
 	}
 	return httpReq, nil
 }

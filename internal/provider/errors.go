@@ -54,3 +54,18 @@ func (e *Error) Is(target error) bool {
 	return e.Kind == t.Kind
 }
 
+// StampProvider attaches name to err's *Error.Provider when missing,
+// so call sites in adapter packages don't repeat the same wrap helper.
+// Pass-through for non-*Error errors.
+func StampProvider(err error, name string) error {
+	var perr *Error
+	if !errors.As(err, &perr) {
+		return err
+	}
+	if perr.Provider == name {
+		return perr
+	}
+	stamped := *perr
+	stamped.Provider = name
+	return &stamped
+}

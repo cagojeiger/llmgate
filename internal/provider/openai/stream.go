@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"strings"
 	"time"
 
 	"llmgate/internal/provider"
@@ -11,7 +12,7 @@ import (
 
 func (c *Client) CompleteStream(ctx context.Context, req *provider.Request) (provider.Stream, error) {
 	if err := req.Validate(); err != nil {
-		return nil, stampProvider(err, c.name)
+		return nil, provider.StampProvider(err, c.cfg.Name)
 	}
 
 	body, err := requestBodyWithStream(req)
@@ -40,7 +41,7 @@ func (c *Client) CompleteStream(ctx context.Context, req *provider.Request) (pro
 	return &stream{
 		body:         resp.Body,
 		reader:       provider.NewSSEReader(resp.Body),
-		providerName: c.name,
+		providerName: c.cfg.Name,
 	}, nil
 }
 
@@ -61,7 +62,7 @@ type stream struct {
 func (s *stream) Recv() (*provider.Event, error) {
 	data, err := s.reader.Recv()
 	if err != nil {
-		return nil, stampProvider(err, s.providerName)
+		return nil, provider.StampProvider(err, s.providerName)
 	}
 	if perr := parseStreamError(data, s.providerName); perr != nil {
 		return nil, perr
@@ -124,6 +125,8 @@ func requestBodyWithStream(req *provider.Request) ([]byte, error) {
 
 // parseStreamError returns a *provider.Error if the SSE event payload is
 // an upstream error envelope (mid-stream surfaced as data: {"error":...}).
+// Heuristic kind detection: error.type or message string match — best
+// effort, default KindUpstream when no token wins.
 func parseStreamError(data []byte, providerName string) *provider.Error {
 	var env struct {
 		Error struct {
@@ -134,8 +137,23 @@ func parseStreamError(data []byte, providerName string) *provider.Error {
 	if err := json.Unmarshal(data, &env); err != nil || env.Error.Message == "" {
 		return nil
 	}
+	t := strings.ToLower(env.Error.Type)
+	m := strings.ToLower(env.Error.Message)
+	kind := provider.KindUpstream
+	switch {
+	case strings.Contains(t, "auth"):
+		kind = provider.KindAuth
+	case strings.Contains(t, "rate"):
+		kind = provider.KindRateLimit
+	case strings.Contains(t, "context") || strings.Contains(m, "token limit") || strings.Contains(m, "context length"):
+		kind = provider.KindContextLength
+	case strings.Contains(t, "content_filter"):
+		kind = provider.KindContentFilter
+	case strings.Contains(t, "invalid"):
+		kind = provider.KindBadRequest
+	}
 	return &provider.Error{
-		Kind:     kindFromErrorType(env.Error.Type, env.Error.Message),
+		Kind:     kind,
 		Provider: providerName,
 		Message:  env.Error.Message,
 		Raw:      firstBytes(data),

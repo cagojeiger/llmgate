@@ -13,7 +13,7 @@ import (
 
 func (c *Client) CompleteStream(ctx context.Context, req *provider.Request) (provider.Stream, error) {
 	if err := req.Validate(); err != nil {
-		return nil, withProvider(err, c.cfg.Name)
+		return nil, provider.StampProvider(err, c.cfg.Name)
 	}
 
 	body, err := toAnthropicRequest(req, c.cfg.DefaultMaxTokens, true)

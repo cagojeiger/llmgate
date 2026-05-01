@@ -150,19 +150,6 @@ func (c *Client) badRequest(message string, cause error, raw []byte) *provider.E
 	}
 }
 
-func withProvider(err error, name string) error {
-	var perr *provider.Error
-	if !errors.As(err, &perr) {
-		return err
-	}
-	if perr.Provider == name {
-		return perr
-	}
-	stamped := *perr
-	stamped.Provider = name
-	return &stamped
-}
-
 func looksLikeContextLength(message string) bool {
 	lower := strings.ToLower(message)
 	return strings.Contains(lower, "context_length") ||

@@ -47,7 +47,7 @@ func (c *Client) classify(status int, body []byte, retryAfterHeader string) *pro
 
 	return &provider.Error{
 		Kind:       kind,
-		Provider:   c.name,
+		Provider:   c.cfg.Name,
 		Message:    message,
 		StatusCode: status,
 		RetryAfter: parseRetryAfter(retryAfterHeader),
@@ -66,28 +66,6 @@ func envelopeMessage(body []byte) string {
 		return ""
 	}
 	return env.Error.Message
-}
-
-func kindFromErrorType(errorType, message string) provider.Kind {
-	lowerType := strings.ToLower(errorType)
-	lowerMessage := strings.ToLower(message)
-	switch {
-	case strings.Contains(lowerType, "auth"):
-		return provider.KindAuth
-	case strings.Contains(lowerType, "rate"):
-		return provider.KindRateLimit
-	case strings.Contains(lowerType, "context") ||
-		strings.Contains(lowerMessage, "token limit") ||
-		strings.Contains(lowerMessage, "context length"):
-		return provider.KindContextLength
-	case strings.Contains(lowerType, "content_filter"):
-		return provider.KindContentFilter
-	case strings.Contains(lowerType, "invalid"):
-		return provider.KindBadRequest
-	case strings.Contains(lowerType, "upstream"):
-		return provider.KindUpstream
-	}
-	return provider.KindUpstream
 }
 
 func parseRetryAfter(header string) time.Duration {
@@ -121,7 +99,7 @@ func (c *Client) lowLevelError(message string, cause error) *provider.Error {
 	}
 	return &provider.Error{
 		Kind:     kind,
-		Provider: c.name,
+		Provider: c.cfg.Name,
 		Message:  message + ": " + cause.Error(),
 		Cause:    cause,
 	}
@@ -130,26 +108,11 @@ func (c *Client) lowLevelError(message string, cause error) *provider.Error {
 func (c *Client) badRequest(message string, cause error, raw []byte) *provider.Error {
 	return &provider.Error{
 		Kind:     provider.KindBadRequest,
-		Provider: c.name,
+		Provider: c.cfg.Name,
 		Message:  message + ": " + cause.Error(),
 		Cause:    cause,
 		Raw:      firstBytes(raw),
 	}
-}
-
-// stampProvider stamps the configured adapter name onto errors from shared
-// helpers so callers always see the originating adapter.
-func stampProvider(err error, name string) error {
-	var perr *provider.Error
-	if !errors.As(err, &perr) {
-		return err
-	}
-	if perr.Provider == name {
-		return perr
-	}
-	stamped := *perr
-	stamped.Provider = name
-	return &stamped
 }
 
 func firstBytes(b []byte) []byte {

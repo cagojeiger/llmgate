@@ -54,23 +54,3 @@ func (e *Error) Is(target error) bool {
 	return e.Kind == t.Kind
 }
 
-func (e *Error) Retryable() bool {
-	switch e.Kind {
-	case KindRateLimit, KindUpstream, KindTimeout, KindNetwork:
-		return true
-	}
-	return false
-}
-
-var (
-	ErrAuth          = &Error{Kind: KindAuth}
-	ErrRateLimit     = &Error{Kind: KindRateLimit}
-	ErrBadRequest    = &Error{Kind: KindBadRequest}
-	ErrContextLength = &Error{Kind: KindContextLength}
-	ErrContentFilter = &Error{Kind: KindContentFilter}
-	ErrUpstream      = &Error{Kind: KindUpstream}
-	ErrTimeout       = &Error{Kind: KindTimeout}
-	ErrNetwork       = &Error{Kind: KindNetwork}
-	ErrEmpty         = &Error{Kind: KindEmpty}
-	ErrUnknown       = &Error{Kind: KindUnknown}
-)

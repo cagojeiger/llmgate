@@ -16,15 +16,14 @@ import (
 // usage via Stream.Summary so the value here can be non-nil even with
 // a non-success ErrorKind.
 type Attempt struct {
-	Vendor       string
-	Model        string
-	StartedAt    time.Time
-	DurationMS   int64
-	StatusCode   int
-	ErrorKind    Kind
-	Usage        *Usage
-	VendorCost   string
-	StreamChunks int
+	Vendor     string
+	Model      string
+	StartedAt  time.Time
+	DurationMS int64
+	StatusCode int
+	ErrorKind  Kind
+	Usage      *Usage
+	VendorCost string
 }
 
 // attemptCtxKey is unexported so callers must use the helpers below; this

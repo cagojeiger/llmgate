@@ -3,8 +3,10 @@ package catalog
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadDefault(t *testing.T) {
@@ -25,6 +27,113 @@ func TestLoadDefault(t *testing.T) {
 	}
 	if cat.Defaults.Model != "deepseek-v4-flash" {
 		t.Fatalf("Defaults.Model = %q, want deepseek-v4-flash", cat.Defaults.Model)
+	}
+
+	coder, ok := cat.Aliases["coder"]
+	if !ok {
+		t.Fatal("Aliases[coder] missing")
+	}
+	wantChain := []string{"deepseek-v4-pro", "deepseek-v4-flash", "kimi-k2.6", "glm-5.1"}
+	if !reflect.DeepEqual(coder.Chain, wantChain) {
+		t.Fatalf("coder.Chain = %v, want %v", coder.Chain, wantChain)
+	}
+
+	if cat.Fallback.CircuitOpen != 30*time.Second {
+		t.Errorf("Fallback.CircuitOpen = %v, want 30s", cat.Fallback.CircuitOpen)
+	}
+	if cat.Fallback.CircuitFailures != 3 {
+		t.Errorf("Fallback.CircuitFailures = %d, want 3", cat.Fallback.CircuitFailures)
+	}
+	if !reflect.DeepEqual(cat.Fallback.OnKinds, []string{"rate_limit", "upstream", "timeout", "network"}) {
+		t.Errorf("Fallback.OnKinds = %v, want [rate_limit upstream timeout network]", cat.Fallback.OnKinds)
+	}
+}
+
+func TestResolveAlias(t *testing.T) {
+	t.Setenv("LLMGATE_OPENCODE_API_KEY", "test-key")
+	cat, err := LoadDefault()
+	if err != nil {
+		t.Fatalf("LoadDefault: %v", err)
+	}
+
+	chain := cat.ResolveAlias("coder")
+	if len(chain) != 4 || chain[0] != "deepseek-v4-pro" {
+		t.Errorf("ResolveAlias(coder) = %v, want chain starting with deepseek-v4-pro", chain)
+	}
+
+	// Unknown name (or raw model) returns single-element slice.
+	single := cat.ResolveAlias("deepseek-v4-flash")
+	if !reflect.DeepEqual(single, []string{"deepseek-v4-flash"}) {
+		t.Errorf("ResolveAlias(raw) = %v, want single-element slice", single)
+	}
+}
+
+func TestLoadFile_AliasUnknownModel(t *testing.T) {
+	t.Setenv("TEST_API_KEY", "test-key")
+	path := writeCatalog(t, `
+vendor: test
+base_url: http://example.test/v1
+auth_env: TEST_API_KEY
+protocols:
+  openai:
+    auth_scheme: bearer
+    models:
+      - id: real
+aliases:
+  bad:
+    chain: [real, ghost]
+defaults:
+  model: real
+`)
+	_, err := LoadFile(path)
+	if err == nil || !strings.Contains(err.Error(), "ghost") {
+		t.Fatalf("error = %v, want unknown-model error referencing ghost", err)
+	}
+}
+
+func TestLoadFile_AliasCollidesWithModel(t *testing.T) {
+	t.Setenv("TEST_API_KEY", "test-key")
+	path := writeCatalog(t, `
+vendor: test
+base_url: http://example.test/v1
+auth_env: TEST_API_KEY
+protocols:
+  openai:
+    auth_scheme: bearer
+    models:
+      - id: real
+aliases:
+  real:
+    chain: [real]
+defaults:
+  model: real
+`)
+	_, err := LoadFile(path)
+	if err == nil || !strings.Contains(err.Error(), "collides") {
+		t.Fatalf("error = %v, want alias-collision error", err)
+	}
+}
+
+func TestLoadFile_AliasEmptyChain(t *testing.T) {
+	t.Setenv("TEST_API_KEY", "test-key")
+	path := writeCatalog(t, `
+vendor: test
+base_url: http://example.test/v1
+auth_env: TEST_API_KEY
+protocols:
+  openai:
+    auth_scheme: bearer
+    models:
+      - id: real
+aliases:
+  blank:
+    chain: []
+defaults:
+  model: real
+`)
+	_, err := LoadFile(path)
+	if err == nil || !strings.Contains(err.Error(), "empty chain") {
+		t.Fatalf("error = %v, want empty-chain error", err)
 	}
 }
 

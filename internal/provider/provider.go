@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"time"
 )
 
 type Provider interface {
@@ -19,6 +20,23 @@ type Provider interface {
 type Stream interface {
 	Recv() (*Event, error)
 	Close() error
+	// Summary returns the aggregated end-state of the stream. It is safe to
+	// call at any time; the typical caller invokes it after Recv returns
+	// io.EOF (or any error) so audit can extract usage / finish reason / cost
+	// without re-implementing per-vendor accumulation in the handler.
+	Summary() *Summary
+}
+
+// Summary captures aggregated stream state for audit purposes. Fields are
+// best-effort — partial streams populate what they got, fully-failed streams
+// may have everything zero. Stream/non-stream paths produce comparable shapes.
+type Summary struct {
+	Model        string
+	FinishReason string
+	Usage        *Usage
+	VendorCost   string
+	ChunkCount   int
+	FirstByteAt  time.Time
 }
 
 type Request struct {

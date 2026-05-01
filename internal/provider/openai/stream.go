@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"time"
 
 	"llmgate/internal/provider"
 )
@@ -47,6 +48,14 @@ type stream struct {
 	body         io.Closer
 	reader       *provider.SSEReader
 	providerName string
+
+	// accumulated state for Summary()
+	model        string
+	finishReason string
+	usage        *provider.Usage
+	vendorCost   string
+	chunkCount   int
+	firstByteAt  time.Time
 }
 
 func (s *stream) Recv() (*provider.Event, error) {
@@ -68,11 +77,40 @@ func (s *stream) Recv() (*provider.Event, error) {
 			Raw:      firstBytes(data),
 		}
 	}
+
+	if s.firstByteAt.IsZero() {
+		s.firstByteAt = time.Now()
+	}
+	s.chunkCount++
+	if event.Model != "" {
+		s.model = event.Model
+	}
+	if event.Usage != nil {
+		s.usage = event.Usage
+	}
+	if cost, ok := event.Extra["cost"]; ok && len(cost) > 0 {
+		s.vendorCost = string(cost)
+	}
+	if len(event.Choices) > 0 && event.Choices[0].FinishReason != "" {
+		s.finishReason = event.Choices[0].FinishReason
+	}
+
 	return &event, nil
 }
 
 func (s *stream) Close() error {
 	return s.body.Close()
+}
+
+func (s *stream) Summary() *provider.Summary {
+	return &provider.Summary{
+		Model:        s.model,
+		FinishReason: s.finishReason,
+		Usage:        s.usage,
+		VendorCost:   s.vendorCost,
+		ChunkCount:   s.chunkCount,
+		FirstByteAt:  s.firstByteAt,
+	}
 }
 
 // requestBodyWithStream marshals req then injects "stream":true at the top

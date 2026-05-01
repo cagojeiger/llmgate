@@ -185,3 +185,4 @@ type fakeStream struct{}
 
 func (fakeStream) Recv() (*Event, error) { return nil, ErrStreamDone }
 func (fakeStream) Close() error          { return nil }
+func (fakeStream) Summary() *Summary     { return &Summary{} }

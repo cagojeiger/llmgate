@@ -310,6 +310,101 @@ func TestCompleteStream_Truncated(t *testing.T) {
 	}
 }
 
+func TestStreamSummary_Success(t *testing.T) {
+	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		writeSSEChunk(t, w, `{"id":"chat-1","model":"deepseek-v4-flash","choices":[{"index":0,"delta":{"role":"assistant","content":"a"}}]}`)
+		writeSSEChunk(t, w, `{"id":"chat-1","model":"deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"b"}}]}`)
+		writeSSEChunk(t, w, `{"id":"chat-1","model":"deepseek-v4-flash","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5},"cost":"0.0001"}`)
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
+	stream, err := c.CompleteStream(context.Background(), &provider.Request{
+		Model:    "deepseek-v4-flash",
+		Messages: []provider.Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	defer stream.Close()
+
+	for {
+		if _, err := stream.Recv(); errors.Is(err, provider.ErrStreamDone) {
+			break
+		} else if err != nil {
+			t.Fatalf("Recv: %v", err)
+		}
+	}
+
+	sum := stream.Summary()
+	if sum == nil {
+		t.Fatal("Summary returned nil")
+	}
+	if sum.ChunkCount != 3 {
+		t.Errorf("ChunkCount = %d, want 3", sum.ChunkCount)
+	}
+	if sum.Model != "deepseek-v4-flash" {
+		t.Errorf("Model = %q, want deepseek-v4-flash", sum.Model)
+	}
+	if sum.FinishReason != "stop" {
+		t.Errorf("FinishReason = %q, want stop", sum.FinishReason)
+	}
+	if sum.Usage == nil || sum.Usage.TotalTokens != 5 {
+		t.Errorf("Usage = %+v, want TotalTokens=5", sum.Usage)
+	}
+	if sum.VendorCost != `"0.0001"` {
+		t.Errorf("VendorCost = %q, want %q", sum.VendorCost, `"0.0001"`)
+	}
+	if sum.FirstByteAt.IsZero() {
+		t.Error("FirstByteAt is zero, want set after first chunk")
+	}
+}
+
+func TestStreamSummary_PartialOnError(t *testing.T) {
+	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		writeSSEChunk(t, w, `{"id":"x","model":"m1","choices":[{"index":0,"delta":{"content":"hi"}}]}`)
+		writeSSEChunk(t, w, `{"error":{"message":"boom","type":"upstream_error"}}`)
+	}))
+	defer server.Close()
+
+	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
+	stream, err := c.CompleteStream(context.Background(), &provider.Request{
+		Model:    "deepseek-v4-flash",
+		Messages: []provider.Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	defer stream.Close()
+
+	if _, err := stream.Recv(); err != nil {
+		t.Fatalf("first Recv: %v", err)
+	}
+	if _, err := stream.Recv(); err == nil {
+		t.Fatal("second Recv: expected error")
+	}
+
+	sum := stream.Summary()
+	if sum.ChunkCount != 1 {
+		t.Errorf("ChunkCount = %d, want 1 (only the pre-error chunk counts)", sum.ChunkCount)
+	}
+	if sum.Model != "m1" {
+		t.Errorf("Model = %q, want m1", sum.Model)
+	}
+	if sum.FirstByteAt.IsZero() {
+		t.Error("FirstByteAt is zero, want set on first chunk before failure")
+	}
+	if sum.FinishReason != "" {
+		t.Errorf("FinishReason = %q, want empty (no finish chunk)", sum.FinishReason)
+	}
+	if sum.Usage != nil {
+		t.Errorf("Usage = %+v, want nil (no usage in pre-error chunks)", sum.Usage)
+	}
+}
+
 func writeSSEChunk(t *testing.T, w http.ResponseWriter, payload string) {
 	t.Helper()
 

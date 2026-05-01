@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"strings"
+	"time"
 
 	"llmgate/internal/provider"
 )
@@ -57,6 +58,17 @@ type stream struct {
 	pendingFinish  *anthropicEnd
 	pendingEmitted bool
 	providerName   string
+
+	// accumulated state for Summary()
+	chunkCount  int
+	firstByteAt time.Time
+}
+
+func (s *stream) recordEmit() {
+	if s.firstByteAt.IsZero() {
+		s.firstByteAt = time.Now()
+	}
+	s.chunkCount++
 }
 
 type anthropicEnd struct {
@@ -72,6 +84,7 @@ func (s *stream) Recv() (*provider.Event, error) {
 	}
 	if s.pendingFinish != nil && !s.pendingEmitted {
 		s.pendingEmitted = true
+		s.recordEmit()
 		return s.buildFinishEvent(s.pendingFinish), nil
 	}
 	if s.pendingEmitted {
@@ -106,6 +119,7 @@ func (s *stream) Recv() (*provider.Event, error) {
 				s.msgModel = event.Message.Model
 				s.inputTokens = event.Message.Usage.InputTokens
 			}
+			s.recordEmit()
 			return &provider.Event{
 				ID:     s.msgID,
 				Object: "chat.completion.chunk",
@@ -119,6 +133,7 @@ func (s *stream) Recv() (*provider.Event, error) {
 			if event.Delta.Type != "text_delta" {
 				continue
 			}
+			s.recordEmit()
 			return &provider.Event{
 				ID:     s.msgID,
 				Object: "chat.completion.chunk",
@@ -145,6 +160,7 @@ func (s *stream) Recv() (*provider.Event, error) {
 				s.pendingFinish = &anthropicEnd{finishReason: "stop"}
 			}
 			s.pendingEmitted = true
+			s.recordEmit()
 			return s.buildFinishEvent(s.pendingFinish), nil
 		case "ping", "content_block_start", "content_block_stop":
 			continue
@@ -168,6 +184,7 @@ func (s *stream) Recv() (*provider.Event, error) {
 	}
 	if s.pendingFinish != nil && !s.pendingEmitted {
 		s.pendingEmitted = true
+		s.recordEmit()
 		return s.buildFinishEvent(s.pendingFinish), nil
 	}
 	return nil, &provider.Error{
@@ -175,6 +192,32 @@ func (s *stream) Recv() (*provider.Event, error) {
 		Provider: s.providerName,
 		Message:  "stream ended without message_stop",
 	}
+}
+
+func (s *stream) Summary() *provider.Summary {
+	summary := &provider.Summary{
+		Model:       s.msgModel,
+		ChunkCount:  s.chunkCount,
+		FirstByteAt: s.firstByteAt,
+	}
+	if s.pendingFinish != nil {
+		summary.FinishReason = s.pendingFinish.finishReason
+		usage := &provider.Usage{
+			PromptTokens:     s.inputTokens,
+			CompletionTokens: s.pendingFinish.outputTokens,
+			TotalTokens:      s.inputTokens + s.pendingFinish.outputTokens,
+		}
+		addCacheUsageExtra(usage, s.pendingFinish.cacheCreationTokens, s.pendingFinish.cacheReadTokens)
+		summary.Usage = usage
+	} else if s.inputTokens > 0 {
+		// Partial: only message_start arrived. Surface what we got so audit
+		// can record prompt token consumption even when generation aborted.
+		summary.Usage = &provider.Usage{
+			PromptTokens: s.inputTokens,
+			TotalTokens:  s.inputTokens,
+		}
+	}
+	return summary
 }
 
 func (s *stream) Close() error {

@@ -396,6 +396,101 @@ func TestCompleteStream_PingIgnored(t *testing.T) {
 	}
 }
 
+func TestStreamSummary_Success(t *testing.T) {
+	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		writeSSEEvent(t, w, "message_start", `{"type":"message_start","message":{"id":"msg-1","type":"message","role":"assistant","model":"minimax-m2.5","usage":{"input_tokens":3}}}`)
+		writeSSEEvent(t, w, "content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}`)
+		writeSSEEvent(t, w, "message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":2}}`)
+		writeSSEEvent(t, w, "message_stop", `{"type":"message_stop"}`)
+	}))
+	defer server.Close()
+
+	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
+	stream, err := c.CompleteStream(context.Background(), &provider.Request{
+		Model:    "minimax-m2.5",
+		Messages: []provider.Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	defer stream.Close()
+
+	for {
+		if _, err := stream.Recv(); errors.Is(err, provider.ErrStreamDone) {
+			break
+		} else if err != nil {
+			t.Fatalf("Recv: %v", err)
+		}
+	}
+
+	sum := stream.Summary()
+	if sum == nil {
+		t.Fatal("Summary returned nil")
+	}
+	if sum.Model != "minimax-m2.5" {
+		t.Errorf("Model = %q, want minimax-m2.5", sum.Model)
+	}
+	if sum.FinishReason != "stop" {
+		t.Errorf("FinishReason = %q, want stop (mapped from end_turn)", sum.FinishReason)
+	}
+	if sum.Usage == nil || sum.Usage.PromptTokens != 3 || sum.Usage.CompletionTokens != 2 || sum.Usage.TotalTokens != 5 {
+		t.Errorf("Usage = %+v, want {3,2,5}", sum.Usage)
+	}
+	if sum.ChunkCount < 3 {
+		t.Errorf("ChunkCount = %d, want >= 3", sum.ChunkCount)
+	}
+	if sum.FirstByteAt.IsZero() {
+		t.Error("FirstByteAt is zero, want set")
+	}
+}
+
+func TestStreamSummary_PartialOnError(t *testing.T) {
+	// message_start arrives (prompt tokens known) but stream cuts off before
+	// message_delta. Summary should expose prompt-side tokens for audit even
+	// though completion never finished.
+	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		writeSSEEvent(t, w, "message_start", `{"type":"message_start","message":{"id":"msg-1","type":"message","role":"assistant","model":"minimax-m2.5","usage":{"input_tokens":7}}}`)
+		writeSSEEvent(t, w, "content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"a"}}`)
+	}))
+	defer server.Close()
+
+	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
+	stream, err := c.CompleteStream(context.Background(), &provider.Request{
+		Model:    "minimax-m2.5",
+		Messages: []provider.Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	defer stream.Close()
+
+	if _, err := stream.Recv(); err != nil {
+		t.Fatalf("first Recv: %v", err)
+	}
+	if _, err := stream.Recv(); err != nil {
+		t.Fatalf("second Recv: %v", err)
+	}
+	if _, err := stream.Recv(); err == nil {
+		t.Fatal("third Recv: want error (truncated stream)")
+	}
+
+	sum := stream.Summary()
+	if sum.Usage == nil || sum.Usage.PromptTokens != 7 {
+		t.Errorf("Usage = %+v, want PromptTokens=7", sum.Usage)
+	}
+	if sum.Usage.CompletionTokens != 0 {
+		t.Errorf("CompletionTokens = %d, want 0 (never finished)", sum.Usage.CompletionTokens)
+	}
+	if sum.FinishReason != "" {
+		t.Errorf("FinishReason = %q, want empty (no message_delta)", sum.FinishReason)
+	}
+	if sum.FirstByteAt.IsZero() {
+		t.Error("FirstByteAt zero, want set after first emitted event")
+	}
+}
+
 func writeAnthropicResponse(t *testing.T, w http.ResponseWriter, stopReason string) {
 	t.Helper()
 	w.Header().Set("Content-Type", "application/json")

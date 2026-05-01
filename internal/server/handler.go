@@ -35,14 +35,29 @@ func NewHandler(p provider.Provider, log *slog.Logger, recorder audit.Recorder) 
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
+	// Install the attempts holder so router (or any provider in the chain)
+	// can append per-attempt records that we then drain into the audit
+	// Record below.
+	ctx := provider.WithAttemptHolder(r.Context())
+	r = r.WithContext(ctx)
+
 	rec := &audit.Record{
 		Timestamp: start,
-		RequestID: RequestIDFromContext(r.Context()),
+		RequestID: RequestIDFromContext(ctx),
 		Method:    "chat.completions",
 	}
 	defer func() {
 		rec.DurationMS = time.Since(start).Milliseconds()
-		h.recorder.Record(r.Context(), rec)
+		rec.Attempts = provider.AttemptsFromContext(ctx)
+		// Vendor / ModelUsed reflect the attempt that actually returned
+		// the response body (the last one for success; the last failed
+		// attempt otherwise). Skipped (circuit-open) entries don't
+		// produce attempts so this remains accurate.
+		if last := lastAttempt(rec.Attempts); last != nil {
+			rec.Vendor = last.Vendor
+			rec.ModelUsed = last.Model
+		}
+		h.recorder.Record(ctx, rec)
 	}()
 
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxChatRequestBytes))
@@ -191,6 +206,16 @@ func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *provi
 		rec.ResponseBytes += int64(n)
 		flusher.Flush()
 	}
+}
+
+// lastAttempt returns the last attempt in the slice (which represents
+// either the successful upstream call or the final failure). Returns nil
+// for an empty slice.
+func lastAttempt(atts []provider.Attempt) *provider.Attempt {
+	if len(atts) == 0 {
+		return nil
+	}
+	return &atts[len(atts)-1]
 }
 
 func writeError(w http.ResponseWriter, err error) {

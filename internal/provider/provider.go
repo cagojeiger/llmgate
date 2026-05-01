@@ -49,6 +49,11 @@ type Request struct {
 	Stop        []string `json:"stop,omitempty"`
 	Seed        *int     `json:"seed,omitempty"`
 	User        string   `json:"user,omitempty"`
+	// Stream is a tri-state: nil = client did not specify, *false = explicit
+	// non-stream, *true = SSE. Handler dispatches to serveStream when true.
+	// Adapters that always force stream (openai/stream.go) override this on
+	// a copy before marshaling.
+	Stream *bool `json:"stream,omitempty"`
 
 	Extra map[string]json.RawMessage `json:"-"`
 }

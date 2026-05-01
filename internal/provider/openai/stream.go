@@ -113,20 +113,13 @@ func (s *stream) Summary() *provider.Summary {
 	}
 }
 
-// requestBodyWithStream marshals req then injects "stream":true at the top
-// level so the upstream switches to SSE. We re-marshal via a map to keep
-// the user's Extra fields and ordering otherwise unchanged.
+// requestBodyWithStream marshals a copy of req with Stream forced true
+// so callers (probe CLI / handler) don't need to set the flag themselves.
 func requestBodyWithStream(req *provider.Request) ([]byte, error) {
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, err
-	}
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, err
-	}
-	raw["stream"] = json.RawMessage("true")
-	return json.Marshal(raw)
+	cp := *req
+	t := true
+	cp.Stream = &t
+	return json.Marshal(&cp)
 }
 
 // parseStreamError returns a *provider.Error if the SSE event payload is

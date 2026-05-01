@@ -70,15 +70,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	rec.RequestBytes = int64(len(body))
 
-	var raw map[string]any
-	if err := json.Unmarshal(body, &raw); err != nil {
-		perr := &provider.Error{Kind: provider.KindBadRequest, Message: "decode request JSON: " + err.Error()}
-		rec.ErrorKind = perr.Kind
-		rec.StatusCode = errStatus(perr)
-		writeError(w, perr)
-		return
-	}
-
 	req := &provider.Request{}
 	if err := json.Unmarshal(body, req); err != nil {
 		perr := &provider.Error{Kind: provider.KindBadRequest, Message: "decode request: " + err.Error()}
@@ -89,8 +80,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	rec.ModelRequested = req.Model
 
-	streaming, _ := raw["stream"].(bool)
-	if streaming {
+	if req.Stream != nil && *req.Stream {
 		rec.Method = "chat.completions.stream"
 		h.serveStream(w, r, req, rec)
 		return

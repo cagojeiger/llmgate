@@ -36,8 +36,9 @@ type anthropicResponse struct {
 }
 
 type anthropicContent struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	Thinking string `json:"thinking,omitempty"`
 }
 
 type anthropicUsage struct {
@@ -108,8 +109,18 @@ func toOpenAIResponse(in *anthropicResponse) (*provider.Response, error) {
 		return nil, errors.New("response is nil")
 	}
 	var text strings.Builder
+	var reasoning strings.Builder
 	for _, block := range in.Content {
-		text.WriteString(block.Text)
+		switch block.Type {
+		case "thinking":
+			if block.Thinking != "" {
+				reasoning.WriteString(block.Thinking)
+			} else {
+				reasoning.WriteString(block.Text)
+			}
+		default:
+			text.WriteString(block.Text)
+		}
 	}
 
 	finishReason := ""
@@ -125,8 +136,9 @@ func toOpenAIResponse(in *anthropicResponse) (*provider.Response, error) {
 		Choices: []provider.Choice{{
 			Index: 0,
 			Message: provider.Message{
-				Role:    "assistant",
-				Content: text.String(),
+				Role:             "assistant",
+				Content:          text.String(),
+				ReasoningContent: reasoning.String(),
 			},
 			FinishReason: finishReason,
 		}},

@@ -132,6 +132,41 @@ func TestComplete_SystemMessageExtracted(t *testing.T) {
 	}
 }
 
+func TestComplete_ThinkingContentMappedToReasoning(t *testing.T) {
+	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id": "msg-1",
+			"type": "message",
+			"role": "assistant",
+			"model": "minimax-m2.5",
+			"content": [
+				{"type": "thinking", "thinking": "because"},
+				{"type": "text", "text": "pong"}
+			],
+			"stop_reason": "end_turn",
+			"usage": {"input_tokens": 5, "output_tokens": 2}
+		}`))
+	}))
+	defer server.Close()
+
+	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client})
+	resp, err := c.Complete(context.Background(), &provider.Request{
+		Model:    "minimax-m2.5",
+		Messages: []provider.Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("Complete returned error: %v", err)
+	}
+	msg := resp.Choices[0].Message
+	if msg.Content != "pong" {
+		t.Fatalf("content = %q, want pong", msg.Content)
+	}
+	if msg.ReasoningContent != "because" {
+		t.Fatalf("reasoning_content = %q, want because", msg.ReasoningContent)
+	}
+}
+
 func TestComplete_MaxTokensDefault(t *testing.T) {
 	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -234,6 +269,7 @@ func TestCompleteStream_Success(t *testing.T) {
 		writeSSEEvent(t, w, "message_start", `{"type":"message_start","message":{"id":"msg-1","type":"message","role":"assistant","model":"minimax-m2.5","usage":{"input_tokens":3}}}`)
 		writeSSEEvent(t, w, "ping", `{"type":"ping"}`)
 		writeSSEEvent(t, w, "content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`)
+		writeSSEEvent(t, w, "content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"because"}}`)
 		writeSSEEvent(t, w, "content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hel"}}`)
 		writeSSEEvent(t, w, "content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"lo"}}`)
 		writeSSEEvent(t, w, "message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":2,"cache_creation_input_tokens":1,"cache_read_input_tokens":2}}`)
@@ -252,6 +288,7 @@ func TestCompleteStream_Success(t *testing.T) {
 	defer stream.Close()
 
 	var content strings.Builder
+	var reasoning strings.Builder
 	var finishReason string
 	var usage *provider.Usage
 	roleSeen := false
@@ -273,20 +310,24 @@ func TestCompleteStream_Success(t *testing.T) {
 			roleSeen = true
 		}
 		content.WriteString(choice.Delta.Content)
+		reasoning.WriteString(choice.Delta.ReasoningContent)
 		if choice.FinishReason != "" {
 			finishReason = choice.FinishReason
 			usage = event.Usage
 		}
 	}
 
-	if chunks != 4 {
-		t.Fatalf("chunks = %d, want 4", chunks)
+	if chunks != 5 {
+		t.Fatalf("chunks = %d, want 5", chunks)
 	}
 	if !roleSeen {
 		t.Fatalf("assistant role chunk missing")
 	}
 	if content.String() != "hello" {
 		t.Fatalf("content = %q, want hello", content.String())
+	}
+	if reasoning.String() != "because" {
+		t.Fatalf("reasoning = %q, want because", reasoning.String())
 	}
 	if finishReason != "stop" {
 		t.Fatalf("finishReason = %q, want stop", finishReason)

@@ -130,7 +130,16 @@ func (s *stream) Recv() (*provider.Event, error) {
 				}},
 			}, nil
 		case "content_block_delta":
-			if event.Delta.Type != "text_delta" {
+			var delta provider.Delta
+			switch event.Delta.Type {
+			case "text_delta":
+				delta.Content = event.Delta.Text
+			case "thinking_delta":
+				delta.ReasoningContent = event.Delta.Thinking
+				if delta.ReasoningContent == "" {
+					delta.ReasoningContent = event.Delta.Text
+				}
+			default:
 				continue
 			}
 			s.recordEmit()
@@ -140,7 +149,7 @@ func (s *stream) Recv() (*provider.Event, error) {
 				Model:  s.msgModel,
 				Choices: []provider.ChoiceDelta{{
 					Index: 0,
-					Delta: provider.Delta{Content: event.Delta.Text},
+					Delta: delta,
 				}},
 			}, nil
 		case "message_delta":
@@ -258,7 +267,8 @@ type anthropicStreamEvent struct {
 	Message *anthropicResponse `json:"message,omitempty"`
 	Delta   struct {
 		Type         string  `json:"type"`
-		Text         string  `json:"text"`
+		Text         string  `json:"text,omitempty"`
+		Thinking     string  `json:"thinking,omitempty"`
 		StopReason   *string `json:"stop_reason"`
 		StopSequence *string `json:"stop_sequence"`
 	} `json:"delta"`

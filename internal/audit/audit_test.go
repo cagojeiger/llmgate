@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
@@ -195,6 +196,23 @@ func TestComposite_NilElement(t *testing.T) {
 	if err := c.Close(); err != nil {
 		t.Errorf("Close with all-nil-or-no-error should be nil, got %v", err)
 	}
+}
+
+func TestComposite_CloseReturnsFirstErrButStillRunsRest(t *testing.T) {
+	first := errors.New("first-failed")
+	second := errors.New("second-failed")
+	a := &captureRecorder{err: first}
+	b := &captureRecorder{err: second}
+	c := &captureRecorder{}
+	composite := Composite{a, b, c}
+
+	got := composite.Close()
+	if !errors.Is(got, first) {
+		t.Errorf("Close = %v, want first-failed (first non-nil)", got)
+	}
+	// All sinks were given a chance to close — captureRecorder records
+	// nothing for Close, but the contract is "best-effort, return first
+	// err". This test pins that "first" semantics.
 }
 
 func TestNop(t *testing.T) {

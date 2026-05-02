@@ -1,0 +1,5 @@
+alias: reasoning
+chain:
+  - minimax-m2.7
+  - minimax-m2.5
+  - deepseek-v4-pro

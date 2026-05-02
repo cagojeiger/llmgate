@@ -1,17 +1,39 @@
+// Package catalog loads the gateway's per-model endpoint table and
+// fallback policy from a directory of yaml files.
+//
+// Layout:
+//
+//	<root>/
+//	  models/                one yaml per endpoint (id + vendor + type +
+//	                         base_url + auth_env). file = endpoint.
+//	  fallback/
+//	    <alias>.yaml         one yaml per alias (alias + chain). file
+//	                         name is informational; the alias name in
+//	                         the yaml is canonical.
+//	    policy.yaml          single global policy (on_kinds + circuit +
+//	                         defaults).
+//
+// Each models/*.yaml registers exactly one Endpoint and one Model with
+// the same id, so two yaml files for the same vendor model name but
+// different auth_env coexist as separate endpoints — useful when one
+// person runs several subscriptions, but the gateway itself needs no
+// special code for that case.
 package catalog
 
 import (
-	_ "embed"
+	"embed"
 	"fmt"
+	"io/fs"
 	"os"
+	"path"
 	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed opencode.yaml
-var defaultCatalog []byte
+//go:embed all:default
+var defaultFS embed.FS
 
 type Catalog struct {
 	Endpoints map[string]*Endpoint
@@ -62,42 +84,29 @@ type Defaults struct {
 	Model string
 }
 
-func LoadDefault() (*Catalog, error) {
-	return loadBytes(defaultCatalog)
+// rawModel is the on-disk shape of a models/*.yaml file. Each file
+// declares one endpoint + one model.
+type rawModel struct {
+	ID         string `yaml:"id"`
+	Vendor     string `yaml:"vendor"`
+	Type       string `yaml:"type"`
+	BaseURL    string `yaml:"base_url"`
+	AuthEnv    string `yaml:"auth_env"`
+	AuthScheme string `yaml:"auth_scheme"`
 }
 
-func LoadFile(path string) (*Catalog, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	return loadBytes(b)
-}
-
-func Load() (*Catalog, error) {
-	if path := os.Getenv("LLMGATE_CATALOG"); path != "" {
-		return LoadFile(path)
-	}
-	return LoadDefault()
-}
-
-type rawCatalog struct {
-	Vendor    string                 `yaml:"vendor"`
-	BaseURL   string                 `yaml:"base_url"`
-	AuthEnv   string                 `yaml:"auth_env"`
-	Protocols map[string]rawProtocol `yaml:"protocols"`
-	Aliases   map[string]rawAlias    `yaml:"aliases"`
-	Fallback  rawFallback            `yaml:"fallback"`
-	Defaults  Defaults               `yaml:"defaults"`
-}
-
+// rawAlias is the shape of fallback/<name>.yaml (excluding policy.yaml).
 type rawAlias struct {
+	Alias string   `yaml:"alias"`
 	Chain []string `yaml:"chain"`
 }
 
-type rawFallback struct {
-	OnKinds []string    `yaml:"on_kinds"`
-	Circuit rawCircuit  `yaml:"circuit"`
+// rawPolicy is the shape of fallback/policy.yaml — global routing policy
+// plus defaults that don't belong to any single alias.
+type rawPolicy struct {
+	OnKinds  []string   `yaml:"on_kinds"`
+	Circuit  rawCircuit `yaml:"circuit"`
+	Defaults Defaults   `yaml:"defaults"`
 }
 
 type rawCircuit struct {
@@ -105,99 +114,189 @@ type rawCircuit struct {
 	OpenDuration   time.Duration `yaml:"open_duration"`
 }
 
-type rawProtocol struct {
-	AuthScheme   string            `yaml:"auth_scheme"`
-	ExtraHeaders map[string]string `yaml:"extra_headers"`
-	Models       []rawModel        `yaml:"models"`
+// LoadDir reads a catalog from the given directory on disk. The directory
+// must contain a models/ subdirectory (at minimum); fallback/ is optional.
+func LoadDir(dir string) (*Catalog, error) {
+	return loadFS(os.DirFS(dir))
 }
 
-type rawModel struct {
-	ID           string         `yaml:"id"`
-	Capabilities map[string]any `yaml:"capabilities"`
-	Defaults     map[string]any `yaml:"defaults"`
+// LoadDefault reads the catalog embedded at build time under default/.
+// Used when LLMGATE_CATALOG is unset.
+func LoadDefault() (*Catalog, error) {
+	sub, err := fs.Sub(defaultFS, "default")
+	if err != nil {
+		return nil, fmt.Errorf("catalog: open embedded default: %w", err)
+	}
+	return loadFS(sub)
 }
 
-func loadBytes(b []byte) (*Catalog, error) {
-	var raw rawCatalog
-	if err := yaml.Unmarshal(b, &raw); err != nil {
-		return nil, err
+// Load returns the catalog pointed to by LLMGATE_CATALOG (a directory
+// path) or the embedded default if the env is unset.
+func Load() (*Catalog, error) {
+	if dir := os.Getenv("LLMGATE_CATALOG"); dir != "" {
+		return LoadDir(dir)
 	}
+	return LoadDefault()
+}
 
-	apiKey := os.Getenv(raw.AuthEnv)
-	if apiKey == "" {
-		return nil, fmt.Errorf("catalog: env %s required for vendor %s is unset", raw.AuthEnv, raw.Vendor)
-	}
-
+func loadFS(fsys fs.FS) (*Catalog, error) {
 	cat := &Catalog{
 		Endpoints: make(map[string]*Endpoint),
 		Models:    make(map[string]*Model),
-		Defaults:  raw.Defaults,
+		Aliases:   make(map[string]*Alias),
 	}
 
-	for protocol, p := range raw.Protocols {
-		endpointName := raw.Vendor + "-" + protocol
-		cat.Endpoints[endpointName] = &Endpoint{
-			Name:         endpointName,
-			Vendor:       raw.Vendor,
-			BaseURL:      raw.BaseURL,
-			APIKey:       apiKey,
-			Protocol:     protocol,
-			AuthScheme:   p.AuthScheme,
-			ExtraHeaders: copyStringMap(p.ExtraHeaders),
+	if err := walkYAML(fsys, "models", func(name string, data []byte) error {
+		var m rawModel
+		if err := yaml.Unmarshal(data, &m); err != nil {
+			return fmt.Errorf("models/%s: %w", name, err)
 		}
-
-		for _, m := range p.Models {
-			key := strings.ToLower(m.ID)
-			if _, exists := cat.Models[key]; exists {
-				return nil, fmt.Errorf("catalog: duplicate model id %q", m.ID)
-			}
-			cat.Models[key] = &Model{
-				ID:           m.ID,
-				Endpoint:     endpointName,
-				Capabilities: copyAnyMap(m.Capabilities),
-				Defaults:     copyAnyMap(m.Defaults),
-			}
-		}
+		return registerModel(cat, m)
+	}); err != nil {
+		return nil, err
 	}
-
 	if len(cat.Models) == 0 {
-		return nil, fmt.Errorf("catalog: no models declared")
+		return nil, fmt.Errorf("catalog: no models loaded from models/")
 	}
+
+	var policy rawPolicy
+	havePolicy := false
+	if err := walkYAMLOptional(fsys, "fallback", func(name string, data []byte) error {
+		if name == "policy.yaml" || name == "policy.yml" {
+			if err := yaml.Unmarshal(data, &policy); err != nil {
+				return fmt.Errorf("fallback/%s: %w", name, err)
+			}
+			havePolicy = true
+			return nil
+		}
+		var a rawAlias
+		if err := yaml.Unmarshal(data, &a); err != nil {
+			return fmt.Errorf("fallback/%s: %w", name, err)
+		}
+		return registerAlias(cat, a)
+	}); err != nil {
+		return nil, err
+	}
+
+	if havePolicy {
+		cat.Fallback = FallbackPolicy{
+			OnKinds:         append([]string(nil), policy.OnKinds...),
+			CircuitFailures: policy.Circuit.FailuresToOpen,
+			CircuitOpen:     policy.Circuit.OpenDuration,
+		}
+		cat.Defaults = policy.Defaults
+	}
+
 	if cat.Defaults.Model != "" {
 		if _, ok := cat.Models[strings.ToLower(cat.Defaults.Model)]; !ok {
 			return nil, fmt.Errorf("catalog: defaults.model %q references unknown model", cat.Defaults.Model)
 		}
 	}
-
-	if len(raw.Aliases) > 0 {
-		cat.Aliases = make(map[string]*Alias, len(raw.Aliases))
-		for name, ra := range raw.Aliases {
-			key := strings.ToLower(name)
-			if _, exists := cat.Models[key]; exists {
-				return nil, fmt.Errorf("catalog: alias %q collides with model id of the same name", name)
+	for _, a := range cat.Aliases {
+		for _, m := range a.Chain {
+			if _, ok := cat.Models[strings.ToLower(m)]; !ok {
+				return nil, fmt.Errorf("catalog: alias %q references unknown model %q", a.Name, m)
 			}
-			if _, exists := cat.Aliases[key]; exists {
-				return nil, fmt.Errorf("catalog: duplicate alias %q", name)
-			}
-			if len(ra.Chain) == 0 {
-				return nil, fmt.Errorf("catalog: alias %q has empty chain", name)
-			}
-			for _, m := range ra.Chain {
-				if _, ok := cat.Models[strings.ToLower(m)]; !ok {
-					return nil, fmt.Errorf("catalog: alias %q references unknown model %q", name, m)
-				}
-			}
-			cat.Aliases[key] = &Alias{Name: name, Chain: append([]string(nil), ra.Chain...)}
 		}
 	}
 
-	cat.Fallback = FallbackPolicy{
-		OnKinds:         append([]string(nil), raw.Fallback.OnKinds...),
-		CircuitFailures: raw.Fallback.Circuit.FailuresToOpen,
-		CircuitOpen:     raw.Fallback.Circuit.OpenDuration,
+	return cat, nil
+}
+
+// registerModel turns one models/*.yaml into one Endpoint + one Model.
+// They share the id so router lookups stay 1:1; this also makes "same
+// vendor model, different auth_env" trivially work as two distinct
+// endpoints.
+func registerModel(cat *Catalog, m rawModel) error {
+	if m.ID == "" {
+		return fmt.Errorf("model: id is required")
+	}
+	if m.Vendor == "" || m.Type == "" || m.BaseURL == "" || m.AuthEnv == "" {
+		return fmt.Errorf("model %q: vendor / type / base_url / auth_env are all required", m.ID)
+	}
+	apiKey := os.Getenv(m.AuthEnv)
+	if apiKey == "" {
+		return fmt.Errorf("model %q: env %s is unset", m.ID, m.AuthEnv)
 	}
 
-	return cat, nil
+	key := strings.ToLower(m.ID)
+	if _, exists := cat.Models[key]; exists {
+		return fmt.Errorf("catalog: duplicate model id %q", m.ID)
+	}
+	cat.Endpoints[key] = &Endpoint{
+		Name:       m.ID,
+		Vendor:     m.Vendor,
+		BaseURL:    m.BaseURL,
+		APIKey:     apiKey,
+		Protocol:   m.Type,
+		AuthScheme: m.AuthScheme,
+	}
+	cat.Models[key] = &Model{
+		ID:       m.ID,
+		Endpoint: m.ID,
+	}
+	return nil
+}
+
+func registerAlias(cat *Catalog, a rawAlias) error {
+	if a.Alias == "" {
+		return fmt.Errorf("alias: name (alias field) is required")
+	}
+	if len(a.Chain) == 0 {
+		return fmt.Errorf("alias %q: empty chain", a.Alias)
+	}
+	key := strings.ToLower(a.Alias)
+	if _, exists := cat.Models[key]; exists {
+		return fmt.Errorf("catalog: alias %q collides with model id of the same name", a.Alias)
+	}
+	if _, exists := cat.Aliases[key]; exists {
+		return fmt.Errorf("catalog: duplicate alias %q", a.Alias)
+	}
+	cat.Aliases[key] = &Alias{
+		Name:  a.Alias,
+		Chain: append([]string(nil), a.Chain...),
+	}
+	return nil
+}
+
+// walkYAML iterates *.yaml / *.yml files in dir. Returns an error if the
+// directory is missing — used for required dirs like models/.
+func walkYAML(fsys fs.FS, dir string, fn func(name string, data []byte) error) error {
+	entries, err := fs.ReadDir(fsys, dir)
+	if err != nil {
+		return fmt.Errorf("catalog: read %s: %w", dir, err)
+	}
+	return walkEntries(fsys, dir, entries, fn)
+}
+
+// walkYAMLOptional is walkYAML but treats a missing dir as empty (no
+// aliases / no policy is OK).
+func walkYAMLOptional(fsys fs.FS, dir string, fn func(name string, data []byte) error) error {
+	entries, err := fs.ReadDir(fsys, dir)
+	if err != nil {
+		return nil
+	}
+	return walkEntries(fsys, dir, entries, fn)
+}
+
+func walkEntries(fsys fs.FS, dir string, entries []fs.DirEntry, fn func(name string, data []byte) error) error {
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(name, ".yaml") && !strings.HasSuffix(name, ".yml") {
+			continue
+		}
+		data, err := fs.ReadFile(fsys, path.Join(dir, name))
+		if err != nil {
+			return fmt.Errorf("catalog: read %s/%s: %w", dir, name, err)
+		}
+		if err := fn(name, data); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ResolveAlias returns the ordered chain for the given name. If name is an
@@ -212,26 +311,4 @@ func (c *Catalog) ResolveAlias(name string) []string {
 		return append([]string(nil), alias.Chain...)
 	}
 	return []string{name}
-}
-
-func copyStringMap(in map[string]string) map[string]string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
-}
-
-func copyAnyMap(in map[string]any) map[string]any {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]any, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
 }

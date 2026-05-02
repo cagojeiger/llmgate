@@ -1,0 +1,6 @@
+id: deepseek-v4-pro
+vendor: opencode
+type: openai
+base_url: https://opencode.ai/zen/go/v1
+auth_env: LLMGATE_OPENCODE_API_KEY
+auth_scheme: bearer

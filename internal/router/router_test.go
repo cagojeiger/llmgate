@@ -291,24 +291,7 @@ func fallbackCatalog() *catalog.Catalog {
 }
 
 func stubCatalog() *catalog.Catalog {
-	endpoints := map[string]*catalog.Endpoint{
-		"opencode-openai": {
-			Name:       "opencode-openai",
-			Vendor:     "opencode",
-			BaseURL:    "http://example.test/openai",
-			APIKey:     "key",
-			Protocol:   "openai",
-			AuthScheme: "bearer",
-		},
-		"opencode-anthropic": {
-			Name:       "opencode-anthropic",
-			Vendor:     "opencode",
-			BaseURL:    "http://example.test/anthropic",
-			APIKey:     "key",
-			Protocol:   "anthropic",
-			AuthScheme: "x-api-key",
-		},
-	}
+	endpoints := make(map[string]*catalog.Endpoint)
 	models := make(map[string]*catalog.Model)
 	for _, id := range []string{
 		"glm-5.1",
@@ -324,10 +307,26 @@ func stubCatalog() *catalog.Catalog {
 		"qwen3.6-plus",
 		"qwen3.5-plus",
 	} {
-		models[id] = &catalog.Model{ID: id, Endpoint: "opencode-openai"}
+		endpoints[id] = &catalog.Endpoint{
+			Name:       id,
+			Vendor:     "opencode",
+			BaseURL:    "http://example.test/openai",
+			APIKey:     "key",
+			Protocol:   "openai",
+			AuthScheme: "bearer",
+		}
+		models[id] = &catalog.Model{ID: id, Endpoint: id}
 	}
 	for _, id := range []string{"minimax-m2.7", "minimax-m2.5"} {
-		models[id] = &catalog.Model{ID: id, Endpoint: "opencode-anthropic"}
+		endpoints[id] = &catalog.Endpoint{
+			Name:       id,
+			Vendor:     "opencode",
+			BaseURL:    "http://example.test/anthropic",
+			APIKey:     "key",
+			Protocol:   "anthropic",
+			AuthScheme: "x-api-key",
+		}
+		models[id] = &catalog.Model{ID: id, Endpoint: id}
 	}
 	return &catalog.Catalog{
 		Endpoints: endpoints,

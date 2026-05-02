@@ -9,8 +9,8 @@ dead upstreams.
 ```
 cmd/llmgate/                  HTTP gateway entrypoint
 catalog/                      data only — operator-facing yaml directory
-  models/<id>.yaml            one yaml per endpoint (id + vendor + type +
-                              base_url + auth_env)
+  models/<id>.yaml            one yaml per model (id + vendor + protocol +
+                              base_url + auth_env + auth_scheme)
   aliases/<name>.yaml         one yaml per alias (alias + chain)
 internal/catalog/             loader package (yaml -> Catalog struct)
 internal/config/              env-driven Server config (incl. router tuning)
@@ -41,26 +41,30 @@ curl http://localhost:8080/v1/chat/completions \
   -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}'
 ```
 
-Aliases work the same way (`coder`, `reasoning`, `cheap-fast`):
+Aliases work the same way (`cheap`, `worker`, `smart`, `planner`):
 
 ```bash
 curl http://localhost:8080/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -d '{"model":"coder","messages":[{"role":"user","content":"hi"}]}'
+  -d '{"model":"smart","messages":[{"role":"user","content":"hi"}]}'
 ```
 
-The gateway resolves the alias via `catalog/default/fallback/coder.yaml` and
-walks the chain on fallback-eligible errors.
+The gateway resolves the alias via `catalog/aliases/smart.yaml` and walks
+the chain on fallback-eligible errors. Alias intent / chain rationale lives
+in yaml comments — `description` is not a data field. See
+`catalog/aliases/example.yaml.example` for the template.
 
 ## Catalog overrides
 
 `make run` reads from `./catalog` by default (relative to cwd, so always
 run from the repo root). Set `LLMGATE_CATALOG=/path/to/dir` to point at
 an external directory instead. The directory must contain `models/` (one
-yaml per endpoint) and may contain `aliases/`. Router policy
-(`LLMGATE_FALLBACK_ON`, `LLMGATE_CIRCUIT_FAILURES`,
-`LLMGATE_CIRCUIT_OPEN_DURATION`) lives in env, not yaml.
-Hot-reload is not supported — change the catalog and restart.
+yaml per model) and may contain `aliases/`. Yaml is parsed strictly —
+unknown fields (typos, stale `type:` / `specs:` / `notes:` blocks) fail
+boot. Use `models/example.yaml.example` and `aliases/example.yaml.example`
+as templates. Router policy (`LLMGATE_FALLBACK_ON`,
+`LLMGATE_CIRCUIT_FAILURES`, `LLMGATE_CIRCUIT_OPEN_DURATION`) lives in env,
+not yaml. Hot-reload is not supported — change the catalog and restart.
 
 ## Run in a container
 

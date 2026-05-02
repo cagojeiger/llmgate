@@ -1,6 +1,7 @@
+# 긴 컨텍스트 + vision, k2.6 의 폴백
 id: kimi-k2.5
 vendor: opencode
-type: openai
+protocol: openai
 base_url: https://opencode.ai/zen/go/v1
 auth_env: LLMGATE_OPENCODE_API_KEY
 auth_scheme: bearer

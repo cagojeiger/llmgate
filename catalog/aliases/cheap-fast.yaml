@@ -1,4 +1,0 @@
-alias: cheap-fast
-chain:
-  - deepseek-v4-flash
-  - glm-5.1

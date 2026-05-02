@@ -1,0 +1,13 @@
+# llmgate 모델 등록 템플릿. 이 파일은 .yaml 이 아니므로 로더가 무시.
+# 새 모델 추가 시 이 파일을 catalog/models/<id>.yaml 로 복사해 채우면 됨.
+#
+# 운영자 메모(설명, 가격, modality 같은 컨텍스트)는 이렇게 yaml 코멘트로
+# 두는 게 원칙 — gateway 가 데이터로 읽지 않으므로 형식 자유. 코드 변경 없이
+# 자유롭게 늘리고 줄여도 됨.
+
+id: example-model            # 호출 시 사용할 식별자. catalog 안에서 unique.
+vendor: example-vendor       # 운영자 / audit / log 라벨.
+protocol: openai             # openai | anthropic 둘 중 하나.
+base_url: https://api.example.com/v1
+auth_env: LLMGATE_EXAMPLE_API_KEY  # env 변수 *이름* (값은 부팅 시 factory 가 읽음).
+auth_scheme: bearer          # bearer | x-api-key 둘 중 하나.

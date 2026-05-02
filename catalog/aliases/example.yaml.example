@@ -1,0 +1,13 @@
+# llmgate 별명 등록 템플릿. 이 파일은 .yaml 이 아니므로 로더가 무시.
+# 새 별명 추가 시 이 파일을 catalog/aliases/<name>.yaml 로 복사해 채우면 됨.
+#
+# 별명의 의도, 사용 케이스, 우선순위 근거는 이렇게 코멘트로 두면 됨.
+# chain 은 위에서부터 시도되며, 폴백 가능한 에러일 때만 다음 후보로 넘어간다.
+# raw model id 로 호출하면 chain 길이가 1 이라 폴백이 일어나지 않는다 —
+# 그래서 폴백은 *별명 호출에만* 의미가 있다.
+
+alias: example-alias         # 호출 시 model 자리에 사용할 이름. 모델 id 와 충돌 X.
+chain:                       # 길이 ≥ 1, 중복 X, 모든 원소가 등록된 모델 id.
+  - first-model-id
+  - second-model-id
+  - third-model-id

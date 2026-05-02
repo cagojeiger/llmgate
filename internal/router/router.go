@@ -19,7 +19,10 @@ import (
 	"llmgate/internal/provider"
 )
 
-type AdapterFactory func(*catalog.Endpoint) (provider.Provider, error)
+// AdapterFactory builds one Provider for one Model. The factory resolves
+// the credential env (m.AuthEnv) at call time and passes the value into the
+// adapter — keeping env reads out of the catalog package.
+type AdapterFactory func(*catalog.Model) (provider.Provider, error)
 
 // FallbackPolicy is the runtime tuning the router applies to every
 // alias chain. It does not live in catalog yaml because it has nothing
@@ -111,24 +114,15 @@ func NewRouter(cat *catalog.Catalog, factories map[string]AdapterFactory, policy
 		log = slog.Default()
 	}
 
-	byEndpoint := make(map[string]provider.Provider, len(cat.Endpoints))
-	for _, ep := range cat.Endpoints {
-		factory, ok := factories[ep.Protocol]
-		if !ok {
-			return nil, fmt.Errorf("router: no adapter for protocol %q endpoint %q", ep.Protocol, ep.Name)
-		}
-		p, err := factory(ep)
-		if err != nil {
-			return nil, fmt.Errorf("router: build adapter for endpoint %q protocol %q: %w", ep.Name, ep.Protocol, err)
-		}
-		byEndpoint[strings.ToLower(ep.Name)] = p
-	}
-
 	byModel := make(map[string]provider.Provider, len(cat.Models))
-	for modelID, model := range cat.Models {
-		p, ok := byEndpoint[strings.ToLower(model.Endpoint)]
+	for modelID, m := range cat.Models {
+		factory, ok := factories[m.Protocol]
 		if !ok {
-			return nil, fmt.Errorf("router: model %q references unavailable endpoint %q", modelID, model.Endpoint)
+			return nil, fmt.Errorf("router: no adapter for protocol %q (model %q)", m.Protocol, m.ID)
+		}
+		p, err := factory(m)
+		if err != nil {
+			return nil, fmt.Errorf("router: build adapter for model %q protocol %q: %w", m.ID, m.Protocol, err)
 		}
 		byModel[strings.ToLower(modelID)] = p
 	}

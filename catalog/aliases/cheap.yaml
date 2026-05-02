@@ -1,0 +1,8 @@
+# 잡일 — 라우팅 / 의도 분류 / 짧은 요약 / JSON 변환 / 검색 쿼리 / 문서 chunk 요약.
+# 기준: 가격, 처리량, 형식 일관성. 정밀한 추론은 다른 별명 사용.
+alias: cheap
+chain:
+  - deepseek-v4-flash
+  - minimax-m2.5
+  - qwen3.5-plus
+  - minimax-m2.7

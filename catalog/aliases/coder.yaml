@@ -1,6 +1,0 @@
-alias: coder
-chain:
-  - deepseek-v4-pro
-  - deepseek-v4-flash
-  - kimi-k2.6
-  - glm-5.1

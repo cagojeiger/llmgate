@@ -1,0 +1,9 @@
+# 작업 — 코드 작성 / 리팩터링 / 테스트 작성 / 문서 작성 / 로그 분석 / 후보 생성.
+# 기준: 코드 품질, 작성 능력, 실작업 수행력.
+alias: worker
+chain:
+  - qwen3.6-plus
+  - minimax-m2.7
+  - kimi-k2.6
+  - glm-5
+  - kimi-k2.5

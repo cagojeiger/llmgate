@@ -1,6 +1,7 @@
+# Anthropic 프로토콜, 최신 + 빠른 응답
 id: minimax-m2.7
 vendor: opencode
-type: anthropic
+protocol: anthropic
 base_url: https://opencode.ai/zen/go/v1
 auth_env: LLMGATE_OPENCODE_API_KEY
 auth_scheme: x-api-key

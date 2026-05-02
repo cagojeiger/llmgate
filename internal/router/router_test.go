@@ -28,8 +28,8 @@ var testPolicy = FallbackPolicy{
 }
 
 func TestRouter_MissingProtocolFactoryFailsFast(t *testing.T) {
-	_, err := NewRouter(stubCatalog(), map[string]AdapterFactory{
-		"openai": func(ep *catalog.Endpoint) (provider.Provider, error) {
+	_, err := NewRouter(stubCatalog(t), map[string]AdapterFactory{
+		"openai": func(*catalog.Model) (provider.Provider, error) {
 			return &fakeProvider{name: "openai"}, nil
 		},
 	}, testPolicy, slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -42,11 +42,11 @@ func TestRouter_MissingProtocolFactoryFailsFast(t *testing.T) {
 }
 
 func TestRouter_Both(t *testing.T) {
-	router, err := NewRouter(stubCatalog(), map[string]AdapterFactory{
-		"openai": func(ep *catalog.Endpoint) (provider.Provider, error) {
+	router, err := NewRouter(stubCatalog(t), map[string]AdapterFactory{
+		"openai": func(*catalog.Model) (provider.Provider, error) {
 			return &fakeProvider{name: "openai"}, nil
 		},
-		"anthropic": func(ep *catalog.Endpoint) (provider.Provider, error) {
+		"anthropic": func(*catalog.Model) (provider.Provider, error) {
 			return &fakeProvider{name: "anthropic"}, nil
 		},
 	}, testPolicy, slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -59,11 +59,11 @@ func TestRouter_Both(t *testing.T) {
 }
 
 func TestRouter_UnknownModel(t *testing.T) {
-	router, err := NewRouter(stubCatalog(), map[string]AdapterFactory{
-		"openai": func(ep *catalog.Endpoint) (provider.Provider, error) {
+	router, err := NewRouter(stubCatalog(t), map[string]AdapterFactory{
+		"openai": func(*catalog.Model) (provider.Provider, error) {
 			return &fakeProvider{name: "openai"}, nil
 		},
-		"anthropic": func(ep *catalog.Endpoint) (provider.Provider, error) {
+		"anthropic": func(*catalog.Model) (provider.Provider, error) {
 			return &fakeProvider{name: "anthropic"}, nil
 		},
 	}, testPolicy, slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -90,11 +90,11 @@ func TestRouter_UnknownModel(t *testing.T) {
 func TestRouter_Dispatch(t *testing.T) {
 	openAI := &fakeProvider{name: "openai"}
 	anthropic := &fakeProvider{name: "anthropic"}
-	router, err := NewRouter(stubCatalog(), map[string]AdapterFactory{
-		"openai": func(ep *catalog.Endpoint) (provider.Provider, error) {
+	router, err := NewRouter(stubCatalog(t), map[string]AdapterFactory{
+		"openai": func(*catalog.Model) (provider.Provider, error) {
 			return openAI, nil
 		},
-		"anthropic": func(ep *catalog.Endpoint) (provider.Provider, error) {
+		"anthropic": func(*catalog.Model) (provider.Provider, error) {
 			return anthropic, nil
 		},
 	}, testPolicy, slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -131,7 +131,7 @@ func TestRouter_Dispatch(t *testing.T) {
 
 func TestRouter_AliasFallback_PrimarySucceeds(t *testing.T) {
 	openAI := &fakeProvider{name: "openai"}
-	router := mustRouter(t, fallbackCatalog(), openAI, nil)
+	router := mustRouter(t, fallbackCatalog(t), openAI, nil)
 
 	result, err := router.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "hi"}}})
 	if err != nil {
@@ -160,7 +160,7 @@ func TestRouter_AliasFallback_RetriesOnEligibleError(t *testing.T) {
 	openAI.errors = map[string]*provider.Error{
 		"deepseek-v4-pro": {Kind: provider.KindRateLimit, Message: "throttled", StatusCode: 429},
 	}
-	router := mustRouter(t, fallbackCatalog(), openAI, nil)
+	router := mustRouter(t, fallbackCatalog(t), openAI, nil)
 
 	result, err := router.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "hi"}}})
 	if err != nil {
@@ -188,7 +188,7 @@ func TestRouter_StreamAliasFallback_RetriesOnEligiblePreStreamError(t *testing.T
 	openAI.streamErrors = map[string]*provider.Error{
 		"deepseek-v4-pro": {Kind: provider.KindRateLimit, Message: "stream throttled", StatusCode: 429},
 	}
-	router := mustRouter(t, fallbackCatalog(), openAI, nil)
+	router := mustRouter(t, fallbackCatalog(t), openAI, nil)
 
 	result, err := router.CompleteStream(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "hi"}}})
 	if err != nil {
@@ -220,7 +220,7 @@ func TestRouter_AliasFallback_BadRequestStopsImmediately(t *testing.T) {
 	openAI.errors = map[string]*provider.Error{
 		"deepseek-v4-pro": {Kind: provider.KindBadRequest, Message: "malformed"},
 	}
-	router := mustRouter(t, fallbackCatalog(), openAI, nil)
+	router := mustRouter(t, fallbackCatalog(t), openAI, nil)
 
 	result, err := router.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "hi"}}})
 	if err == nil {
@@ -243,7 +243,7 @@ func TestRouter_StreamAliasFallback_BadRequestStopsImmediately(t *testing.T) {
 	openAI.streamErrors = map[string]*provider.Error{
 		"deepseek-v4-pro": {Kind: provider.KindBadRequest, Message: "malformed stream"},
 	}
-	router := mustRouter(t, fallbackCatalog(), openAI, nil)
+	router := mustRouter(t, fallbackCatalog(t), openAI, nil)
 
 	result, err := router.CompleteStream(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "hi"}}})
 	if err == nil {
@@ -264,7 +264,7 @@ func TestRouter_StreamAliasFallback_BadRequestStopsImmediately(t *testing.T) {
 func TestRouter_AliasFallback_AllExhausted(t *testing.T) {
 	openAI := &fakeProvider{name: "openai"}
 	openAI.errorAll = &provider.Error{Kind: provider.KindUpstream, Message: "boom", StatusCode: 502}
-	router := mustRouter(t, fallbackCatalog(), openAI, nil)
+	router := mustRouter(t, fallbackCatalog(t), openAI, nil)
 
 	result, err := router.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "hi"}}})
 	if err == nil {
@@ -285,7 +285,7 @@ func TestRouter_StreamSkipsOpenCircuitModel(t *testing.T) {
 	openAI.errors = map[string]*provider.Error{
 		"deepseek-v4-pro": {Kind: provider.KindUpstream, Message: "boom"},
 	}
-	router := mustRouter(t, fallbackCatalog(), openAI, nil)
+	router := mustRouter(t, fallbackCatalog(t), openAI, nil)
 
 	for i := 0; i < 3; i++ {
 		_, err := router.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
@@ -314,7 +314,7 @@ func TestRouter_StreamPreStreamFailuresOpenCircuit(t *testing.T) {
 	openAI.streamErrors = map[string]*provider.Error{
 		"deepseek-v4-pro": {Kind: provider.KindUpstream, Message: "stream setup failed"},
 	}
-	router := mustRouter(t, fallbackCatalog(), openAI, nil)
+	router := mustRouter(t, fallbackCatalog(t), openAI, nil)
 
 	for i := 0; i < 3; i++ {
 		result, err := router.CompleteStream(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
@@ -351,7 +351,7 @@ func TestRouter_StreamStartTimeoutFallsBack(t *testing.T) {
 	}
 	policy := testPolicy
 	policy.StreamStartTimeout = time.Millisecond
-	router := mustRouterWithPolicy(t, fallbackCatalog(), openAI, nil, policy)
+	router := mustRouterWithPolicy(t, fallbackCatalog(t), openAI, nil, policy)
 
 	result, err := router.CompleteStream(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
 	if err != nil {
@@ -376,7 +376,7 @@ func TestRouter_CircuitOpensAfterRepeatedFailures(t *testing.T) {
 	openAI.errors = map[string]*provider.Error{
 		"deepseek-v4-pro": {Kind: provider.KindUpstream, Message: "boom"},
 	}
-	router := mustRouter(t, fallbackCatalog(), openAI, nil)
+	router := mustRouter(t, fallbackCatalog(t), openAI, nil)
 
 	for i := 0; i < 3; i++ {
 		_, err := router.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
@@ -493,7 +493,7 @@ func TestRouter_CompleteAttemptTimeoutFallsBack(t *testing.T) {
 	}
 	policy := testPolicy
 	policy.CompleteAttemptTimeout = time.Millisecond
-	router := mustRouterWithPolicy(t, fallbackCatalog(), openAI, nil, policy)
+	router := mustRouterWithPolicy(t, fallbackCatalog(t), openAI, nil, policy)
 
 	result, err := router.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
 	if err != nil {
@@ -520,7 +520,7 @@ func TestRouter_CompleteRequestTimeoutStopsChain(t *testing.T) {
 	policy := testPolicy
 	policy.CompleteRequestTimeout = time.Millisecond
 	policy.CompleteAttemptTimeout = time.Minute
-	router := mustRouterWithPolicy(t, fallbackCatalog(), openAI, nil, policy)
+	router := mustRouterWithPolicy(t, fallbackCatalog(t), openAI, nil, policy)
 
 	result, err := router.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
 	if err == nil {
@@ -540,7 +540,7 @@ func TestRouter_CompleteRequestTimeoutStopsChain(t *testing.T) {
 
 func TestRouter_RawModelStillWorks(t *testing.T) {
 	openAI := &fakeProvider{name: "openai"}
-	router := mustRouter(t, fallbackCatalog(), openAI, nil)
+	router := mustRouter(t, fallbackCatalog(t), openAI, nil)
 
 	result, err := router.Complete(context.Background(), &provider.Request{Model: "kimi-k2.6", Messages: []provider.Message{{Role: "user", Content: "hi"}}})
 	if err != nil {
@@ -559,12 +559,12 @@ func mustRouter(t *testing.T, cat *catalog.Catalog, openAI provider.Provider, an
 func mustRouterWithPolicy(t *testing.T, cat *catalog.Catalog, openAI provider.Provider, anth provider.Provider, policy FallbackPolicy) *Router {
 	t.Helper()
 	factories := map[string]AdapterFactory{
-		"openai": func(*catalog.Endpoint) (provider.Provider, error) { return openAI, nil },
+		"openai": func(*catalog.Model) (provider.Provider, error) { return openAI, nil },
 	}
 	if anth == nil {
 		anth = &fakeProvider{name: "anthropic"}
 	}
-	factories["anthropic"] = func(*catalog.Endpoint) (provider.Provider, error) { return anth, nil }
+	factories["anthropic"] = func(*catalog.Model) (provider.Provider, error) { return anth, nil }
 	r, err := NewRouter(cat, factories, policy, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
@@ -572,56 +572,47 @@ func mustRouterWithPolicy(t *testing.T, cat *catalog.Catalog, openAI provider.Pr
 	return r
 }
 
-func fallbackCatalog() *catalog.Catalog {
-	cat := stubCatalog()
+// fallbackCatalog mirrors stubCatalog with the addition of a "coder" alias
+// whose chain spans the openai-protocol models in priority order. Used by
+// every fallback / circuit-breaker test in this file so the chain shape is
+// shared across cases.
+func fallbackCatalog(t *testing.T) *catalog.Catalog {
+	cat := stubCatalog(t)
 	cat.Aliases = map[string]*catalog.Alias{
-		"coder": {Name: "coder", Chain: []string{"deepseek-v4-pro", "deepseek-v4-flash", "kimi-k2.6", "glm-5.1"}},
+		"coder": {Alias: "coder", Chain: []string{"deepseek-v4-pro", "deepseek-v4-flash", "kimi-k2.6", "glm-5.1"}},
 	}
 	return cat
 }
 
-func stubCatalog() *catalog.Catalog {
-	endpoints := make(map[string]*catalog.Endpoint)
-	models := make(map[string]*catalog.Model)
-	for _, id := range []string{
-		"glm-5.1",
-		"glm-5",
-		"kimi-k2.5",
-		"kimi-k2.6",
-		"deepseek-v4-pro",
-		"deepseek-v4-flash",
-		"mimo-v2-pro",
-		"mimo-v2-omni",
-		"mimo-v2.5-pro",
-		"mimo-v2.5",
-		"qwen3.6-plus",
-		"qwen3.5-plus",
-	} {
-		endpoints[id] = &catalog.Endpoint{
-			Name:       id,
-			Vendor:     "opencode",
-			BaseURL:    "http://example.test/openai",
-			APIKey:     "key",
-			Protocol:   "openai",
-			AuthScheme: "bearer",
+// stubCatalog builds a Catalog directly (no filesystem round-trip) so router
+// tests stay focused on dispatch / fallback / breaker behavior. The real
+// loader is exercised in catalog_test.go.
+func stubCatalog(t *testing.T) *catalog.Catalog {
+	t.Helper()
+	cat := &catalog.Catalog{
+		Models:  make(map[string]*catalog.Model),
+		Aliases: make(map[string]*catalog.Alias),
+	}
+	openaiIDs := []string{
+		"glm-5.1", "glm-5",
+		"kimi-k2.5", "kimi-k2.6",
+		"deepseek-v4-pro", "deepseek-v4-flash",
+		"mimo-v2-pro", "mimo-v2-omni", "mimo-v2.5-pro", "mimo-v2.5",
+		"qwen3.6-plus", "qwen3.5-plus",
+	}
+	for _, id := range openaiIDs {
+		cat.Models[id] = &catalog.Model{
+			ID: id, Vendor: "opencode", Protocol: "openai",
+			BaseURL: "http://example.test/v1", AuthEnv: "TEST_API_KEY", AuthScheme: "bearer",
 		}
-		models[id] = &catalog.Model{ID: id, Endpoint: id}
 	}
 	for _, id := range []string{"minimax-m2.7", "minimax-m2.5"} {
-		endpoints[id] = &catalog.Endpoint{
-			Name:       id,
-			Vendor:     "opencode",
-			BaseURL:    "http://example.test/anthropic",
-			APIKey:     "key",
-			Protocol:   "anthropic",
-			AuthScheme: "x-api-key",
+		cat.Models[id] = &catalog.Model{
+			ID: id, Vendor: "opencode", Protocol: "anthropic",
+			BaseURL: "http://example.test/v1", AuthEnv: "TEST_API_KEY", AuthScheme: "x-api-key",
 		}
-		models[id] = &catalog.Model{ID: id, Endpoint: id}
 	}
-	return &catalog.Catalog{
-		Endpoints: endpoints,
-		Models:    models,
-	}
+	return cat
 }
 
 type fakeProvider struct {

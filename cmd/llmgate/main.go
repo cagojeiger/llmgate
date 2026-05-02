@@ -48,7 +48,6 @@ func run() error {
 		return fmt.Errorf("load catalog: %w", err)
 	}
 	logger.Info("catalog loaded",
-		slog.Int("endpoints", len(cat.Endpoints)),
 		slog.Int("models", len(cat.Models)),
 		slog.Int("aliases", len(cat.Aliases)),
 	)
@@ -112,24 +111,41 @@ func run() error {
 	return nil
 }
 
-func openaiFactory(ep *catalog.Endpoint) (provider.Provider, error) {
+func openaiFactory(m *catalog.Model) (provider.Provider, error) {
+	apiKey, err := readAuthKey(m)
+	if err != nil {
+		return nil, err
+	}
 	return openai.New(openai.Config{
-		BaseURL:      ep.BaseURL,
-		APIKey:       ep.APIKey,
-		AuthScheme:   ep.AuthScheme,
-		ExtraHeaders: ep.ExtraHeaders,
-		Name:         ep.Vendor,
+		BaseURL:    m.BaseURL,
+		APIKey:     apiKey,
+		AuthScheme: m.AuthScheme,
+		Name:       m.Vendor,
 	})
 }
 
-func anthropicFactory(ep *catalog.Endpoint) (provider.Provider, error) {
+func anthropicFactory(m *catalog.Model) (provider.Provider, error) {
+	apiKey, err := readAuthKey(m)
+	if err != nil {
+		return nil, err
+	}
 	return anthropic.New(anthropic.Config{
-		BaseURL:      ep.BaseURL,
-		APIKey:       ep.APIKey,
-		AuthScheme:   ep.AuthScheme,
-		ExtraHeaders: ep.ExtraHeaders,
-		Name:         ep.Vendor,
+		BaseURL:    m.BaseURL,
+		APIKey:     apiKey,
+		AuthScheme: m.AuthScheme,
+		Name:       m.Vendor,
 	})
+}
+
+// readAuthKey resolves the credential env var the catalog declared for this
+// model. The catalog only stores the env *name*; the value is read here so
+// catalog parsing stays a pure file → struct operation.
+func readAuthKey(m *catalog.Model) (string, error) {
+	v := os.Getenv(m.AuthEnv)
+	if v == "" {
+		return "", fmt.Errorf("model %q: env %s is unset", m.ID, m.AuthEnv)
+	}
+	return v, nil
 }
 
 func shutdown(srv *http.Server, cfg *config.Server, log *slog.Logger) {

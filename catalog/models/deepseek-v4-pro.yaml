@@ -1,6 +1,7 @@
+# 최강 reasoning, 복잡한 문제 해결에 최적
 id: deepseek-v4-pro
 vendor: opencode
-type: openai
+protocol: openai
 base_url: https://opencode.ai/zen/go/v1
 auth_env: LLMGATE_OPENCODE_API_KEY
 auth_scheme: bearer

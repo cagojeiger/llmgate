@@ -8,6 +8,7 @@ package router
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -95,26 +96,20 @@ func NewRouter(cat *catalog.Catalog, factories map[string]AdapterFactory, policy
 	for _, ep := range cat.Endpoints {
 		factory, ok := factories[ep.Protocol]
 		if !ok {
-			log.Warn("no adapter for protocol", slog.String("protocol", ep.Protocol), slog.String("endpoint", ep.Name))
-			continue
+			return nil, fmt.Errorf("router: no adapter for protocol %q endpoint %q", ep.Protocol, ep.Name)
 		}
 		p, err := factory(ep)
 		if err != nil {
-			log.Warn("adapter factory failed",
-				slog.String("protocol", ep.Protocol),
-				slog.String("endpoint", ep.Name),
-				slog.String("err", err.Error()),
-			)
-			continue
+			return nil, fmt.Errorf("router: build adapter for endpoint %q protocol %q: %w", ep.Name, ep.Protocol, err)
 		}
-		byEndpoint[ep.Name] = p
+		byEndpoint[strings.ToLower(ep.Name)] = p
 	}
 
 	byModel := make(map[string]provider.Provider, len(cat.Models))
 	for modelID, model := range cat.Models {
-		p, ok := byEndpoint[model.Endpoint]
+		p, ok := byEndpoint[strings.ToLower(model.Endpoint)]
 		if !ok {
-			continue
+			return nil, fmt.Errorf("router: model %q references unavailable endpoint %q", modelID, model.Endpoint)
 		}
 		byModel[strings.ToLower(modelID)] = p
 	}

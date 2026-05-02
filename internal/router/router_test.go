@@ -1,7 +1,6 @@
 package router
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -23,26 +22,17 @@ var testPolicy = FallbackPolicy{
 	CircuitOpen:     30 * time.Second,
 }
 
-func TestRouter_OpenAIOnly(t *testing.T) {
-	var logs bytes.Buffer
-	openAI := &fakeProvider{name: "openai"}
-
-	router, err := NewRouter(stubCatalog(), map[string]AdapterFactory{
+func TestRouter_MissingProtocolFactoryFailsFast(t *testing.T) {
+	_, err := NewRouter(stubCatalog(), map[string]AdapterFactory{
 		"openai": func(ep *catalog.Endpoint) (provider.Provider, error) {
-			return openAI, nil
+			return &fakeProvider{name: "openai"}, nil
 		},
-	}, testPolicy, slog.New(slog.NewTextHandler(&logs, nil)))
-	if err != nil {
-		t.Fatalf("NewRouter() error = %v", err)
+	}, testPolicy, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err == nil {
+		t.Fatal("NewRouter() error = nil, want missing protocol factory error")
 	}
-	if got := len(router.byModel); got != 12 {
-		t.Fatalf("len(byModel) = %d, want 12", got)
-	}
-	if _, ok := router.byModel["minimax-m2.7"]; ok {
-		t.Fatalf("anthropic model registered without anthropic factory")
-	}
-	if !strings.Contains(logs.String(), "no adapter for protocol") {
-		t.Fatalf("logs = %q, want missing protocol warning", logs.String())
+	if !strings.Contains(err.Error(), `no adapter for protocol "anthropic"`) {
+		t.Fatalf("NewRouter() error = %q, want missing anthropic protocol factory", err.Error())
 	}
 }
 
@@ -67,6 +57,9 @@ func TestRouter_UnknownModel(t *testing.T) {
 	router, err := NewRouter(stubCatalog(), map[string]AdapterFactory{
 		"openai": func(ep *catalog.Endpoint) (provider.Provider, error) {
 			return &fakeProvider{name: "openai"}, nil
+		},
+		"anthropic": func(ep *catalog.Endpoint) (provider.Provider, error) {
+			return &fakeProvider{name: "anthropic"}, nil
 		},
 	}, testPolicy, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
@@ -276,9 +269,10 @@ func mustRouter(t *testing.T, cat *catalog.Catalog, openAI provider.Provider, an
 	factories := map[string]AdapterFactory{
 		"openai": func(*catalog.Endpoint) (provider.Provider, error) { return openAI, nil },
 	}
-	if anth != nil {
-		factories["anthropic"] = func(*catalog.Endpoint) (provider.Provider, error) { return anth, nil }
+	if anth == nil {
+		anth = &fakeProvider{name: "anthropic"}
 	}
+	factories["anthropic"] = func(*catalog.Endpoint) (provider.Provider, error) { return anth, nil }
 	r, err := NewRouter(cat, factories, testPolicy, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)

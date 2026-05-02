@@ -110,7 +110,7 @@ sequenceDiagram
     H->>Au: Record (fact)
 ```
 
-스트리밍 요청은 V1 에서 폴백하지 않는다. Router 가 chain 의 첫 후보로만 dispatch 하고, end-of-stream 에서 `Stream.Summary()` 로 usage / finish reason 을 audit 에 finalize 한다.
+스트리밍 요청은 stream 시작 전 실패에 한해 폴백한다. 아직 SSE header / chunk 가 client 에게 나가지 않았기 때문이다. stream 이 열린 뒤의 mid-stream 실패는 partial output 이 이미 전달됐을 수 있어 폴백하지 않는다. end-of-stream 에서 `Stream.Summary()` 로 usage / finish reason 을 audit 에 finalize 한다.
 
 ## 상태가 어디 사는가
 
@@ -125,4 +125,4 @@ sequenceDiagram
 
 ## 의도적 미지원
 
-멀티모달 capability 매칭 / `/v1/models` discovery / hot-reload / pre-call 한도 / 스트리밍 폴백 / 모델 메타정보(가격 · context window) 보유 / multi-key smart distribution — 모두 V1 범위 밖. 누적 결정은 `docs/adr/003-out-of-scope.md` (작성 예정) 에 정리한다.
+멀티모달 capability 매칭 / `/v1/models` discovery / hot-reload / pre-call 한도 / mid-stream 폴백 / 모델 메타정보(가격 · context window) 보유 / multi-key smart distribution — 모두 V1 범위 밖. 누적 결정은 `docs/adr/003-out-of-scope.md` (작성 예정) 에 정리한다.

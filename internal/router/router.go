@@ -62,10 +62,10 @@ type RouteResult struct {
 // resolving aliases to ordered fallback chains and tracking per-process
 // circuit-breaker state for each model.
 //
-// Fallback only applies to non-streaming Complete. CompleteStream uses
-// the first chain entry; streaming fallback is intentionally out of V1
-// scope (first-byte semantics + partial billing make it fragile —
-// downgrade non-stream first, validate, then revisit).
+// Fallback applies to non-streaming Complete and to CompleteStream only
+// before a stream is established. Once streaming starts, mid-stream
+// fallback is intentionally out of scope: partial output may already
+// have reached the caller.
 type Router struct {
 	byModel map[string]provider.Provider
 	aliases map[string][]string
@@ -85,6 +85,11 @@ type fallbackPolicy struct {
 type breakerState struct {
 	failures  int
 	openUntil time.Time
+}
+
+type routeCandidate struct {
+	model    string
+	provider provider.Provider
 }
 
 func NewRouter(cat *catalog.Catalog, factories map[string]AdapterFactory, policy FallbackPolicy, log *slog.Logger) (*Router, error) {
@@ -160,38 +165,23 @@ func (r *Router) Complete(ctx context.Context, req *provider.Request) (*RouteRes
 		return result, &provider.Error{Kind: provider.KindBadRequest, Message: "request is nil"}
 	}
 
-	chain, err := r.resolveChain(req.Model)
+	candidates, err := r.candidates(req.Model)
 	if err != nil {
 		return result, err
 	}
 
 	var lastErr error
-	calledAny := false
 
-	for _, modelID := range chain {
-		p, ok := r.byModel[modelID]
-		if !ok {
-			// Chain entry references a model the router couldn't
-			// construct (e.g. its protocol factory failed). Skip
-			// silently — operators see the warning at startup.
-			continue
-		}
-		if r.isCircuitOpen(modelID) {
-			r.log.Debug("skip model: circuit open", slog.String("model", modelID))
-			continue
-		}
-
-		attemptReq := *req
-		attemptReq.Model = modelID
+	for _, candidate := range candidates {
+		attemptReq := requestForCandidate(req, candidate)
 
 		start := time.Now()
-		resp, err := p.Complete(ctx, &attemptReq)
+		resp, err := candidate.provider.Complete(ctx, &attemptReq)
 		dur := time.Since(start)
-		calledAny = true
 
 		att := provider.Attempt{
-			Vendor:     p.Name(),
-			Model:      modelID,
+			Vendor:     candidate.provider.Name(),
+			Model:      candidate.model,
 			StartedAt:  start,
 			DurationMS: dur.Milliseconds(),
 		}
@@ -207,94 +197,128 @@ func (r *Router) Complete(ctx context.Context, req *provider.Request) (*RouteRes
 			}
 			result.Attempts = append(result.Attempts, att)
 			result.Response = resp
-			result.Vendor = p.Name()
-			result.ModelUsed = modelID
-			r.recordSuccess(modelID)
+			result.Vendor = candidate.provider.Name()
+			result.ModelUsed = candidate.model
+			r.recordSuccess(candidate.model)
 			return result, nil
 		}
 
-		var perr *provider.Error
-		if errors.As(err, &perr) {
-			att.ErrorKind = perr.Kind
-			att.StatusCode = perr.StatusCode
-		} else {
-			att.ErrorKind = provider.KindUnknown
-		}
+		adoptAttemptError(&att, err)
 		result.Attempts = append(result.Attempts, att)
-		result.Vendor = p.Name()
-		result.ModelUsed = modelID
+		result.Vendor = candidate.provider.Name()
+		result.ModelUsed = candidate.model
 		lastErr = err
 
 		if !r.fallbackEligible(att.ErrorKind) {
 			return result, err
 		}
-		r.recordFailure(modelID)
+		r.recordFailure(candidate.model)
 		r.log.Info("fallback triggered",
-			slog.String("model", modelID),
+			slog.String("model", candidate.model),
 			slog.String("error_kind", string(att.ErrorKind)),
 		)
 	}
 
-	if !calledAny {
-		// Every chain entry was either unregistered or had its circuit
-		// open. Surface this as upstream-unavailable so callers can
-		// distinguish from "request was bad".
-		return result, &provider.Error{Kind: provider.KindUpstream, Message: "all models in chain are currently unavailable"}
-	}
 	return result, lastErr
 }
 
-// CompleteStream picks the first valid chain entry and dispatches once.
-// V1 does not fall back streaming requests — see Router doc.
+// CompleteStream walks the chain until a stream is established. It can
+// fall back on pre-stream failures because no SSE bytes have reached the
+// caller yet. After returning Stream, mid-stream Recv failures are not
+// routed through fallback.
 //
-// On success the returned RouteResult has Stream populated and a single
-// Attempt with StartedAt set; the caller drains the stream and finalizes
+// On success the returned RouteResult has Stream populated and the final
+// Attempt has StartedAt set; the caller drains the stream and finalizes
 // that Attempt (DurationMS, Usage, VendorCost, ErrorKind) at end-of-stream.
-// On a pre-stream error the Attempt is finalized in place before return.
+// On pre-stream errors, Attempts are finalized before fallback or return.
 func (r *Router) CompleteStream(ctx context.Context, req *provider.Request) (*RouteResult, error) {
 	result := &RouteResult{}
 	if req == nil {
 		return result, &provider.Error{Kind: provider.KindBadRequest, Message: "request is nil"}
 	}
-	chain, err := r.resolveChain(req.Model)
+	candidates, err := r.candidates(req.Model)
 	if err != nil {
 		return result, err
 	}
+
+	var lastErr error
+	for _, candidate := range candidates {
+		attemptReq := requestForCandidate(req, candidate)
+
+		att := provider.Attempt{
+			Vendor:    candidate.provider.Name(),
+			Model:     candidate.model,
+			StartedAt: time.Now(),
+		}
+		stream, err := candidate.provider.CompleteStream(ctx, &attemptReq)
+		if err != nil {
+			adoptAttemptError(&att, err)
+			att.DurationMS = time.Since(att.StartedAt).Milliseconds()
+			result.Attempts = append(result.Attempts, att)
+			result.Vendor = candidate.provider.Name()
+			result.ModelUsed = candidate.model
+			lastErr = err
+
+			if !r.fallbackEligible(att.ErrorKind) {
+				return result, err
+			}
+			r.recordFailure(candidate.model)
+			r.log.Info("stream fallback triggered",
+				slog.String("model", candidate.model),
+				slog.String("error_kind", string(att.ErrorKind)),
+			)
+			continue
+		}
+		result.Attempts = append(result.Attempts, att)
+		result.Stream = stream
+		result.Vendor = candidate.provider.Name()
+		result.ModelUsed = candidate.model
+		r.recordSuccess(candidate.model)
+		return result, nil
+	}
+	return result, lastErr
+}
+
+func requestForCandidate(req *provider.Request, candidate routeCandidate) provider.Request {
+	attemptReq := *req
+	attemptReq.Model = candidate.model
+	return attemptReq
+}
+
+func adoptAttemptError(att *provider.Attempt, err error) {
+	var perr *provider.Error
+	if errors.As(err, &perr) {
+		att.ErrorKind = perr.Kind
+		att.StatusCode = perr.StatusCode
+		return
+	}
+	att.ErrorKind = provider.KindUnknown
+}
+
+func (r *Router) candidates(model string) ([]routeCandidate, error) {
+	chain, err := r.resolveChain(model)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]routeCandidate, 0, len(chain))
 	for _, modelID := range chain {
 		p, ok := r.byModel[modelID]
 		if !ok {
 			continue
 		}
-		attemptReq := *req
-		attemptReq.Model = modelID
-
-		att := provider.Attempt{
-			Vendor:    p.Name(),
-			Model:     modelID,
-			StartedAt: time.Now(),
+		if r.isCircuitOpen(modelID) {
+			r.log.Debug("skip model: circuit open", slog.String("model", modelID))
+			continue
 		}
-		stream, err := p.CompleteStream(ctx, &attemptReq)
-		if err != nil {
-			var perr *provider.Error
-			if errors.As(err, &perr) {
-				att.ErrorKind = perr.Kind
-				att.StatusCode = perr.StatusCode
-			} else {
-				att.ErrorKind = provider.KindUnknown
-			}
-			att.DurationMS = time.Since(att.StartedAt).Milliseconds()
-			result.Attempts = append(result.Attempts, att)
-			result.Vendor = p.Name()
-			result.ModelUsed = modelID
-			return result, err
-		}
-		result.Attempts = append(result.Attempts, att)
-		result.Stream = stream
-		result.Vendor = p.Name()
-		result.ModelUsed = modelID
-		return result, nil
+		out = append(out, routeCandidate{
+			model:    modelID,
+			provider: p,
+		})
 	}
-	return result, &provider.Error{Kind: provider.KindBadRequest, Message: "unknown model: " + req.Model}
+	if len(out) == 0 {
+		return nil, &provider.Error{Kind: provider.KindUpstream, Message: "all models in chain are currently unavailable"}
+	}
+	return out, nil
 }
 
 // resolveChain returns the lowercased chain for a model name. Aliases

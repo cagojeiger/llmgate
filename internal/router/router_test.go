@@ -178,6 +178,37 @@ func TestRouter_AliasFallback_RetriesOnEligibleError(t *testing.T) {
 	}
 }
 
+func TestRouter_StreamAliasFallback_RetriesOnEligiblePreStreamError(t *testing.T) {
+	openAI := &fakeProvider{name: "openai"}
+	openAI.streamErrors = map[string]*provider.Error{
+		"deepseek-v4-pro": {Kind: provider.KindRateLimit, Message: "stream throttled", StatusCode: 429},
+	}
+	router := mustRouter(t, fallbackCatalog(), openAI, nil)
+
+	result, err := router.CompleteStream(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "hi"}}})
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if result.Stream == nil {
+		t.Fatal("CompleteStream: result.Stream is nil")
+	}
+	if result.ModelUsed != "deepseek-v4-flash" {
+		t.Errorf("ModelUsed = %q, want deepseek-v4-flash", result.ModelUsed)
+	}
+	if openAI.streamCalls != 2 || openAI.lastStreamReq.Model != "deepseek-v4-flash" {
+		t.Fatalf("stream calls/model = %d/%q, want 2/deepseek-v4-flash", openAI.streamCalls, openAI.lastStreamReq.Model)
+	}
+	if len(result.Attempts) != 2 {
+		t.Fatalf("attempts = %d, want 2", len(result.Attempts))
+	}
+	if result.Attempts[0].Model != "deepseek-v4-pro" || result.Attempts[0].ErrorKind != provider.KindRateLimit {
+		t.Errorf("attempt[0] = %+v, want deepseek-v4-pro rate_limit", result.Attempts[0])
+	}
+	if result.Attempts[1].Model != "deepseek-v4-flash" || result.Attempts[1].ErrorKind != "" {
+		t.Errorf("attempt[1] = %+v, want deepseek-v4-flash success", result.Attempts[1])
+	}
+}
+
 func TestRouter_AliasFallback_BadRequestStopsImmediately(t *testing.T) {
 	// Primary fails with KindBadRequest (not eligible) → return immediately.
 	openAI := &fakeProvider{name: "openai"}
@@ -202,6 +233,29 @@ func TestRouter_AliasFallback_BadRequestStopsImmediately(t *testing.T) {
 	}
 }
 
+func TestRouter_StreamAliasFallback_BadRequestStopsImmediately(t *testing.T) {
+	openAI := &fakeProvider{name: "openai"}
+	openAI.streamErrors = map[string]*provider.Error{
+		"deepseek-v4-pro": {Kind: provider.KindBadRequest, Message: "malformed stream"},
+	}
+	router := mustRouter(t, fallbackCatalog(), openAI, nil)
+
+	result, err := router.CompleteStream(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "hi"}}})
+	if err == nil {
+		t.Fatal("CompleteStream: want error")
+	}
+	var perr *provider.Error
+	if !errors.As(err, &perr) || perr.Kind != provider.KindBadRequest {
+		t.Fatalf("err = %v, want KindBadRequest", err)
+	}
+	if openAI.streamCalls != 1 {
+		t.Errorf("streamCalls = %d, want 1 (no fallback for non-eligible)", openAI.streamCalls)
+	}
+	if len(result.Attempts) != 1 || result.Attempts[0].ErrorKind != provider.KindBadRequest {
+		t.Fatalf("attempts = %+v, want one bad_request attempt", result.Attempts)
+	}
+}
+
 func TestRouter_AliasFallback_AllExhausted(t *testing.T) {
 	openAI := &fakeProvider{name: "openai"}
 	openAI.errorAll = &provider.Error{Kind: provider.KindUpstream, Message: "boom", StatusCode: 502}
@@ -218,6 +272,68 @@ func TestRouter_AliasFallback_AllExhausted(t *testing.T) {
 	// chain has 4 openai-protocol entries; all should be tried before chain exhausted.
 	if len(result.Attempts) != 4 {
 		t.Fatalf("attempts = %d, want 4", len(result.Attempts))
+	}
+}
+
+func TestRouter_StreamSkipsOpenCircuitModel(t *testing.T) {
+	openAI := &fakeProvider{name: "openai"}
+	openAI.errors = map[string]*provider.Error{
+		"deepseek-v4-pro": {Kind: provider.KindUpstream, Message: "boom"},
+	}
+	router := mustRouter(t, fallbackCatalog(), openAI, nil)
+
+	for i := 0; i < 3; i++ {
+		_, err := router.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
+		if err != nil {
+			t.Fatalf("run %d: unexpected error %v", i, err)
+		}
+	}
+
+	result, err := router.CompleteStream(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if result.ModelUsed != "deepseek-v4-flash" {
+		t.Fatalf("ModelUsed = %q, want deepseek-v4-flash (primary circuit open)", result.ModelUsed)
+	}
+	if openAI.streamCalls != 1 || openAI.lastStreamReq.Model != "deepseek-v4-flash" {
+		t.Fatalf("stream calls/model = %d/%q, want 1/deepseek-v4-flash", openAI.streamCalls, openAI.lastStreamReq.Model)
+	}
+	if len(result.Attempts) != 1 || result.Attempts[0].Model != "deepseek-v4-flash" {
+		t.Fatalf("attempts = %+v, want one flash attempt", result.Attempts)
+	}
+}
+
+func TestRouter_StreamPreStreamFailuresOpenCircuit(t *testing.T) {
+	openAI := &fakeProvider{name: "openai"}
+	openAI.streamErrors = map[string]*provider.Error{
+		"deepseek-v4-pro": {Kind: provider.KindUpstream, Message: "stream setup failed"},
+	}
+	router := mustRouter(t, fallbackCatalog(), openAI, nil)
+
+	for i := 0; i < 3; i++ {
+		result, err := router.CompleteStream(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
+		if err != nil {
+			t.Fatalf("run %d: unexpected error %v", i, err)
+		}
+		if result.ModelUsed != "deepseek-v4-flash" {
+			t.Fatalf("run %d ModelUsed = %q, want deepseek-v4-flash", i, result.ModelUsed)
+		}
+	}
+	if openAI.streamCalls != 6 {
+		t.Fatalf("after 3 runs streamCalls = %d, want 6", openAI.streamCalls)
+	}
+
+	beforeSkip := openAI.streamCalls
+	result, err := router.CompleteStream(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
+	if err != nil {
+		t.Fatalf("fourth CompleteStream: %v", err)
+	}
+	if added := openAI.streamCalls - beforeSkip; added != 1 {
+		t.Fatalf("fourth run added %d stream calls, want 1 (primary skipped)", added)
+	}
+	if result.ModelUsed != "deepseek-v4-flash" {
+		t.Fatalf("fourth ModelUsed = %q, want deepseek-v4-flash", result.ModelUsed)
 	}
 }
 
@@ -340,8 +456,10 @@ type fakeProvider struct {
 	lastStreamReq   *provider.Request
 
 	// per-model and global error simulation. Per-model takes precedence.
-	errors   map[string]*provider.Error
-	errorAll *provider.Error
+	errors         map[string]*provider.Error
+	errorAll       *provider.Error
+	streamErrors   map[string]*provider.Error
+	streamErrorAll *provider.Error
 }
 
 func (p *fakeProvider) Name() string { return p.name }
@@ -363,6 +481,14 @@ func (p *fakeProvider) Complete(ctx context.Context, req *provider.Request) (*pr
 func (p *fakeProvider) CompleteStream(ctx context.Context, req *provider.Request) (provider.Stream, error) {
 	p.streamCalls++
 	p.lastStreamReq = req
+	if p.streamErrors != nil {
+		if e, ok := p.streamErrors[req.Model]; ok {
+			return nil, e
+		}
+	}
+	if p.streamErrorAll != nil {
+		return nil, p.streamErrorAll
+	}
 	return fakeStream{}, nil
 }
 

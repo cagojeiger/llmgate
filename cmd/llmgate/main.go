@@ -13,7 +13,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"llmgate/internal/audit"
-	"llmgate/catalog"
+	"llmgate/internal/catalog"
 	"llmgate/internal/config"
 	"llmgate/internal/provider"
 	"llmgate/internal/provider/anthropic"

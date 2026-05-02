@@ -8,10 +8,12 @@ dead upstreams.
 
 ```
 cmd/llmgate/                  HTTP gateway entrypoint
-catalog/                      catalog package + embedded default
-  default/models/             one yaml per endpoint (id + vendor + type +
+catalog/                      data only — operator-facing yaml directory
+  models/<id>.yaml            one yaml per endpoint (id + vendor + type +
                               base_url + auth_env)
-  default/fallback/           one yaml per alias + a single policy.yaml
+  aliases/<name>.yaml         one yaml per alias (alias + chain)
+  policy.yaml                 fallback rules + circuit breaker + defaults
+internal/catalog/             loader package (yaml -> Catalog struct)
 internal/config/              env-driven Server config
 internal/provider/            Provider interface + OpenAI-shaped types
 internal/provider/openai/     OpenAI-protocol adapter
@@ -53,9 +55,10 @@ walks the chain on fallback-eligible errors.
 
 ## Catalog overrides
 
-Set `LLMGATE_CATALOG=/path/to/dir` to use an external catalog directory
-instead of the embedded one. The directory must contain `models/` (one
-yaml per endpoint) and may contain `fallback/` (alias and policy yamls).
+`make run` reads from `./catalog` by default (relative to cwd, so always
+run from the repo root). Set `LLMGATE_CATALOG=/path/to/dir` to point at
+an external directory instead. The directory must contain `models/` (one
+yaml per endpoint) and may contain `aliases/` and `policy.yaml`.
 Hot-reload is not supported — change the catalog and restart.
 
 ## End-to-end checks against upstream

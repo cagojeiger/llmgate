@@ -9,19 +9,23 @@ import (
 	"time"
 )
 
-func TestLoadDefault(t *testing.T) {
+// repoCatalogDir points at the repo's actual catalog/ directory from the
+// internal/catalog package's working directory at test time.
+const repoCatalogDir = "../../catalog"
+
+func TestLoadDir_RepoCatalog(t *testing.T) {
 	t.Setenv("LLMGATE_OPENCODE_API_KEY", "test-key")
 
-	cat, err := LoadDefault()
+	cat, err := LoadDir(repoCatalogDir)
 	if err != nil {
-		t.Fatalf("LoadDefault() error = %v", err)
+		t.Fatalf("LoadDir(%q) error = %v", repoCatalogDir, err)
 	}
 	if got := len(cat.Models); got != 14 {
 		t.Fatalf("len(Models) = %d, want 14", got)
 	}
-	// One endpoint per model now (1:1) — same vendor + auth_env, but the
-	// catalog level keeps each model addressable as its own endpoint so
-	// "same model, different key" can coexist later.
+	// One endpoint per model (1:1) — same vendor + auth_env, but each
+	// model is addressable as its own endpoint so "same model, different
+	// key" can coexist as two yaml files later.
 	if got := len(cat.Endpoints); got != 14 {
 		t.Fatalf("len(Endpoints) = %d, want 14", got)
 	}
@@ -57,9 +61,9 @@ func TestLoadDefault(t *testing.T) {
 
 func TestResolveAlias(t *testing.T) {
 	t.Setenv("LLMGATE_OPENCODE_API_KEY", "test-key")
-	cat, err := LoadDefault()
+	cat, err := LoadDir(repoCatalogDir)
 	if err != nil {
-		t.Fatalf("LoadDefault: %v", err)
+		t.Fatalf("LoadDir: %v", err)
 	}
 
 	chain := cat.ResolveAlias("coder")
@@ -72,13 +76,26 @@ func TestResolveAlias(t *testing.T) {
 	}
 }
 
+func TestLoadDir_RepoCatalog_MissingEnv(t *testing.T) {
+	t.Setenv("LLMGATE_OPENCODE_API_KEY", "")
+
+	_, err := LoadDir(repoCatalogDir)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "LLMGATE_OPENCODE_API_KEY") {
+		t.Fatalf("error = %q, want env name", err.Error())
+	}
+}
+
 func TestLoadDir_AliasUnknownModel(t *testing.T) {
 	t.Setenv("TEST_API_KEY", "test-key")
 	dir := writeCatalogDir(t,
 		map[string]string{"real.yaml": modelYAML("real")},
 		map[string]string{"bad.yaml": `alias: bad
 chain: [real, ghost]
-`})
+`},
+		"")
 	_, err := LoadDir(dir)
 	if err == nil || !strings.Contains(err.Error(), "ghost") {
 		t.Fatalf("error = %v, want unknown-model error referencing ghost", err)
@@ -91,7 +108,8 @@ func TestLoadDir_AliasCollidesWithModel(t *testing.T) {
 		map[string]string{"real.yaml": modelYAML("real")},
 		map[string]string{"real.yaml": `alias: real
 chain: [real]
-`})
+`},
+		"")
 	_, err := LoadDir(dir)
 	if err == nil || !strings.Contains(err.Error(), "collides") {
 		t.Fatalf("error = %v, want alias-collision error", err)
@@ -104,34 +122,23 @@ func TestLoadDir_AliasEmptyChain(t *testing.T) {
 		map[string]string{"real.yaml": modelYAML("real")},
 		map[string]string{"blank.yaml": `alias: blank
 chain: []
-`})
+`},
+		"")
 	_, err := LoadDir(dir)
 	if err == nil || !strings.Contains(err.Error(), "empty chain") {
 		t.Fatalf("error = %v, want empty-chain error", err)
 	}
 }
 
-func TestLoadDefault_MissingEnv(t *testing.T) {
-	t.Setenv("LLMGATE_OPENCODE_API_KEY", "")
-
-	_, err := LoadDefault()
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "LLMGATE_OPENCODE_API_KEY") {
-		t.Fatalf("error = %q, want env name", err.Error())
-	}
-}
-
 func TestLoadDir_DuplicateModel(t *testing.T) {
 	t.Setenv("TEST_API_KEY", "test-key")
-	// Two yamls share id "same" — the second registration should fail.
 	dir := writeCatalogDir(t,
 		map[string]string{
 			"a.yaml": modelYAML("same"),
 			"b.yaml": modelYAML("same"),
 		},
-		nil)
+		nil,
+		"")
 	_, err := LoadDir(dir)
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -145,9 +152,10 @@ func TestLoadDir_UnknownDefault(t *testing.T) {
 	t.Setenv("TEST_API_KEY", "test-key")
 	dir := writeCatalogDir(t,
 		map[string]string{"real.yaml": modelYAML("real")},
-		map[string]string{"policy.yaml": `defaults:
+		nil,
+		`defaults:
   model: notreal
-`})
+`)
 	_, err := LoadDir(dir)
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -159,7 +167,7 @@ func TestLoadDir_UnknownDefault(t *testing.T) {
 
 func TestLoadDir_NoModels(t *testing.T) {
 	t.Setenv("TEST_API_KEY", "test-key")
-	dir := writeCatalogDir(t, map[string]string{}, nil)
+	dir := writeCatalogDir(t, map[string]string{}, nil, "")
 	_, err := LoadDir(dir)
 	if err == nil || !strings.Contains(err.Error(), "no models loaded") {
 		t.Fatalf("error = %v, want 'no models loaded'", err)
@@ -179,12 +187,13 @@ auth_scheme: bearer
 `
 }
 
-// writeCatalogDir creates a temp catalog dir with models/ and fallback/
-// subdirs populated from the given maps (file name -> yaml body). Pass
-// nil for fallback to skip creating that subdir.
-func writeCatalogDir(t *testing.T, models map[string]string, fallback map[string]string) string {
+// writeCatalogDir creates a temp catalog dir laid out as the loader
+// expects: models/, aliases/ (optional), policy.yaml (optional). Each
+// map argument is name -> yaml body; pass nil/empty to skip.
+func writeCatalogDir(t *testing.T, models, aliases map[string]string, policyBody string) string {
 	t.Helper()
 	dir := t.TempDir()
+
 	modelsDir := filepath.Join(dir, "models")
 	if err := os.MkdirAll(modelsDir, 0o755); err != nil {
 		t.Fatalf("mkdir models: %v", err)
@@ -194,15 +203,20 @@ func writeCatalogDir(t *testing.T, models map[string]string, fallback map[string
 			t.Fatalf("write %s: %v", name, err)
 		}
 	}
-	if fallback != nil {
-		fbDir := filepath.Join(dir, "fallback")
-		if err := os.MkdirAll(fbDir, 0o755); err != nil {
-			t.Fatalf("mkdir fallback: %v", err)
+	if aliases != nil {
+		aliasesDir := filepath.Join(dir, "aliases")
+		if err := os.MkdirAll(aliasesDir, 0o755); err != nil {
+			t.Fatalf("mkdir aliases: %v", err)
 		}
-		for name, body := range fallback {
-			if err := os.WriteFile(filepath.Join(fbDir, name), []byte(body), 0o600); err != nil {
+		for name, body := range aliases {
+			if err := os.WriteFile(filepath.Join(aliasesDir, name), []byte(body), 0o600); err != nil {
 				t.Fatalf("write %s: %v", name, err)
 			}
+		}
+	}
+	if policyBody != "" {
+		if err := os.WriteFile(filepath.Join(dir, "policy.yaml"), []byte(policyBody), 0o600); err != nil {
+			t.Fatalf("write policy.yaml: %v", err)
 		}
 	}
 	return dir

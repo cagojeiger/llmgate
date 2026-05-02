@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"math"
@@ -188,20 +187,15 @@ func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *provi
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-	flusher.Flush()
+	sink := newSSESink(w, flusher)
+	defer func() { rec.ResponseBytes = sink.Bytes() }()
+	sink.WriteHeaders()
 	rec.StatusCode = http.StatusOK
 
 	for {
 		event, err := stream.Recv()
 		if errors.Is(err, io.EOF) {
-			n, _ := w.Write([]byte("data: [DONE]\n\n"))
-			rec.ResponseBytes += int64(n)
-			flusher.Flush()
+			sink.SendDone()
 			return
 		}
 		if err != nil {
@@ -213,26 +207,20 @@ func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *provi
 				slog.String("vendor", rec.Vendor),
 				slog.String("err", err.Error()),
 			)
-			writeSSEError(w, err)
-			n, _ := w.Write([]byte("data: [DONE]\n\n"))
-			rec.ResponseBytes += int64(n)
-			flusher.Flush()
+			sink.SendError(err)
+			sink.SendDone()
 			return
 		}
 
-		out, err := json.Marshal(event)
+		payload, err := json.Marshal(event)
 		if err != nil {
 			perr := &provider.Error{Kind: provider.KindUnknown, Message: "encode stream event: " + err.Error(), Cause: err}
 			rec.ErrorKind = perr.Kind
-			writeSSEError(w, perr)
-			n, _ := w.Write([]byte("data: [DONE]\n\n"))
-			rec.ResponseBytes += int64(n)
-			flusher.Flush()
+			sink.SendError(perr)
+			sink.SendDone()
 			return
 		}
-		n, _ := fmt.Fprintf(w, "data: %s\n\n", out)
-		rec.ResponseBytes += int64(n)
-		flusher.Flush()
+		sink.Send(payload)
 	}
 }
 
@@ -244,11 +232,6 @@ func writeError(w http.ResponseWriter, err error) {
 	}
 	w.WriteHeader(status)
 	_, _ = w.Write(append(payload, '\n'))
-}
-
-func writeSSEError(w http.ResponseWriter, err error) {
-	_, _, payload := errorPayload(err)
-	_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
 }
 
 func errStatus(err error) int {

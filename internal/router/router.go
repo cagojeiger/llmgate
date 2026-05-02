@@ -42,6 +42,7 @@ type FallbackPolicy struct {
 	CircuitJitter          float64
 	CompleteRequestTimeout time.Duration
 	CompleteAttemptTimeout time.Duration
+	StreamStartTimeout     time.Duration
 }
 
 // RouteResult is the outcome of one Router.Complete or Router.CompleteStream
@@ -91,6 +92,7 @@ type fallbackPolicy struct {
 	circuitJitter          float64
 	completeRequestTimeout time.Duration
 	completeAttemptTimeout time.Duration
+	streamStartTimeout     time.Duration
 }
 
 type breakerState struct {
@@ -151,6 +153,7 @@ func NewRouter(cat *catalog.Catalog, factories map[string]AdapterFactory, policy
 		circuitJitter:          policy.CircuitJitter,
 		completeRequestTimeout: policy.CompleteRequestTimeout,
 		completeAttemptTimeout: policy.CompleteAttemptTimeout,
+		streamStartTimeout:     policy.StreamStartTimeout,
 	}
 	for _, k := range policy.OnKinds {
 		internalPolicy.onKinds[provider.Kind(strings.ToLower(k))] = struct{}{}
@@ -278,13 +281,19 @@ func (r *Router) CompleteStream(ctx context.Context, req *provider.Request) (*Ro
 	var lastErr error
 	for _, candidate := range candidates {
 		attemptReq := requestForCandidate(req, candidate)
+		attemptCtx := ctx
+		cancelAttempt := func() {}
+		if r.policy.streamStartTimeout > 0 {
+			attemptCtx, cancelAttempt = context.WithTimeout(ctx, r.policy.streamStartTimeout)
+		}
 
 		att := provider.Attempt{
 			Vendor:    candidate.provider.Name(),
 			Model:     candidate.model,
 			StartedAt: time.Now(),
 		}
-		stream, err := candidate.provider.CompleteStream(ctx, &attemptReq)
+		stream, err := candidate.provider.CompleteStream(attemptCtx, &attemptReq)
+		cancelAttempt()
 		if err != nil {
 			adoptAttemptError(&att, err)
 			att.DurationMS = time.Since(att.StartedAt).Milliseconds()

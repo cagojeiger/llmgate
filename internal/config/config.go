@@ -29,6 +29,8 @@ type Server struct {
 	CircuitJitter          float64
 	CompleteRequestTimeout time.Duration
 	CompleteAttemptTimeout time.Duration
+	StreamStartTimeout     time.Duration
+	StreamIdleTimeout      time.Duration
 }
 
 func LoadServer() (*Server, error) {
@@ -68,6 +70,14 @@ func LoadServer() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	streamStartTimeout, err := nonNegativeDuration("LLMGATE_STREAM_START_TIMEOUT", "30s")
+	if err != nil {
+		return nil, err
+	}
+	streamIdleTimeout, err := nonNegativeDuration("LLMGATE_STREAM_IDLE_TIMEOUT", "1m")
+	if err != nil {
+		return nil, err
+	}
 
 	return &Server{
 		Addr:                   orDefault("LLMGATE_ADDR", ":8080"),
@@ -81,6 +91,8 @@ func LoadServer() (*Server, error) {
 		CircuitJitter:          circuitJitter,
 		CompleteRequestTimeout: completeRequestTimeout,
 		CompleteAttemptTimeout: completeAttemptTimeout,
+		StreamStartTimeout:     streamStartTimeout,
+		StreamIdleTimeout:      streamIdleTimeout,
 	}, nil
 }
 

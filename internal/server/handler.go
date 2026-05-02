@@ -25,19 +25,28 @@ type ChatRouter interface {
 }
 
 type Handler struct {
-	router   ChatRouter
-	log      *slog.Logger
-	recorder audit.Recorder
+	router            ChatRouter
+	log               *slog.Logger
+	recorder          audit.Recorder
+	streamIdleTimeout time.Duration
+}
+
+type HandlerConfig struct {
+	StreamIdleTimeout time.Duration
 }
 
 func NewHandler(router ChatRouter, log *slog.Logger, recorder audit.Recorder) *Handler {
+	return NewHandlerWithConfig(router, log, recorder, HandlerConfig{})
+}
+
+func NewHandlerWithConfig(router ChatRouter, log *slog.Logger, recorder audit.Recorder, cfg HandlerConfig) *Handler {
 	if log == nil {
 		log = slog.Default()
 	}
 	if recorder == nil {
 		recorder = audit.Nop{}
 	}
-	return &Handler{router: router, log: log, recorder: recorder}
+	return &Handler{router: router, log: log, recorder: recorder, streamIdleTimeout: cfg.StreamIdleTimeout}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -191,7 +200,7 @@ func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *provi
 	rec.StatusCode = http.StatusOK
 
 	for {
-		event, err := stream.Recv()
+		event, err := recvWithIdleTimeout(r.Context(), stream, h.streamIdleTimeout)
 		if errors.Is(err, io.EOF) {
 			sink.SendDone()
 			return
@@ -222,3 +231,35 @@ func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *provi
 	}
 }
 
+type recvResult struct {
+	event *provider.Event
+	err   error
+}
+
+func recvWithIdleTimeout(ctx context.Context, stream provider.Stream, timeout time.Duration) (*provider.Event, error) {
+	if timeout <= 0 {
+		return stream.Recv()
+	}
+	ch := make(chan recvResult, 1)
+	go func() {
+		event, err := stream.Recv()
+		ch <- recvResult{event: event, err: err}
+	}()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case got := <-ch:
+		return got.event, got.err
+	case <-timer.C:
+		_ = stream.Close()
+		return nil, &provider.Error{Kind: provider.KindTimeout, Message: "stream idle timeout"}
+	case <-ctx.Done():
+		_ = stream.Close()
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, &provider.Error{Kind: provider.KindTimeout, Message: ctx.Err().Error(), Cause: ctx.Err()}
+		}
+		return nil, ctx.Err()
+	}
+}

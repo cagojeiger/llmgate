@@ -26,6 +26,8 @@ func resetEnv(t *testing.T) {
 		"LLMGATE_CIRCUIT_JITTER",
 		"LLMGATE_COMPLETE_REQUEST_TIMEOUT",
 		"LLMGATE_COMPLETE_ATTEMPT_TIMEOUT",
+		"LLMGATE_STREAM_START_TIMEOUT",
+		"LLMGATE_STREAM_IDLE_TIMEOUT",
 	} {
 		t.Setenv(k, "")
 	}
@@ -70,6 +72,12 @@ func TestLoadServer_Defaults(t *testing.T) {
 	}
 	if cfg.CompleteAttemptTimeout != time.Minute {
 		t.Errorf("CompleteAttemptTimeout = %v, want 1m", cfg.CompleteAttemptTimeout)
+	}
+	if cfg.StreamStartTimeout != 30*time.Second {
+		t.Errorf("StreamStartTimeout = %v, want 30s", cfg.StreamStartTimeout)
+	}
+	if cfg.StreamIdleTimeout != time.Minute {
+		t.Errorf("StreamIdleTimeout = %v, want 1m", cfg.StreamIdleTimeout)
 	}
 }
 
@@ -153,6 +161,23 @@ func TestLoadServer_CompleteTimeoutOverrides(t *testing.T) {
 	}
 	if cfg.CompleteAttemptTimeout != 10*time.Second {
 		t.Errorf("CompleteAttemptTimeout = %v, want 10s", cfg.CompleteAttemptTimeout)
+	}
+}
+
+func TestLoadServer_StreamTimeoutOverrides(t *testing.T) {
+	resetEnv(t)
+	t.Setenv("LLMGATE_STREAM_START_TIMEOUT", "15s")
+	t.Setenv("LLMGATE_STREAM_IDLE_TIMEOUT", "20s")
+
+	cfg, err := LoadServer()
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if cfg.StreamStartTimeout != 15*time.Second {
+		t.Errorf("StreamStartTimeout = %v, want 15s", cfg.StreamStartTimeout)
+	}
+	if cfg.StreamIdleTimeout != 20*time.Second {
+		t.Errorf("StreamIdleTimeout = %v, want 20s", cfg.StreamIdleTimeout)
 	}
 }
 

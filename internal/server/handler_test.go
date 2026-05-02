@@ -240,8 +240,8 @@ func TestHandler_Stream_NormalEOF(t *testing.T) {
 	if !strings.HasSuffix(w.Body.String(), "data: [DONE]\n\n") {
 		t.Errorf("body must end with [DONE] frame: %q", w.Body.String())
 	}
-	if streamObj.closed != 1 {
-		t.Errorf("Stream.Close() calls = %d, want 1", streamObj.closed)
+	if got := streamObj.closedCount(); got != 1 {
+		t.Errorf("Stream.Close() calls = %d, want 1", got)
 	}
 
 	got := captured.last(t)
@@ -318,6 +318,56 @@ func TestHandler_Stream_RecvError_PropagatesErrorKind(t *testing.T) {
 	}
 }
 
+func TestHandler_Stream_IdleTimeoutSendsError(t *testing.T) {
+	captured, recorder := newCaptureRecorder()
+	streamObj := &fakeStream{
+		recvDelay: 50 * time.Millisecond,
+		summary:   &provider.Summary{},
+	}
+	r := &fakeRouter{
+		buildStreamResult: func(req *provider.Request) (*router.RouteResult, error) {
+			return &router.RouteResult{
+				Stream:    streamObj,
+				Vendor:    "opencode",
+				ModelUsed: req.Model,
+				Attempts: []provider.Attempt{
+					{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()},
+				},
+			}, nil
+		},
+	}
+	h := NewHandlerWithConfig(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{
+		StreamIdleTimeout: time.Millisecond,
+	})
+
+	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (stream already started)", w.Code)
+	}
+	body2 := w.Body.String()
+	if !strings.Contains(body2, `"type":"timeout"`) {
+		t.Errorf("body missing timeout error envelope: %q", body2)
+	}
+	if !strings.HasSuffix(body2, "data: [DONE]\n\n") {
+		t.Errorf("body must end with [DONE]: %q", body2)
+	}
+
+	got := captured.last(t)
+	if got.ErrorKind != provider.KindTimeout {
+		t.Errorf("rec.ErrorKind = %q, want timeout", got.ErrorKind)
+	}
+	if len(got.Attempts) != 1 || got.Attempts[0].ErrorKind != provider.KindTimeout {
+		t.Errorf("Attempts[0].ErrorKind not propagated: %+v", got.Attempts)
+	}
+	if streamObj.closedCount() == 0 {
+		t.Errorf("Stream.Close() calls = 0, want at least 1")
+	}
+}
+
 func TestHandler_Stream_PreStreamRouterError(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
 	r := &fakeRouter{
@@ -384,14 +434,25 @@ func (f *fakeRouter) CompleteStream(_ context.Context, req *provider.Request) (*
 // fakeStream returns events in order, then optionally yields recvErr
 // on the next Recv (or io.EOF if recvErr is nil).
 type fakeStream struct {
-	events  []*provider.Event
-	cursor  int
-	recvErr error
-	summary *provider.Summary
-	closed  int
+	mu        sync.Mutex
+	closeOnce sync.Once
+	done      chan struct{}
+	events    []*provider.Event
+	cursor    int
+	recvErr   error
+	recvDelay time.Duration
+	summary   *provider.Summary
+	closed    int
 }
 
 func (s *fakeStream) Recv() (*provider.Event, error) {
+	if s.recvDelay > 0 {
+		select {
+		case <-time.After(s.recvDelay):
+		case <-s.doneChan():
+			return nil, io.EOF
+		}
+	}
 	if s.cursor < len(s.events) {
 		e := s.events[s.cursor]
 		s.cursor++
@@ -403,8 +464,31 @@ func (s *fakeStream) Recv() (*provider.Event, error) {
 	return nil, io.EOF
 }
 
-func (s *fakeStream) Close() error                { s.closed++; return nil }
-func (s *fakeStream) Summary() *provider.Summary  { return s.summary }
+func (s *fakeStream) Close() error {
+	done := s.doneChan()
+	s.closeOnce.Do(func() { close(done) })
+	s.mu.Lock()
+	s.closed++
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *fakeStream) Summary() *provider.Summary { return s.summary }
+
+func (s *fakeStream) doneChan() chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.done == nil {
+		s.done = make(chan struct{})
+	}
+	return s.done
+}
+
+func (s *fakeStream) closedCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed
+}
 
 type captureRecorder struct {
 	mu      sync.Mutex

@@ -66,6 +66,7 @@ func run() error {
 		CircuitJitter:          cfg.CircuitJitter,
 		CompleteRequestTimeout: cfg.CompleteRequestTimeout,
 		CompleteAttemptTimeout: cfg.CompleteAttemptTimeout,
+		StreamStartTimeout:     cfg.StreamStartTimeout,
 	}
 	rtr, err := router.NewRouter(cat, factories, policy, logger)
 	if err != nil {
@@ -79,7 +80,9 @@ func run() error {
 		}
 	}()
 
-	handler := server.NewHandler(rtr, logger, recorder)
+	handler := server.NewHandlerWithConfig(rtr, logger, recorder, server.HandlerConfig{
+		StreamIdleTimeout: cfg.StreamIdleTimeout,
+	})
 	srv := server.New(cfg, logger, handler)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

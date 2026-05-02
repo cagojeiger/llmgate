@@ -24,6 +24,7 @@ var testPolicy = FallbackPolicy{
 	CircuitJitter:          0.2,
 	CompleteRequestTimeout: 3 * time.Minute,
 	CompleteAttemptTimeout: time.Minute,
+	StreamStartTimeout:     30 * time.Second,
 }
 
 func TestRouter_MissingProtocolFactoryFailsFast(t *testing.T) {
@@ -341,6 +342,32 @@ func TestRouter_StreamPreStreamFailuresOpenCircuit(t *testing.T) {
 	}
 }
 
+func TestRouter_StreamStartTimeoutFallsBack(t *testing.T) {
+	openAI := &fakeProvider{
+		name: "openai",
+		streamDelays: map[string]time.Duration{
+			"deepseek-v4-pro": 50 * time.Millisecond,
+		},
+	}
+	policy := testPolicy
+	policy.StreamStartTimeout = time.Millisecond
+	router := mustRouterWithPolicy(t, fallbackCatalog(), openAI, nil, policy)
+
+	result, err := router.CompleteStream(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if result.ModelUsed != "deepseek-v4-flash" {
+		t.Fatalf("ModelUsed = %q, want deepseek-v4-flash after primary stream start timeout", result.ModelUsed)
+	}
+	if len(result.Attempts) != 2 {
+		t.Fatalf("attempts = %d, want 2", len(result.Attempts))
+	}
+	if result.Attempts[0].ErrorKind != provider.KindTimeout {
+		t.Fatalf("attempt[0].ErrorKind = %q, want timeout", result.Attempts[0].ErrorKind)
+	}
+}
+
 func TestRouter_CircuitOpensAfterRepeatedFailures(t *testing.T) {
 	// Only the primary fails — secondary always succeeds. Three failed
 	// runs trip the breaker on the primary; the fourth call must skip
@@ -610,6 +637,7 @@ type fakeProvider struct {
 	streamErrors   map[string]*provider.Error
 	streamErrorAll *provider.Error
 	completeDelays map[string]time.Duration
+	streamDelays   map[string]time.Duration
 }
 
 func (p *fakeProvider) Name() string { return p.name }
@@ -640,6 +668,15 @@ func (p *fakeProvider) Complete(ctx context.Context, req *provider.Request) (*pr
 func (p *fakeProvider) CompleteStream(ctx context.Context, req *provider.Request) (provider.Stream, error) {
 	p.streamCalls++
 	p.lastStreamReq = req
+	if p.streamDelays != nil {
+		if d := p.streamDelays[req.Model]; d > 0 {
+			select {
+			case <-time.After(d):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+	}
 	if p.streamErrors != nil {
 		if e, ok := p.streamErrors[req.Model]; ok {
 			return nil, e

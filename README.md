@@ -8,13 +8,18 @@ dead upstreams.
 
 ```
 cmd/llmgate/                  HTTP gateway entrypoint
+catalog/                      catalog package + embedded default
+  default/models/             one yaml per endpoint (id + vendor + type +
+                              base_url + auth_env)
+  default/fallback/           one yaml per alias + a single policy.yaml
 internal/config/              env-driven Server config
-internal/catalog/             catalog.yaml: endpoints / models / aliases / fallback
 internal/provider/            Provider interface + OpenAI-shaped types
 internal/provider/openai/     OpenAI-protocol adapter
 internal/provider/anthropic/  Anthropic-protocol adapter (response normalized to OpenAI wire)
-internal/server/              HTTP handler, middleware, router server
+internal/router/              alias→chain dispatch + fallback + circuit breaker
+internal/server/              chi handler, sseWriter, error envelope, middleware
 internal/audit/               per-request audit Record + slog recorder
+docs/adr/                     accepted decisions
 ```
 
 ## Quick Start
@@ -35,7 +40,25 @@ curl http://localhost:8080/v1/chat/completions \
   -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}'
 ```
 
-For end-to-end checks against upstream via the gateway:
+Aliases work the same way (`coder`, `reasoning`, `cheap-fast`):
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"coder","messages":[{"role":"user","content":"hi"}]}'
+```
+
+The gateway resolves the alias via `catalog/default/fallback/coder.yaml` and
+walks the chain on fallback-eligible errors.
+
+## Catalog overrides
+
+Set `LLMGATE_CATALOG=/path/to/dir` to use an external catalog directory
+instead of the embedded one. The directory must contain `models/` (one
+yaml per endpoint) and may contain `fallback/` (alias and policy yamls).
+Hot-reload is not supported — change the catalog and restart.
+
+## End-to-end checks against upstream
 
 ```bash
 make e2e-probe-via-gate

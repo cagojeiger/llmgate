@@ -40,10 +40,7 @@ func (r *SSEReader) Recv() (data []byte, err error) {
 		if !strings.HasPrefix(line, "data:") {
 			continue
 		}
-		payload := strings.TrimPrefix(line, "data:")
-		if strings.HasPrefix(payload, " ") {
-			payload = payload[1:]
-		}
+		payload := strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " ")
 		parts = append(parts, []byte(payload))
 	}
 

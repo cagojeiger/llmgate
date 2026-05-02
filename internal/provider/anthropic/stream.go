@@ -279,10 +279,7 @@ func dataPayload(line string) []byte {
 	if !strings.HasPrefix(line, "data:") {
 		return nil
 	}
-	payload := strings.TrimPrefix(line, "data:")
-	if strings.HasPrefix(payload, " ") {
-		payload = payload[1:]
-	}
+	payload := strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " ")
 	if payload == "" {
 		return nil
 	}

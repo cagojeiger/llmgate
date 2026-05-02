@@ -62,6 +62,8 @@ func run() error {
 		OnKinds:         cfg.FallbackOn,
 		CircuitFailures: cfg.CircuitFailures,
 		CircuitOpen:     cfg.CircuitOpen,
+		CircuitMaxOpen:  cfg.CircuitMaxOpen,
+		CircuitJitter:   cfg.CircuitJitter,
 	}
 	rtr, err := router.NewRouter(cat, factories, policy, logger)
 	if err != nil {

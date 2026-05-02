@@ -20,11 +20,13 @@ type Server struct {
 	// they describe gateway-internal algorithm settings — not vendor
 	// or model data. main.go assembles them into a router.FallbackPolicy.
 	// Defaults are sized for typical LLM upstreams (transient 429/5xx,
-	// 3 strikes, 30s cooldown); operators only set the env vars when
-	// the defaults don't fit.
+	// 3 strikes, 30s base cooldown with capped backoff); operators only
+	// set the env vars when the defaults don't fit.
 	FallbackOn      []string
 	CircuitFailures int
 	CircuitOpen     time.Duration
+	CircuitMaxOpen  time.Duration
+	CircuitJitter   float64
 }
 
 func LoadServer() (*Server, error) {
@@ -48,6 +50,14 @@ func LoadServer() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	circuitMaxOpen, err := nonNegativeDuration("LLMGATE_CIRCUIT_MAX_OPEN_DURATION", "5m")
+	if err != nil {
+		return nil, err
+	}
+	circuitJitter, err := ratio("LLMGATE_CIRCUIT_JITTER", "0.2")
+	if err != nil {
+		return nil, err
+	}
 
 	return &Server{
 		Addr:                  orDefault("LLMGATE_ADDR", ":8080"),
@@ -57,6 +67,8 @@ func LoadServer() (*Server, error) {
 		FallbackOn:            parseCSV("LLMGATE_FALLBACK_ON", "rate_limit,upstream,timeout,network"),
 		CircuitFailures:       circuitFailures,
 		CircuitOpen:           circuitOpen,
+		CircuitMaxOpen:        circuitMaxOpen,
+		CircuitJitter:         circuitJitter,
 	}, nil
 }
 
@@ -99,6 +111,18 @@ func nonNegativeInt(key, def string) (int, error) {
 		return 0, fmt.Errorf("%s must be >= 0, got %q", key, raw)
 	}
 	return n, nil
+}
+
+func ratio(key, def string) (float64, error) {
+	raw := orDefault(key, def)
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a number, got %q: %w", key, raw, err)
+	}
+	if v < 0 || v > 1 {
+		return 0, fmt.Errorf("%s must be between 0 and 1, got %q", key, raw)
+	}
+	return v, nil
 }
 
 func parseLogLevel(key, def string) (slog.Level, error) {

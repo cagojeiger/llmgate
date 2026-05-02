@@ -1,18 +1,20 @@
 # llmgate (dev-v2)
 
-Provider-first LLM gateway. The `Provider` interface is the spine; both the
-HTTP server and a CLI probe consume it through the exact same contract.
-
-V1 ships a single OpenCode Go adapter targeting `deepseek-v4-flash` and a
-non-streaming text-only request shape.
+OpenAI-wire-compatible LLM gateway. Logical model names resolve through a
+catalog to ordered fallback chains; per-process circuit breakers suppress
+dead upstreams.
 
 ## Layout
 
 ```
-cmd/llmgate-probe/    CLI: stdin OpenAI request -> stdout OpenAI response
-internal/config/      env-driven Config
-internal/provider/    Provider interface + OpenAI-shaped types
-internal/provider/opencode/   OpenCode Go HTTP adapter
+cmd/llmgate/                  HTTP gateway entrypoint
+internal/config/              env-driven Server config
+internal/catalog/             catalog.yaml: endpoints / models / aliases / fallback
+internal/provider/            Provider interface + OpenAI-shaped types
+internal/provider/openai/     OpenAI-protocol adapter
+internal/provider/anthropic/  Anthropic-protocol adapter (response normalized to OpenAI wire)
+internal/server/              HTTP handler, middleware, router server
+internal/audit/               per-request audit Record + slog recorder
 ```
 
 ## Quick Start
@@ -21,14 +23,21 @@ internal/provider/opencode/   OpenCode Go HTTP adapter
 cp .env.example .env
 $EDITOR .env  # fill LLMGATE_OPENCODE_API_KEY
 
-make test     # unit tests (httptest mocks)
-make probe    # real upstream call: POST /chat/completions -> deepseek-v4-flash
+make test     # unit tests
+make run      # start the gateway on :8080
 ```
 
-Custom prompt or full OpenAI request:
+Issue an OpenAI-compatible request:
 
 ```bash
-go run ./cmd/llmgate-probe -prompt "say pong" -max-tokens 32
-echo '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}' \
-  | go run ./cmd/llmgate-probe
+curl http://localhost:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}'
+```
+
+For end-to-end checks against upstream via the gateway:
+
+```bash
+make e2e-probe-via-gate
+make e2e
 ```

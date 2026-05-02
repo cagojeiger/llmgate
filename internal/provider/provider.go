@@ -1,7 +1,6 @@
 // Package provider defines the single contract that every LLM upstream
-// adapter implements. Both the HTTP gateway (cmd/llmgate) and the
-// diagnostic CLI (cmd/llmgate-probe) consume this — adding auth, quota,
-// or observability at the Provider boundary covers both call sites.
+// adapter implements. Adding auth, quota, or observability at the
+// Provider boundary covers every gateway call site.
 package provider
 
 import (

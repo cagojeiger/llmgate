@@ -115,7 +115,7 @@ func (s *stream) Summary() *provider.Summary {
 }
 
 // requestBodyWithStream marshals a copy of req with Stream forced true
-// so callers (probe CLI / handler) don't need to set the flag themselves.
+// so callers don't need to set the flag themselves.
 func requestBodyWithStream(req *provider.Request) ([]byte, error) {
 	cp := *req
 	t := true

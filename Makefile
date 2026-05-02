@@ -1,4 +1,4 @@
-.PHONY: test tidy probe build clean run e2e-probe-via-gate e2e-probe-via-gate-stream e2e
+.PHONY: test tidy build clean run e2e-probe-via-gate e2e-probe-via-gate-stream e2e
 
 test:
 	go test ./...
@@ -7,10 +7,7 @@ tidy:
 	go mod tidy
 
 build:
-	go build -o bin/llmgate-probe ./cmd/llmgate-probe
-
-probe:
-	go run ./cmd/llmgate-probe -prompt "ping" -raw
+	go build -o bin/llmgate ./cmd/llmgate
 
 run:
 	go run ./cmd/llmgate

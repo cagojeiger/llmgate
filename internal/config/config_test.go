@@ -24,6 +24,8 @@ func resetEnv(t *testing.T) {
 		"LLMGATE_CIRCUIT_OPEN_DURATION",
 		"LLMGATE_CIRCUIT_MAX_OPEN_DURATION",
 		"LLMGATE_CIRCUIT_JITTER",
+		"LLMGATE_COMPLETE_REQUEST_TIMEOUT",
+		"LLMGATE_COMPLETE_ATTEMPT_TIMEOUT",
 	} {
 		t.Setenv(k, "")
 	}
@@ -62,6 +64,12 @@ func TestLoadServer_Defaults(t *testing.T) {
 	}
 	if cfg.CircuitJitter != 0.2 {
 		t.Errorf("CircuitJitter = %v, want 0.2", cfg.CircuitJitter)
+	}
+	if cfg.CompleteRequestTimeout != 3*time.Minute {
+		t.Errorf("CompleteRequestTimeout = %v, want 3m", cfg.CompleteRequestTimeout)
+	}
+	if cfg.CompleteAttemptTimeout != time.Minute {
+		t.Errorf("CompleteAttemptTimeout = %v, want 1m", cfg.CompleteAttemptTimeout)
 	}
 }
 
@@ -128,6 +136,23 @@ func TestLoadServer_CircuitBackoffOverrides(t *testing.T) {
 	}
 	if cfg.CircuitJitter != 0.35 {
 		t.Errorf("CircuitJitter = %v, want 0.35", cfg.CircuitJitter)
+	}
+}
+
+func TestLoadServer_CompleteTimeoutOverrides(t *testing.T) {
+	resetEnv(t)
+	t.Setenv("LLMGATE_COMPLETE_REQUEST_TIMEOUT", "45s")
+	t.Setenv("LLMGATE_COMPLETE_ATTEMPT_TIMEOUT", "10s")
+
+	cfg, err := LoadServer()
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if cfg.CompleteRequestTimeout != 45*time.Second {
+		t.Errorf("CompleteRequestTimeout = %v, want 45s", cfg.CompleteRequestTimeout)
+	}
+	if cfg.CompleteAttemptTimeout != 10*time.Second {
+		t.Errorf("CompleteAttemptTimeout = %v, want 10s", cfg.CompleteAttemptTimeout)
 	}
 }
 

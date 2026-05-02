@@ -17,11 +17,13 @@ import (
 // same in tests as it does at runtime — fallback on transient classes,
 // circuit trips after 3 strikes, 30s cooldown.
 var testPolicy = FallbackPolicy{
-	OnKinds:         []string{"rate_limit", "upstream", "timeout", "network"},
-	CircuitFailures: 3,
-	CircuitOpen:     30 * time.Second,
-	CircuitMaxOpen:  5 * time.Minute,
-	CircuitJitter:   0.2,
+	OnKinds:                []string{"rate_limit", "upstream", "timeout", "network"},
+	CircuitFailures:        3,
+	CircuitOpen:            30 * time.Second,
+	CircuitMaxOpen:         5 * time.Minute,
+	CircuitJitter:          0.2,
+	CompleteRequestTimeout: 3 * time.Minute,
+	CompleteAttemptTimeout: time.Minute,
 }
 
 func TestRouter_MissingProtocolFactoryFailsFast(t *testing.T) {
@@ -455,6 +457,60 @@ func TestRouter_CircuitOpenExpiryKeepsOpenCountUntilSuccess(t *testing.T) {
 	}
 }
 
+func TestRouter_CompleteAttemptTimeoutFallsBack(t *testing.T) {
+	openAI := &fakeProvider{
+		name: "openai",
+		completeDelays: map[string]time.Duration{
+			"deepseek-v4-pro": 50 * time.Millisecond,
+		},
+	}
+	policy := testPolicy
+	policy.CompleteAttemptTimeout = time.Millisecond
+	router := mustRouterWithPolicy(t, fallbackCatalog(), openAI, nil, policy)
+
+	result, err := router.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if result.ModelUsed != "deepseek-v4-flash" {
+		t.Fatalf("ModelUsed = %q, want deepseek-v4-flash after primary timeout", result.ModelUsed)
+	}
+	if len(result.Attempts) != 2 {
+		t.Fatalf("attempts = %d, want 2", len(result.Attempts))
+	}
+	if result.Attempts[0].ErrorKind != provider.KindTimeout {
+		t.Fatalf("attempt[0].ErrorKind = %q, want timeout", result.Attempts[0].ErrorKind)
+	}
+}
+
+func TestRouter_CompleteRequestTimeoutStopsChain(t *testing.T) {
+	openAI := &fakeProvider{
+		name: "openai",
+		completeDelays: map[string]time.Duration{
+			"deepseek-v4-pro": 50 * time.Millisecond,
+		},
+	}
+	policy := testPolicy
+	policy.CompleteRequestTimeout = time.Millisecond
+	policy.CompleteAttemptTimeout = time.Minute
+	router := mustRouterWithPolicy(t, fallbackCatalog(), openAI, nil, policy)
+
+	result, err := router.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
+	if err == nil {
+		t.Fatal("Complete: want request timeout error")
+	}
+	var perr *provider.Error
+	if !errors.As(err, &perr) || perr.Kind != provider.KindTimeout {
+		t.Fatalf("err = %v, want provider timeout", err)
+	}
+	if openAI.completeCalls != 1 {
+		t.Fatalf("completeCalls = %d, want 1 (request budget exhausted before fallback)", openAI.completeCalls)
+	}
+	if len(result.Attempts) != 1 || result.Attempts[0].ErrorKind != provider.KindTimeout {
+		t.Fatalf("attempts = %+v, want one timeout attempt", result.Attempts)
+	}
+}
+
 func TestRouter_RawModelStillWorks(t *testing.T) {
 	openAI := &fakeProvider{name: "openai"}
 	router := mustRouter(t, fallbackCatalog(), openAI, nil)
@@ -470,6 +526,11 @@ func TestRouter_RawModelStillWorks(t *testing.T) {
 
 func mustRouter(t *testing.T, cat *catalog.Catalog, openAI provider.Provider, anth provider.Provider) *Router {
 	t.Helper()
+	return mustRouterWithPolicy(t, cat, openAI, anth, testPolicy)
+}
+
+func mustRouterWithPolicy(t *testing.T, cat *catalog.Catalog, openAI provider.Provider, anth provider.Provider, policy FallbackPolicy) *Router {
+	t.Helper()
 	factories := map[string]AdapterFactory{
 		"openai": func(*catalog.Endpoint) (provider.Provider, error) { return openAI, nil },
 	}
@@ -477,7 +538,7 @@ func mustRouter(t *testing.T, cat *catalog.Catalog, openAI provider.Provider, an
 		anth = &fakeProvider{name: "anthropic"}
 	}
 	factories["anthropic"] = func(*catalog.Endpoint) (provider.Provider, error) { return anth, nil }
-	r, err := NewRouter(cat, factories, testPolicy, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	r, err := NewRouter(cat, factories, policy, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}
@@ -548,6 +609,7 @@ type fakeProvider struct {
 	errorAll       *provider.Error
 	streamErrors   map[string]*provider.Error
 	streamErrorAll *provider.Error
+	completeDelays map[string]time.Duration
 }
 
 func (p *fakeProvider) Name() string { return p.name }
@@ -555,6 +617,15 @@ func (p *fakeProvider) Name() string { return p.name }
 func (p *fakeProvider) Complete(ctx context.Context, req *provider.Request) (*provider.Response, error) {
 	p.completeCalls++
 	p.lastCompleteReq = req
+	if p.completeDelays != nil {
+		if d := p.completeDelays[req.Model]; d > 0 {
+			select {
+			case <-time.After(d):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+	}
 	if p.errors != nil {
 		if e, ok := p.errors[req.Model]; ok {
 			return nil, e

@@ -35,11 +35,13 @@ type AdapterFactory func(*catalog.Endpoint) (provider.Provider, error)
 // repeated-open exponential backoff. CircuitJitter applies symmetric
 // randomization, where 0.2 means +/-20%.
 type FallbackPolicy struct {
-	OnKinds         []string
-	CircuitFailures int
-	CircuitOpen     time.Duration
-	CircuitMaxOpen  time.Duration
-	CircuitJitter   float64
+	OnKinds                []string
+	CircuitFailures        int
+	CircuitOpen            time.Duration
+	CircuitMaxOpen         time.Duration
+	CircuitJitter          float64
+	CompleteRequestTimeout time.Duration
+	CompleteAttemptTimeout time.Duration
 }
 
 // RouteResult is the outcome of one Router.Complete or Router.CompleteStream
@@ -82,11 +84,13 @@ type Router struct {
 }
 
 type fallbackPolicy struct {
-	onKinds         map[provider.Kind]struct{}
-	circuitFailures int
-	circuitOpen     time.Duration
-	circuitMaxOpen  time.Duration
-	circuitJitter   float64
+	onKinds                map[provider.Kind]struct{}
+	circuitFailures        int
+	circuitOpen            time.Duration
+	circuitMaxOpen         time.Duration
+	circuitJitter          float64
+	completeRequestTimeout time.Duration
+	completeAttemptTimeout time.Duration
 }
 
 type breakerState struct {
@@ -140,11 +144,13 @@ func NewRouter(cat *catalog.Catalog, factories map[string]AdapterFactory, policy
 	}
 
 	internalPolicy := fallbackPolicy{
-		onKinds:         make(map[provider.Kind]struct{}, len(policy.OnKinds)),
-		circuitFailures: policy.CircuitFailures,
-		circuitOpen:     policy.CircuitOpen,
-		circuitMaxOpen:  policy.CircuitMaxOpen,
-		circuitJitter:   policy.CircuitJitter,
+		onKinds:                make(map[provider.Kind]struct{}, len(policy.OnKinds)),
+		circuitFailures:        policy.CircuitFailures,
+		circuitOpen:            policy.CircuitOpen,
+		circuitMaxOpen:         policy.CircuitMaxOpen,
+		circuitJitter:          policy.CircuitJitter,
+		completeRequestTimeout: policy.CompleteRequestTimeout,
+		completeAttemptTimeout: policy.CompleteAttemptTimeout,
 	}
 	for _, k := range policy.OnKinds {
 		internalPolicy.onKinds[provider.Kind(strings.ToLower(k))] = struct{}{}
@@ -174,6 +180,12 @@ func (r *Router) Complete(ctx context.Context, req *provider.Request) (*RouteRes
 	if req == nil {
 		return result, &provider.Error{Kind: provider.KindBadRequest, Message: "request is nil"}
 	}
+	routeCtx := ctx
+	if r.policy.completeRequestTimeout > 0 {
+		var cancel context.CancelFunc
+		routeCtx, cancel = context.WithTimeout(ctx, r.policy.completeRequestTimeout)
+		defer cancel()
+	}
 
 	candidates, err := r.candidates(req.Model)
 	if err != nil {
@@ -183,11 +195,20 @@ func (r *Router) Complete(ctx context.Context, req *provider.Request) (*RouteRes
 	var lastErr error
 
 	for _, candidate := range candidates {
+		if err := routeCtx.Err(); err != nil {
+			return result, contextError(err)
+		}
 		attemptReq := requestForCandidate(req, candidate)
+		attemptCtx := routeCtx
+		cancelAttempt := func() {}
+		if r.policy.completeAttemptTimeout > 0 {
+			attemptCtx, cancelAttempt = context.WithTimeout(routeCtx, r.policy.completeAttemptTimeout)
+		}
 
 		start := time.Now()
-		resp, err := candidate.provider.Complete(ctx, &attemptReq)
+		resp, err := candidate.provider.Complete(attemptCtx, &attemptReq)
 		dur := time.Since(start)
+		cancelAttempt()
 
 		att := provider.Attempt{
 			Vendor:     candidate.provider.Name(),
@@ -223,6 +244,9 @@ func (r *Router) Complete(ctx context.Context, req *provider.Request) (*RouteRes
 			return result, err
 		}
 		r.recordFailure(candidate.model)
+		if err := routeCtx.Err(); err != nil {
+			return result, contextError(lastErr)
+		}
 		r.log.Info("fallback triggered",
 			slog.String("model", candidate.model),
 			slog.String("error_kind", string(att.ErrorKind)),
@@ -302,7 +326,18 @@ func adoptAttemptError(att *provider.Attempt, err error) {
 		att.StatusCode = perr.StatusCode
 		return
 	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		att.ErrorKind = provider.KindTimeout
+		return
+	}
 	att.ErrorKind = provider.KindUnknown
+}
+
+func contextError(err error) error {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return &provider.Error{Kind: provider.KindTimeout, Message: err.Error(), Cause: err}
+	}
+	return err
 }
 
 func (r *Router) candidates(model string) ([]routeCandidate, error) {

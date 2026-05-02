@@ -22,11 +22,13 @@ type Server struct {
 	// Defaults are sized for typical LLM upstreams (transient 429/5xx,
 	// 3 strikes, 30s base cooldown with capped backoff); operators only
 	// set the env vars when the defaults don't fit.
-	FallbackOn      []string
-	CircuitFailures int
-	CircuitOpen     time.Duration
-	CircuitMaxOpen  time.Duration
-	CircuitJitter   float64
+	FallbackOn             []string
+	CircuitFailures        int
+	CircuitOpen            time.Duration
+	CircuitMaxOpen         time.Duration
+	CircuitJitter          float64
+	CompleteRequestTimeout time.Duration
+	CompleteAttemptTimeout time.Duration
 }
 
 func LoadServer() (*Server, error) {
@@ -58,17 +60,27 @@ func LoadServer() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	completeRequestTimeout, err := nonNegativeDuration("LLMGATE_COMPLETE_REQUEST_TIMEOUT", "3m")
+	if err != nil {
+		return nil, err
+	}
+	completeAttemptTimeout, err := nonNegativeDuration("LLMGATE_COMPLETE_ATTEMPT_TIMEOUT", "1m")
+	if err != nil {
+		return nil, err
+	}
 
 	return &Server{
-		Addr:                  orDefault("LLMGATE_ADDR", ":8080"),
-		ShutdownHeaderTimeout: headerTimeout,
-		ShutdownDrainTimeout:  drainTimeout,
-		LogLevel:              logLevel,
-		FallbackOn:            parseCSV("LLMGATE_FALLBACK_ON", "rate_limit,upstream,timeout,network"),
-		CircuitFailures:       circuitFailures,
-		CircuitOpen:           circuitOpen,
-		CircuitMaxOpen:        circuitMaxOpen,
-		CircuitJitter:         circuitJitter,
+		Addr:                   orDefault("LLMGATE_ADDR", ":8080"),
+		ShutdownHeaderTimeout:  headerTimeout,
+		ShutdownDrainTimeout:   drainTimeout,
+		LogLevel:               logLevel,
+		FallbackOn:             parseCSV("LLMGATE_FALLBACK_ON", "rate_limit,upstream,timeout,network"),
+		CircuitFailures:        circuitFailures,
+		CircuitOpen:            circuitOpen,
+		CircuitMaxOpen:         circuitMaxOpen,
+		CircuitJitter:          circuitJitter,
+		CompleteRequestTimeout: completeRequestTimeout,
+		CompleteAttemptTimeout: completeAttemptTimeout,
 	}, nil
 }
 

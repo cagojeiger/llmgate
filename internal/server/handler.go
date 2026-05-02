@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,29 +18,33 @@ import (
 
 const maxChatRequestBytes = 1 << 20
 
+// ChatRouter is what Handler needs from the upstream layer. Defined
+// here (consumer side) so the router package can return RouteResult
+// without exporting an interface contract for it.
+type ChatRouter interface {
+	Complete(ctx context.Context, req *provider.Request) (*provider.RouteResult, error)
+	CompleteStream(ctx context.Context, req *provider.Request) (*provider.RouteResult, error)
+}
+
 type Handler struct {
-	provider provider.Provider
+	router   ChatRouter
 	log      *slog.Logger
 	recorder audit.Recorder
 }
 
-func NewHandler(p provider.Provider, log *slog.Logger, recorder audit.Recorder) *Handler {
+func NewHandler(router ChatRouter, log *slog.Logger, recorder audit.Recorder) *Handler {
 	if log == nil {
 		log = slog.Default()
 	}
 	if recorder == nil {
 		recorder = audit.Nop{}
 	}
-	return &Handler{provider: p, log: log, recorder: recorder}
+	return &Handler{router: router, log: log, recorder: recorder}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
-	// Install the attempts holder so router (or any provider in the chain)
-	// can append per-attempt records that we then drain into the audit
-	// Record below.
-	ctx := provider.WithAttemptHolder(r.Context())
-	r = r.WithContext(ctx)
+	ctx := r.Context()
 
 	rec := &audit.Record{
 		Timestamp: start,
@@ -48,23 +53,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() {
 		rec.DurationMS = time.Since(start).Milliseconds()
-		rec.Attempts = provider.AttemptsFromContext(ctx)
-		// Vendor / ModelUsed reflect the attempt that actually returned
-		// the response body (the last one for success; the last failed
-		// attempt otherwise). Skipped (circuit-open) entries don't
-		// produce attempts so this remains accurate.
-		if last := lastAttempt(rec.Attempts); last != nil {
-			rec.Vendor = last.Vendor
-			rec.ModelUsed = last.Model
-		}
 		h.recorder.Record(ctx, rec)
 	}()
 
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxChatRequestBytes))
 	if err != nil {
 		perr := &provider.Error{Kind: provider.KindBadRequest, Message: "read request body: " + err.Error()}
-		rec.ErrorKind = perr.Kind
-		rec.StatusCode = errStatus(perr)
+		adoptError(rec, perr)
 		writeError(w, perr)
 		return
 	}
@@ -73,8 +68,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	req := &provider.Request{}
 	if err := json.Unmarshal(body, req); err != nil {
 		perr := &provider.Error{Kind: provider.KindBadRequest, Message: "decode request: " + err.Error()}
-		rec.ErrorKind = perr.Kind
-		rec.StatusCode = errStatus(perr)
+		adoptError(rec, perr)
 		writeError(w, perr)
 		return
 	}
@@ -88,31 +82,83 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.serveComplete(w, r, req, rec)
 }
 
-func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *provider.Request, rec *audit.Record) {
-	resp, err := h.provider.Complete(r.Context(), req)
-	if err != nil {
-		var perr *provider.Error
-		if errors.As(err, &perr) {
-			rec.ErrorKind = perr.Kind
+// adoptRoute copies routing metadata onto rec. Non-stream callers see a
+// fully-populated RouteResult (chain done); stream callers see a single
+// in-flight Attempt that is finalized later from Stream.Summary.
+func adoptRoute(rec *audit.Record, result *provider.RouteResult) {
+	if result == nil {
+		return
+	}
+	rec.Attempts = result.Attempts
+	rec.Vendor = result.Vendor
+	rec.ModelUsed = result.ModelUsed
+}
+
+// adoptError populates rec.ErrorKind / rec.StatusCode from err. Pure on
+// rec — no logging, no HTTP write — so call sites that handle different
+// error sources stay tiny and audit assembly stays unit-testable.
+func adoptError(rec *audit.Record, err error) {
+	var perr *provider.Error
+	if errors.As(err, &perr) {
+		rec.ErrorKind = perr.Kind
+	}
+	rec.StatusCode = errStatus(err)
+}
+
+// adoptStreamSummary syncs end-of-stream Summary onto rec and finalizes
+// the in-flight Attempt's DurationMS (relative to now). When the stream
+// errored mid-flight, rec.ErrorKind is already set by the Recv loop;
+// this propagates it onto the Attempt for symmetry with non-stream.
+func adoptStreamSummary(rec *audit.Record, sum *provider.Summary, now time.Time) {
+	if len(rec.Attempts) > 0 {
+		last := &rec.Attempts[len(rec.Attempts)-1]
+		last.DurationMS = now.Sub(last.StartedAt).Milliseconds()
+		if last.ErrorKind == "" && rec.ErrorKind != "" {
+			last.ErrorKind = rec.ErrorKind
 		}
-		rec.StatusCode = errStatus(err)
+		if sum != nil {
+			if sum.Usage != nil {
+				last.Usage = sum.Usage
+			}
+			if sum.VendorCost != "" {
+				last.VendorCost = sum.VendorCost
+			}
+		}
+	}
+	if sum == nil {
+		return
+	}
+	if sum.Usage != nil {
+		rec.Usage = sum.Usage
+	}
+	if sum.VendorCost != "" {
+		rec.VendorCost = sum.VendorCost
+	}
+}
+
+func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *provider.Request, rec *audit.Record) {
+	result, err := h.router.Complete(r.Context(), req)
+	adoptRoute(rec, result)
+	if err != nil {
+		adoptError(rec, err)
 		writeError(w, err)
 		return
 	}
 
-	out, err := json.Marshal(resp)
+	out, err := json.Marshal(result.Response)
 	if err != nil {
 		perr := &provider.Error{Kind: provider.KindUnknown, Message: "encode response: " + err.Error(), Cause: err}
-		rec.ErrorKind = perr.Kind
-		rec.StatusCode = errStatus(perr)
+		adoptError(rec, perr)
 		writeError(w, perr)
 		return
 	}
 
 	rec.StatusCode = http.StatusOK
-	rec.Usage = resp.Usage
-	if cost, ok := resp.Extra["cost"]; ok && len(cost) > 0 {
-		rec.VendorCost = string(cost)
+	if result.Response != nil {
+		rec.Usage = result.Response.Usage
+		if cost, ok := result.Response.Extra["cost"]; ok && len(cost) > 0 {
+			rec.VendorCost = string(cost)
+		}
 	}
 	rec.ResponseBytes = int64(len(out))
 
@@ -122,39 +168,21 @@ func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *pro
 }
 
 func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *provider.Request, rec *audit.Record) {
-	stream, err := h.provider.CompleteStream(r.Context(), req)
+	result, err := h.router.CompleteStream(r.Context(), req)
+	adoptRoute(rec, result)
 	if err != nil {
-		var perr *provider.Error
-		if errors.As(err, &perr) {
-			rec.ErrorKind = perr.Kind
-		}
-		rec.StatusCode = errStatus(err)
+		adoptError(rec, err)
 		writeError(w, err)
 		return
 	}
+	stream := result.Stream
 	defer stream.Close()
-	// Drain end-of-stream usage / vendor cost from the adapter's own
-	// accumulator instead of parsing each event inline. defer LIFO runs
-	// this before Close — Summary is callable any time but reads cleanest
-	// while the stream object is still live.
-	defer func() {
-		sum := stream.Summary()
-		if sum == nil {
-			return
-		}
-		if sum.Usage != nil {
-			rec.Usage = sum.Usage
-		}
-		if sum.VendorCost != "" {
-			rec.VendorCost = sum.VendorCost
-		}
-	}()
+	defer func() { adoptStreamSummary(rec, stream.Summary(), time.Now()) }()
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		perr := &provider.Error{Kind: provider.KindUnknown, Message: "streaming unsupported"}
-		rec.ErrorKind = perr.Kind
-		rec.StatusCode = errStatus(perr)
+		adoptError(rec, perr)
 		writeError(w, perr)
 		return
 	}
@@ -181,7 +209,7 @@ func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *provi
 				rec.ErrorKind = perr.Kind
 			}
 			h.log.LogAttrs(r.Context(), slog.LevelWarn, "stream receive failed",
-				slog.String("provider", h.provider.Name()),
+				slog.String("vendor", rec.Vendor),
 				slog.String("err", err.Error()),
 			)
 			writeSSEError(w, err)
@@ -205,16 +233,6 @@ func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *provi
 		rec.ResponseBytes += int64(n)
 		flusher.Flush()
 	}
-}
-
-// lastAttempt returns the last attempt in the slice (which represents
-// either the successful upstream call or the final failure). Returns nil
-// for an empty slice.
-func lastAttempt(atts []provider.Attempt) *provider.Attempt {
-	if len(atts) == 0 {
-		return nil
-	}
-	return &atts[len(atts)-1]
 }
 
 func writeError(w http.ResponseWriter, err error) {

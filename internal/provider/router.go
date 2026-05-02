@@ -13,6 +13,27 @@ import (
 
 type AdapterFactory func(*catalog.Endpoint) (Provider, error)
 
+// RouteResult is the outcome of one Router.Complete or Router.CompleteStream
+// call. Exactly one of Response/Stream is populated on success. On failure
+// the response side is nil but Attempts is still populated so audit can
+// log the partial chain.
+//
+// For Complete: Attempts records every upstream call in chain order; the
+// last entry corresponds to the body returned (success) or the final
+// failure. Vendor/ModelUsed reflect that last entry.
+//
+// For CompleteStream: the stream is started but not yet drained, so the
+// single Attempt has StartedAt set but DurationMS/Usage/ErrorKind/VendorCost
+// are zero-valued. The caller must finalize that Attempt at end-of-stream
+// from Stream.Summary() and any Recv error.
+type RouteResult struct {
+	Response  *Response
+	Stream    Stream
+	Vendor    string
+	ModelUsed string
+	Attempts  []Attempt
+}
+
 // Router dispatches a Request to the right Provider based on model id,
 // resolving aliases to ordered fallback chains and tracking per-process
 // circuit-breaker state for each model.
@@ -105,22 +126,25 @@ func NewRouter(cat *catalog.Catalog, factories map[string]AdapterFactory, log *s
 	}, nil
 }
 
-func (r *Router) Name() string { return "router" }
-
 // Complete walks the fallback chain for the requested model. On a
 // fallback-eligible error it tries the next entry; on a non-eligible
-// error it returns immediately. Each upstream call is recorded as an
-// Attempt on the request context (if a holder is installed) so audit
-// can replay the chain. Skipped (circuit-open) models do not produce
-// Attempt entries because no upstream call was made.
-func (r *Router) Complete(ctx context.Context, req *Request) (*Response, error) {
+// error it returns immediately. Each upstream call is appended to
+// RouteResult.Attempts so audit can replay the chain. Skipped
+// (circuit-open) models do not produce Attempt entries because no
+// upstream call was made.
+//
+// RouteResult is non-nil for every return; Attempts is populated even
+// on error so the caller can audit the partial chain. The error is
+// non-nil iff no chain entry produced a body.
+func (r *Router) Complete(ctx context.Context, req *Request) (*RouteResult, error) {
+	result := &RouteResult{}
 	if req == nil {
-		return nil, &Error{Kind: KindBadRequest, Message: "request is nil"}
+		return result, &Error{Kind: KindBadRequest, Message: "request is nil"}
 	}
 
 	chain, err := r.resolveChain(req.Model)
 	if err != nil {
-		return nil, err
+		return result, err
 	}
 
 	var lastErr error
@@ -163,9 +187,12 @@ func (r *Router) Complete(ctx context.Context, req *Request) (*Response, error) 
 					att.VendorCost = string(cost)
 				}
 			}
-			RecordAttempt(ctx, att)
+			result.Attempts = append(result.Attempts, att)
+			result.Response = resp
+			result.Vendor = p.Name()
+			result.ModelUsed = modelID
 			r.recordSuccess(modelID)
-			return resp, nil
+			return result, nil
 		}
 
 		var perr *Error
@@ -175,11 +202,13 @@ func (r *Router) Complete(ctx context.Context, req *Request) (*Response, error) 
 		} else {
 			att.ErrorKind = KindUnknown
 		}
-		RecordAttempt(ctx, att)
+		result.Attempts = append(result.Attempts, att)
+		result.Vendor = p.Name()
+		result.ModelUsed = modelID
 		lastErr = err
 
 		if !r.fallbackEligible(att.ErrorKind) {
-			return nil, err
+			return result, err
 		}
 		r.recordFailure(modelID)
 		r.log.Info("fallback triggered",
@@ -192,20 +221,26 @@ func (r *Router) Complete(ctx context.Context, req *Request) (*Response, error) 
 		// Every chain entry was either unregistered or had its circuit
 		// open. Surface this as upstream-unavailable so callers can
 		// distinguish from "request was bad".
-		return nil, &Error{Kind: KindUpstream, Message: "all models in chain are currently unavailable"}
+		return result, &Error{Kind: KindUpstream, Message: "all models in chain are currently unavailable"}
 	}
-	return nil, lastErr
+	return result, lastErr
 }
 
 // CompleteStream picks the first valid chain entry and dispatches once.
 // V1 does not fall back streaming requests — see Router doc.
-func (r *Router) CompleteStream(ctx context.Context, req *Request) (Stream, error) {
+//
+// On success the returned RouteResult has Stream populated and a single
+// Attempt with StartedAt set; the caller drains the stream and finalizes
+// that Attempt (DurationMS, Usage, VendorCost, ErrorKind) at end-of-stream.
+// On a pre-stream error the Attempt is finalized in place before return.
+func (r *Router) CompleteStream(ctx context.Context, req *Request) (*RouteResult, error) {
+	result := &RouteResult{}
 	if req == nil {
-		return nil, &Error{Kind: KindBadRequest, Message: "request is nil"}
+		return result, &Error{Kind: KindBadRequest, Message: "request is nil"}
 	}
 	chain, err := r.resolveChain(req.Model)
 	if err != nil {
-		return nil, err
+		return result, err
 	}
 	for _, modelID := range chain {
 		p, ok := r.byModel[modelID]
@@ -214,9 +249,34 @@ func (r *Router) CompleteStream(ctx context.Context, req *Request) (Stream, erro
 		}
 		attemptReq := *req
 		attemptReq.Model = modelID
-		return p.CompleteStream(ctx, &attemptReq)
+
+		att := Attempt{
+			Vendor:    p.Name(),
+			Model:     modelID,
+			StartedAt: time.Now(),
+		}
+		stream, err := p.CompleteStream(ctx, &attemptReq)
+		if err != nil {
+			var perr *Error
+			if errors.As(err, &perr) {
+				att.ErrorKind = perr.Kind
+				att.StatusCode = perr.StatusCode
+			} else {
+				att.ErrorKind = KindUnknown
+			}
+			att.DurationMS = time.Since(att.StartedAt).Milliseconds()
+			result.Attempts = append(result.Attempts, att)
+			result.Vendor = p.Name()
+			result.ModelUsed = modelID
+			return result, err
+		}
+		result.Attempts = append(result.Attempts, att)
+		result.Stream = stream
+		result.Vendor = p.Name()
+		result.ModelUsed = modelID
+		return result, nil
 	}
-	return nil, &Error{Kind: KindBadRequest, Message: "unknown model: " + req.Model}
+	return result, &Error{Kind: KindBadRequest, Message: "unknown model: " + req.Model}
 }
 
 // resolveChain returns the lowercased chain for a model name. Aliases

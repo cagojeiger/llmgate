@@ -17,8 +17,23 @@ import (
 
 func TestHandler_SingleAttempt_RecordPopulated(t *testing.T) {
 	rec, recorder := newCaptureRecorder()
-	p := &recordingProvider{name: "opencode"}
-	h := NewHandler(p, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder)
+	r := &fakeRouter{
+		vendor: "opencode",
+		buildResult: func(req *provider.Request) *provider.RouteResult {
+			return &provider.RouteResult{
+				Response: &provider.Response{
+					Model:   req.Model,
+					Choices: []provider.Choice{{Index: 0, Message: provider.Message{Role: "assistant", Content: "ok"}}},
+				},
+				Vendor:    "opencode",
+				ModelUsed: req.Model,
+				Attempts: []provider.Attempt{
+					{Vendor: "opencode", Model: req.Model, StatusCode: 200, StartedAt: time.Now()},
+				},
+			}
+		},
+	}
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder)
 
 	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -45,13 +60,24 @@ func TestHandler_SingleAttempt_RecordPopulated(t *testing.T) {
 
 func TestHandler_FallbackChain_AttemptsRecorded(t *testing.T) {
 	rec, recorder := newCaptureRecorder()
-	// Provider records two attempts: first failed (rate_limit), second succeeded.
-	p := &recordingProvider{
-		name:           "opencode",
-		extraAttempts:  []provider.Attempt{{Vendor: "opencode", Model: "deepseek-v4-pro", ErrorKind: provider.KindRateLimit, StatusCode: 429}},
-		successAttempt: provider.Attempt{Vendor: "opencode", Model: "deepseek-v4-flash", StatusCode: 200},
+	r := &fakeRouter{
+		vendor: "opencode",
+		buildResult: func(req *provider.Request) *provider.RouteResult {
+			return &provider.RouteResult{
+				Response: &provider.Response{
+					Model:   "deepseek-v4-flash",
+					Choices: []provider.Choice{{Index: 0, Message: provider.Message{Role: "assistant", Content: "ok"}}},
+				},
+				Vendor:    "opencode",
+				ModelUsed: "deepseek-v4-flash",
+				Attempts: []provider.Attempt{
+					{Vendor: "opencode", Model: "deepseek-v4-pro", ErrorKind: provider.KindRateLimit, StatusCode: 429, StartedAt: time.Now()},
+					{Vendor: "opencode", Model: "deepseek-v4-flash", StatusCode: 200, StartedAt: time.Now()},
+				},
+			}
+		},
 	}
-	h := NewHandler(p, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder)
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder)
 
 	body := `{"model":"coder","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -76,43 +102,116 @@ func TestHandler_FallbackChain_AttemptsRecorded(t *testing.T) {
 	}
 }
 
-// recordingProvider seeds extraAttempts (failed) before pushing
-// successAttempt and returning success. Single-attempt callers leave
-// extraAttempts nil and successAttempt with Model=req.Model.
-type recordingProvider struct {
-	name           string
-	extraAttempts  []provider.Attempt
-	successAttempt provider.Attempt
+func TestAdoptError_ProviderErrorMapsKindAndStatus(t *testing.T) {
+	cases := []struct {
+		name       string
+		kind       provider.Kind
+		wantStatus int
+	}{
+		{"auth", provider.KindAuth, http.StatusUnauthorized},
+		{"rate_limit", provider.KindRateLimit, http.StatusTooManyRequests},
+		{"bad_request", provider.KindBadRequest, http.StatusBadRequest},
+		{"context_length", provider.KindContextLength, http.StatusBadRequest},
+		{"upstream", provider.KindUpstream, http.StatusBadGateway},
+		{"timeout", provider.KindTimeout, http.StatusBadGateway},
+		{"unknown", provider.KindUnknown, http.StatusInternalServerError},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &audit.Record{}
+			adoptError(rec, &provider.Error{Kind: tc.kind, Message: "x"})
+			if rec.ErrorKind != tc.kind {
+				t.Errorf("ErrorKind = %q, want %q", rec.ErrorKind, tc.kind)
+			}
+			if rec.StatusCode != tc.wantStatus {
+				t.Errorf("StatusCode = %d, want %d", rec.StatusCode, tc.wantStatus)
+			}
+		})
+	}
 }
 
-func (p *recordingProvider) Name() string { return p.name }
-
-func (p *recordingProvider) Complete(ctx context.Context, req *provider.Request) (*provider.Response, error) {
-	for _, a := range p.extraAttempts {
-		provider.RecordAttempt(ctx, a)
+func TestAdoptError_NonProviderError_Falls500(t *testing.T) {
+	rec := &audit.Record{}
+	adoptError(rec, io.ErrUnexpectedEOF)
+	if rec.ErrorKind != "" {
+		t.Errorf("ErrorKind = %q, want empty (non-provider err shouldn't set kind)", rec.ErrorKind)
 	}
-	finish := p.successAttempt
-	if finish.Vendor == "" {
-		finish.Vendor = p.name
+	if rec.StatusCode != http.StatusInternalServerError {
+		t.Errorf("StatusCode = %d, want 500", rec.StatusCode)
 	}
-	if finish.Model == "" {
-		finish.Model = req.Model
-	}
-	if finish.StatusCode == 0 {
-		finish.StatusCode = 200
-	}
-	if finish.StartedAt.IsZero() {
-		finish.StartedAt = time.Now()
-	}
-	provider.RecordAttempt(ctx, finish)
-	return &provider.Response{
-		Model:   finish.Model,
-		Choices: []provider.Choice{{Index: 0, Message: provider.Message{Role: "assistant", Content: "ok"}}},
-	}, nil
 }
 
-func (p *recordingProvider) CompleteStream(ctx context.Context, req *provider.Request) (provider.Stream, error) {
-	return nil, &provider.Error{Kind: provider.KindUpstream, Message: "stream not implemented in this fake"}
+func TestAdoptStreamSummary_FinalizesAttemptAndRecord(t *testing.T) {
+	started := time.Unix(1700000000, 0)
+	now := started.Add(250 * time.Millisecond)
+	rec := &audit.Record{
+		Attempts: []provider.Attempt{
+			{Vendor: "v", Model: "m", StartedAt: started},
+		},
+	}
+	sum := &provider.Summary{
+		Usage:      &provider.Usage{PromptTokens: 5, CompletionTokens: 7, TotalTokens: 12},
+		VendorCost: `"0.001"`,
+	}
+
+	adoptStreamSummary(rec, sum, now)
+
+	if rec.Usage == nil || rec.Usage.TotalTokens != 12 {
+		t.Errorf("rec.Usage = %+v, want total=12", rec.Usage)
+	}
+	if rec.VendorCost != `"0.001"` {
+		t.Errorf("rec.VendorCost = %q, want \"0.001\"", rec.VendorCost)
+	}
+	last := rec.Attempts[0]
+	if last.DurationMS != 250 {
+		t.Errorf("last.DurationMS = %d, want 250", last.DurationMS)
+	}
+	if last.Usage == nil || last.Usage.TotalTokens != 12 {
+		t.Errorf("last.Usage = %+v, want total=12 propagated", last.Usage)
+	}
+	if last.VendorCost != `"0.001"` {
+		t.Errorf("last.VendorCost = %q, want \"0.001\" propagated", last.VendorCost)
+	}
+}
+
+func TestAdoptStreamSummary_PropagatesRecvErrorKindToAttempt(t *testing.T) {
+	// Recv loop set rec.ErrorKind; the deferred summary sync must mirror
+	// it onto the in-flight Attempt so audit logs stay symmetric with the
+	// non-stream path.
+	started := time.Unix(1700000000, 0)
+	now := started.Add(100 * time.Millisecond)
+	rec := &audit.Record{
+		ErrorKind: provider.KindUpstream,
+		Attempts: []provider.Attempt{
+			{Vendor: "v", Model: "m", StartedAt: started},
+		},
+	}
+
+	adoptStreamSummary(rec, nil, now)
+
+	if rec.Attempts[0].ErrorKind != provider.KindUpstream {
+		t.Errorf("attempt ErrorKind = %q, want upstream", rec.Attempts[0].ErrorKind)
+	}
+	if rec.Attempts[0].DurationMS != 100 {
+		t.Errorf("DurationMS = %d, want 100", rec.Attempts[0].DurationMS)
+	}
+}
+
+// fakeRouter implements ChatRouter for handler tests. buildResult lets
+// each test case shape the RouteResult — including pre-populated
+// Attempts so we exercise the audit-copy path without spinning up a
+// real Router.
+type fakeRouter struct {
+	vendor      string
+	buildResult func(req *provider.Request) *provider.RouteResult
+}
+
+func (f *fakeRouter) Complete(_ context.Context, req *provider.Request) (*provider.RouteResult, error) {
+	return f.buildResult(req), nil
+}
+
+func (f *fakeRouter) CompleteStream(_ context.Context, _ *provider.Request) (*provider.RouteResult, error) {
+	return &provider.RouteResult{}, &provider.Error{Kind: provider.KindUpstream, Message: "stream not implemented in this fake"}
 }
 
 type captureRecorder struct {

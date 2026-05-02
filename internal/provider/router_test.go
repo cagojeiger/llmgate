@@ -106,8 +106,15 @@ func TestRouter_Dispatch(t *testing.T) {
 	}
 
 	streamReq := &Request{Model: "minimax-m2.5", Messages: []Message{{Role: "user", Content: "hi"}}}
-	if _, err := router.CompleteStream(context.Background(), streamReq); err != nil {
+	streamRes, err := router.CompleteStream(context.Background(), streamReq)
+	if err != nil {
 		t.Fatalf("CompleteStream() error = %v", err)
+	}
+	if streamRes.Stream == nil {
+		t.Fatalf("CompleteStream: result.Stream is nil")
+	}
+	if len(streamRes.Attempts) != 1 || streamRes.Attempts[0].Model != "minimax-m2.5" {
+		t.Fatalf("stream attempts = %+v, want one minimax-m2.5", streamRes.Attempts)
 	}
 	if anthropic.streamCalls != 1 || anthropic.lastStreamReq.Model != "minimax-m2.5" {
 		t.Fatalf("anthropic stream calls = %d, model = %q, want 1 / minimax-m2.5", anthropic.streamCalls, anthropic.lastStreamReq.Model)
@@ -118,24 +125,24 @@ func TestRouter_AliasFallback_PrimarySucceeds(t *testing.T) {
 	openAI := &fakeProvider{name: "openai"}
 	router := mustRouter(t, fallbackCatalog(), openAI, nil)
 
-	ctx := WithAttemptHolder(context.Background())
-	resp, err := router.Complete(ctx, &Request{Model: "coder", Messages: []Message{{Role: "user", Content: "hi"}}})
+	result, err := router.Complete(context.Background(), &Request{Model: "coder", Messages: []Message{{Role: "user", Content: "hi"}}})
 	if err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
-	// resp.Model is whatever fakeProvider echoed (req.Model = first chain entry)
-	if resp.Model != "deepseek-v4-pro" {
-		t.Errorf("resp.Model = %q, want deepseek-v4-pro", resp.Model)
+	if result.Response == nil || result.Response.Model != "deepseek-v4-pro" {
+		t.Errorf("result.Response.Model = %v, want deepseek-v4-pro", result.Response)
+	}
+	if result.Vendor != "openai" || result.ModelUsed != "deepseek-v4-pro" {
+		t.Errorf("Vendor/ModelUsed = %q/%q, want openai/deepseek-v4-pro", result.Vendor, result.ModelUsed)
 	}
 	if openAI.completeCalls != 1 {
 		t.Errorf("completeCalls = %d, want 1 (no fallback needed)", openAI.completeCalls)
 	}
-	atts := AttemptsFromContext(ctx)
-	if len(atts) != 1 {
-		t.Fatalf("attempts = %d, want 1", len(atts))
+	if len(result.Attempts) != 1 {
+		t.Fatalf("attempts = %d, want 1", len(result.Attempts))
 	}
-	if atts[0].Model != "deepseek-v4-pro" || atts[0].Vendor != "openai" {
-		t.Errorf("attempt[0] = %+v, want deepseek-v4-pro / openai", atts[0])
+	if result.Attempts[0].Model != "deepseek-v4-pro" || result.Attempts[0].Vendor != "openai" {
+		t.Errorf("attempt[0] = %+v, want deepseek-v4-pro / openai", result.Attempts[0])
 	}
 }
 
@@ -147,23 +154,24 @@ func TestRouter_AliasFallback_RetriesOnEligibleError(t *testing.T) {
 	}
 	router := mustRouter(t, fallbackCatalog(), openAI, nil)
 
-	ctx := WithAttemptHolder(context.Background())
-	resp, err := router.Complete(ctx, &Request{Model: "coder", Messages: []Message{{Role: "user", Content: "hi"}}})
+	result, err := router.Complete(context.Background(), &Request{Model: "coder", Messages: []Message{{Role: "user", Content: "hi"}}})
 	if err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
-	if resp.Model != "deepseek-v4-flash" {
-		t.Errorf("resp.Model = %q, want deepseek-v4-flash (after fallback)", resp.Model)
+	if result.Response == nil || result.Response.Model != "deepseek-v4-flash" {
+		t.Errorf("result.Response.Model = %v, want deepseek-v4-flash (after fallback)", result.Response)
 	}
-	atts := AttemptsFromContext(ctx)
-	if len(atts) != 2 {
-		t.Fatalf("attempts = %d, want 2", len(atts))
+	if result.ModelUsed != "deepseek-v4-flash" {
+		t.Errorf("ModelUsed = %q, want deepseek-v4-flash", result.ModelUsed)
 	}
-	if atts[0].ErrorKind != KindRateLimit || atts[0].StatusCode != 429 {
-		t.Errorf("attempt[0] = %+v, want rate_limit/429", atts[0])
+	if len(result.Attempts) != 2 {
+		t.Fatalf("attempts = %d, want 2", len(result.Attempts))
 	}
-	if atts[1].ErrorKind != "" || atts[1].StatusCode != 200 {
-		t.Errorf("attempt[1] = %+v, want success", atts[1])
+	if result.Attempts[0].ErrorKind != KindRateLimit || result.Attempts[0].StatusCode != 429 {
+		t.Errorf("attempt[0] = %+v, want rate_limit/429", result.Attempts[0])
+	}
+	if result.Attempts[1].ErrorKind != "" || result.Attempts[1].StatusCode != 200 {
+		t.Errorf("attempt[1] = %+v, want success", result.Attempts[1])
 	}
 }
 
@@ -175,8 +183,7 @@ func TestRouter_AliasFallback_BadRequestStopsImmediately(t *testing.T) {
 	}
 	router := mustRouter(t, fallbackCatalog(), openAI, nil)
 
-	ctx := WithAttemptHolder(context.Background())
-	_, err := router.Complete(ctx, &Request{Model: "coder", Messages: []Message{{Role: "user", Content: "hi"}}})
+	result, err := router.Complete(context.Background(), &Request{Model: "coder", Messages: []Message{{Role: "user", Content: "hi"}}})
 	if err == nil {
 		t.Fatal("Complete: want error")
 	}
@@ -187,9 +194,8 @@ func TestRouter_AliasFallback_BadRequestStopsImmediately(t *testing.T) {
 	if openAI.completeCalls != 1 {
 		t.Errorf("completeCalls = %d, want 1 (no fallback for non-eligible)", openAI.completeCalls)
 	}
-	atts := AttemptsFromContext(ctx)
-	if len(atts) != 1 {
-		t.Fatalf("attempts = %d, want 1", len(atts))
+	if len(result.Attempts) != 1 {
+		t.Fatalf("attempts = %d, want 1", len(result.Attempts))
 	}
 }
 
@@ -198,8 +204,7 @@ func TestRouter_AliasFallback_AllExhausted(t *testing.T) {
 	openAI.errorAll = &Error{Kind: KindUpstream, Message: "boom", StatusCode: 502}
 	router := mustRouter(t, fallbackCatalog(), openAI, nil)
 
-	ctx := WithAttemptHolder(context.Background())
-	_, err := router.Complete(ctx, &Request{Model: "coder", Messages: []Message{{Role: "user", Content: "hi"}}})
+	result, err := router.Complete(context.Background(), &Request{Model: "coder", Messages: []Message{{Role: "user", Content: "hi"}}})
 	if err == nil {
 		t.Fatal("Complete: want error")
 	}
@@ -207,10 +212,9 @@ func TestRouter_AliasFallback_AllExhausted(t *testing.T) {
 	if !errors.As(err, &perr) || perr.Kind != KindUpstream {
 		t.Fatalf("err = %v, want KindUpstream (last attempt err)", err)
 	}
-	atts := AttemptsFromContext(ctx)
 	// chain has 4 openai-protocol entries; all should be tried before chain exhausted.
-	if len(atts) != 4 {
-		t.Fatalf("attempts = %d, want 4", len(atts))
+	if len(result.Attempts) != 4 {
+		t.Fatalf("attempts = %d, want 4", len(result.Attempts))
 	}
 }
 
@@ -248,12 +252,12 @@ func TestRouter_RawModelStillWorks(t *testing.T) {
 	openAI := &fakeProvider{name: "openai"}
 	router := mustRouter(t, fallbackCatalog(), openAI, nil)
 
-	resp, err := router.Complete(context.Background(), &Request{Model: "kimi-k2.6", Messages: []Message{{Role: "user", Content: "hi"}}})
+	result, err := router.Complete(context.Background(), &Request{Model: "kimi-k2.6", Messages: []Message{{Role: "user", Content: "hi"}}})
 	if err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
-	if resp.Model != "kimi-k2.6" {
-		t.Errorf("resp.Model = %q, want kimi-k2.6", resp.Model)
+	if result.Response == nil || result.Response.Model != "kimi-k2.6" {
+		t.Errorf("result.Response.Model = %v, want kimi-k2.6", result.Response)
 	}
 }
 

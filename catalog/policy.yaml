@@ -1,6 +1,0 @@
-on_kinds: [rate_limit, upstream, timeout, network]
-circuit:
-  failures_to_open: 3
-  open_duration: 30s
-defaults:
-  model: deepseek-v4-flash

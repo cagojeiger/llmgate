@@ -1,12 +1,11 @@
-// Package catalog loads the gateway's per-model endpoint table and
-// fallback policy from a directory of yaml files.
+// Package catalog loads the gateway's per-model endpoint table from a
+// directory of yaml files.
 //
 // Layout (under the root passed to LoadDir):
 //
 //	models/<id>.yaml          one yaml per endpoint (id + vendor + type +
 //	                          base_url + auth_env). file = endpoint.
 //	aliases/<name>.yaml       one yaml per alias (alias + chain).
-//	policy.yaml               global policy: on_kinds + circuit + defaults.
 //
 // Each models/*.yaml registers exactly one Endpoint and one Model with
 // the same id, so two yaml files for the same vendor model name but
@@ -14,20 +13,21 @@
 // person runs several subscriptions, but the gateway itself needs no
 // special code for that case.
 //
-// The catalog is data, not code: this package only carries the loader.
+// Routing policy (fallback eligibility, circuit breaker) is not part
+// of the catalog. It lives in env-driven config and reaches the router
+// through main.go — the catalog's job is data only.
+//
 // The default catalog ships at the repo root under catalog/. At runtime
 // LLMGATE_CATALOG (a directory path) overrides; otherwise Load reads
 // from cwd's ./catalog.
 package catalog
 
 import (
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path"
 	"strings"
-	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -38,8 +38,6 @@ type Catalog struct {
 	Endpoints map[string]*Endpoint
 	Models    map[string]*Model
 	Aliases   map[string]*Alias
-	Fallback  FallbackPolicy
-	Defaults  Defaults
 }
 
 type Endpoint struct {
@@ -67,22 +65,6 @@ type Alias struct {
 	Chain []string
 }
 
-// FallbackPolicy declares when the router treats a failure as eligible for
-// the next chain entry, and how circuit breaking suppresses dead models.
-//
-// OnKinds is a string list (matched against provider.Kind values) so this
-// package stays free of upstream-error semantics. Empty list = no errors
-// are fallback-eligible (i.e. fallback is effectively disabled).
-type FallbackPolicy struct {
-	OnKinds         []string
-	CircuitFailures int
-	CircuitOpen     time.Duration
-}
-
-type Defaults struct {
-	Model string
-}
-
 // rawModel is the on-disk shape of a models/*.yaml file. Each file
 // declares one endpoint + one model.
 type rawModel struct {
@@ -100,30 +82,14 @@ type rawAlias struct {
 	Chain []string `yaml:"chain"`
 }
 
-// rawPolicy is the shape of the catalog-root policy.yaml — global routing
-// policy plus the catalog default model.
-type rawPolicy struct {
-	OnKinds  []string   `yaml:"on_kinds"`
-	Circuit  rawCircuit `yaml:"circuit"`
-	Defaults Defaults   `yaml:"defaults"`
-}
-
-type rawCircuit struct {
-	FailuresToOpen int           `yaml:"failures_to_open"`
-	OpenDuration   time.Duration `yaml:"open_duration"`
-}
-
 // LoadDir reads a catalog from the given directory on disk. The directory
-// must contain a models/ subdirectory (at minimum); aliases/ and
-// policy.yaml are optional.
+// must contain a models/ subdirectory (at minimum); aliases/ is optional.
 func LoadDir(dir string) (*Catalog, error) {
 	return loadFS(os.DirFS(dir))
 }
 
 // Load returns the catalog at LLMGATE_CATALOG (a directory path) or
-// from cwd's ./catalog when the env is unset. There is no embedded
-// default — running from a directory without a catalog/ next to it
-// (and no LLMGATE_CATALOG set) is an error, by design.
+// from cwd's ./catalog when the env is unset.
 func Load() (*Catalog, error) {
 	dir := os.Getenv("LLMGATE_CATALOG")
 	if dir == "" {
@@ -162,15 +128,6 @@ func loadFS(fsys fs.FS) (*Catalog, error) {
 		return nil, err
 	}
 
-	if err := loadPolicy(fsys, cat); err != nil {
-		return nil, err
-	}
-
-	if cat.Defaults.Model != "" {
-		if _, ok := cat.Models[strings.ToLower(cat.Defaults.Model)]; !ok {
-			return nil, fmt.Errorf("catalog: defaults.model %q references unknown model", cat.Defaults.Model)
-		}
-	}
 	for _, a := range cat.Aliases {
 		for _, m := range a.Chain {
 			if _, ok := cat.Models[strings.ToLower(m)]; !ok {
@@ -180,29 +137,6 @@ func loadFS(fsys fs.FS) (*Catalog, error) {
 	}
 
 	return cat, nil
-}
-
-// loadPolicy reads policy.yaml at the catalog root. A missing file is OK
-// (means "no fallback rules, no defaults"); any other error propagates.
-func loadPolicy(fsys fs.FS, cat *Catalog) error {
-	data, err := fs.ReadFile(fsys, "policy.yaml")
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil
-		}
-		return fmt.Errorf("catalog: read policy.yaml: %w", err)
-	}
-	var policy rawPolicy
-	if err := yaml.Unmarshal(data, &policy); err != nil {
-		return fmt.Errorf("policy.yaml: %w", err)
-	}
-	cat.Fallback = FallbackPolicy{
-		OnKinds:         append([]string(nil), policy.OnKinds...),
-		CircuitFailures: policy.Circuit.FailuresToOpen,
-		CircuitOpen:     policy.Circuit.OpenDuration,
-	}
-	cat.Defaults = policy.Defaults
-	return nil
 }
 
 // registerModel turns one models/*.yaml into one Endpoint + one Model.

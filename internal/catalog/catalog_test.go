@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 )
 
 // repoCatalogDir points at the repo's actual catalog/ directory from the
@@ -35,9 +34,6 @@ func TestLoadDir_RepoCatalog(t *testing.T) {
 	if cat.Endpoints["minimax-m2.7"].Protocol != "anthropic" {
 		t.Fatalf("minimax-m2.7 protocol = %q, want anthropic", cat.Endpoints["minimax-m2.7"].Protocol)
 	}
-	if cat.Defaults.Model != "deepseek-v4-flash" {
-		t.Fatalf("Defaults.Model = %q, want deepseek-v4-flash", cat.Defaults.Model)
-	}
 
 	coder, ok := cat.Aliases["coder"]
 	if !ok {
@@ -46,16 +42,6 @@ func TestLoadDir_RepoCatalog(t *testing.T) {
 	wantChain := []string{"deepseek-v4-pro", "deepseek-v4-flash", "kimi-k2.6", "glm-5.1"}
 	if !reflect.DeepEqual(coder.Chain, wantChain) {
 		t.Fatalf("coder.Chain = %v, want %v", coder.Chain, wantChain)
-	}
-
-	if cat.Fallback.CircuitOpen != 30*time.Second {
-		t.Errorf("Fallback.CircuitOpen = %v, want 30s", cat.Fallback.CircuitOpen)
-	}
-	if cat.Fallback.CircuitFailures != 3 {
-		t.Errorf("Fallback.CircuitFailures = %d, want 3", cat.Fallback.CircuitFailures)
-	}
-	if !reflect.DeepEqual(cat.Fallback.OnKinds, []string{"rate_limit", "upstream", "timeout", "network"}) {
-		t.Errorf("Fallback.OnKinds = %v, want [rate_limit upstream timeout network]", cat.Fallback.OnKinds)
 	}
 }
 
@@ -94,8 +80,7 @@ func TestLoadDir_AliasUnknownModel(t *testing.T) {
 		map[string]string{"real.yaml": modelYAML("real")},
 		map[string]string{"bad.yaml": `alias: bad
 chain: [real, ghost]
-`},
-		"")
+`})
 	_, err := LoadDir(dir)
 	if err == nil || !strings.Contains(err.Error(), "ghost") {
 		t.Fatalf("error = %v, want unknown-model error referencing ghost", err)
@@ -108,8 +93,7 @@ func TestLoadDir_AliasCollidesWithModel(t *testing.T) {
 		map[string]string{"real.yaml": modelYAML("real")},
 		map[string]string{"real.yaml": `alias: real
 chain: [real]
-`},
-		"")
+`})
 	_, err := LoadDir(dir)
 	if err == nil || !strings.Contains(err.Error(), "collides") {
 		t.Fatalf("error = %v, want alias-collision error", err)
@@ -122,8 +106,7 @@ func TestLoadDir_AliasEmptyChain(t *testing.T) {
 		map[string]string{"real.yaml": modelYAML("real")},
 		map[string]string{"blank.yaml": `alias: blank
 chain: []
-`},
-		"")
+`})
 	_, err := LoadDir(dir)
 	if err == nil || !strings.Contains(err.Error(), "empty chain") {
 		t.Fatalf("error = %v, want empty-chain error", err)
@@ -137,8 +120,7 @@ func TestLoadDir_DuplicateModel(t *testing.T) {
 			"a.yaml": modelYAML("same"),
 			"b.yaml": modelYAML("same"),
 		},
-		nil,
-		"")
+		nil)
 	_, err := LoadDir(dir)
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -148,26 +130,9 @@ func TestLoadDir_DuplicateModel(t *testing.T) {
 	}
 }
 
-func TestLoadDir_UnknownDefault(t *testing.T) {
-	t.Setenv("TEST_API_KEY", "test-key")
-	dir := writeCatalogDir(t,
-		map[string]string{"real.yaml": modelYAML("real")},
-		nil,
-		`defaults:
-  model: notreal
-`)
-	_, err := LoadDir(dir)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "defaults.model") {
-		t.Fatalf("error = %q, want defaults.model", err.Error())
-	}
-}
-
 func TestLoadDir_NoModels(t *testing.T) {
 	t.Setenv("TEST_API_KEY", "test-key")
-	dir := writeCatalogDir(t, map[string]string{}, nil, "")
+	dir := writeCatalogDir(t, map[string]string{}, nil)
 	_, err := LoadDir(dir)
 	if err == nil || !strings.Contains(err.Error(), "no models loaded") {
 		t.Fatalf("error = %v, want 'no models loaded'", err)
@@ -188,9 +153,9 @@ auth_scheme: bearer
 }
 
 // writeCatalogDir creates a temp catalog dir laid out as the loader
-// expects: models/, aliases/ (optional), policy.yaml (optional). Each
-// map argument is name -> yaml body; pass nil/empty to skip.
-func writeCatalogDir(t *testing.T, models, aliases map[string]string, policyBody string) string {
+// expects: models/, aliases/ (optional). Each map is name -> yaml body;
+// pass nil/empty to skip aliases/.
+func writeCatalogDir(t *testing.T, models, aliases map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
 
@@ -212,11 +177,6 @@ func writeCatalogDir(t *testing.T, models, aliases map[string]string, policyBody
 			if err := os.WriteFile(filepath.Join(aliasesDir, name), []byte(body), 0o600); err != nil {
 				t.Fatalf("write %s: %v", name, err)
 			}
-		}
-	}
-	if policyBody != "" {
-		if err := os.WriteFile(filepath.Join(dir, "policy.yaml"), []byte(policyBody), 0o600); err != nil {
-			t.Fatalf("write policy.yaml: %v", err)
 		}
 	}
 	return dir

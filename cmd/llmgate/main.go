@@ -50,7 +50,7 @@ func run() error {
 	logger.Info("catalog loaded",
 		slog.Int("endpoints", len(cat.Endpoints)),
 		slog.Int("models", len(cat.Models)),
-		slog.String("default_model", cat.Defaults.Model),
+		slog.Int("aliases", len(cat.Aliases)),
 	)
 
 	factories := map[string]router.AdapterFactory{
@@ -58,7 +58,12 @@ func run() error {
 		"anthropic": anthropicFactory,
 	}
 
-	rtr, err := router.NewRouter(cat, factories, logger)
+	policy := router.FallbackPolicy{
+		OnKinds:         cfg.FallbackOn,
+		CircuitFailures: cfg.CircuitFailures,
+		CircuitOpen:     cfg.CircuitOpen,
+	}
+	rtr, err := router.NewRouter(cat, factories, policy, logger)
 	if err != nil {
 		return err
 	}

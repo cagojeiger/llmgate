@@ -2,6 +2,7 @@ package config
 
 import (
 	"log/slog"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +19,9 @@ func resetEnv(t *testing.T) {
 		"LLMGATE_SHUTDOWN_HEADER_TIMEOUT",
 		"LLMGATE_SHUTDOWN_DRAIN_TIMEOUT",
 		"LLMGATE_LOG_LEVEL",
+		"LLMGATE_FALLBACK_ON",
+		"LLMGATE_CIRCUIT_FAILURES",
+		"LLMGATE_CIRCUIT_OPEN_DURATION",
 	} {
 		t.Setenv(k, "")
 	}
@@ -41,6 +45,60 @@ func TestLoadServer_Defaults(t *testing.T) {
 	}
 	if cfg.LogLevel != slog.LevelInfo {
 		t.Errorf("LogLevel = %v, want info", cfg.LogLevel)
+	}
+	if !reflect.DeepEqual(cfg.FallbackOn, []string{"rate_limit", "upstream", "timeout", "network"}) {
+		t.Errorf("FallbackOn = %v, want default transient classes", cfg.FallbackOn)
+	}
+	if cfg.CircuitFailures != 3 {
+		t.Errorf("CircuitFailures = %d, want 3", cfg.CircuitFailures)
+	}
+	if cfg.CircuitOpen != 30*time.Second {
+		t.Errorf("CircuitOpen = %v, want 30s", cfg.CircuitOpen)
+	}
+}
+
+func TestLoadServer_FallbackOnOverride(t *testing.T) {
+	resetEnv(t)
+	t.Setenv("LLMGATE_FALLBACK_ON", " rate_limit, upstream , empty_response ")
+
+	cfg, err := LoadServer()
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	want := []string{"rate_limit", "upstream", "empty_response"}
+	if !reflect.DeepEqual(cfg.FallbackOn, want) {
+		t.Errorf("FallbackOn = %v, want %v (trimmed)", cfg.FallbackOn, want)
+	}
+}
+
+func TestLoadServer_CircuitDisabledByZero(t *testing.T) {
+	// Operators turn the breaker off by setting failures or duration to 0.
+	resetEnv(t)
+	t.Setenv("LLMGATE_CIRCUIT_FAILURES", "0")
+	t.Setenv("LLMGATE_CIRCUIT_OPEN_DURATION", "0s")
+
+	cfg, err := LoadServer()
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if cfg.CircuitFailures != 0 {
+		t.Errorf("CircuitFailures = %d, want 0 (explicitly disabled)", cfg.CircuitFailures)
+	}
+	if cfg.CircuitOpen != 0 {
+		t.Errorf("CircuitOpen = %v, want 0 (explicitly disabled)", cfg.CircuitOpen)
+	}
+}
+
+func TestLoadServer_RejectsNegativeCircuit(t *testing.T) {
+	resetEnv(t)
+	t.Setenv("LLMGATE_CIRCUIT_FAILURES", "-1")
+
+	_, err := LoadServer()
+	if err == nil {
+		t.Fatal("LoadServer: want error for negative LLMGATE_CIRCUIT_FAILURES")
+	}
+	if !strings.Contains(err.Error(), "LLMGATE_CIRCUIT_FAILURES") {
+		t.Errorf("err = %v, want mention of failing key", err)
 	}
 }
 

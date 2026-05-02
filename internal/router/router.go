@@ -19,6 +19,23 @@ import (
 
 type AdapterFactory func(*catalog.Endpoint) (provider.Provider, error)
 
+// FallbackPolicy is the runtime tuning the router applies to every
+// alias chain. It does not live in catalog yaml because it has nothing
+// to do with vendor or model data — it shapes how the algorithm reacts
+// to upstream errors. main.go assembles it from env-driven config and
+// passes it in.
+//
+// OnKinds is matched against provider.Kind. When the list is empty
+// fallback is effectively disabled (no error class is eligible to
+// advance the chain). CircuitFailures<=0 or CircuitOpen<=0 disables
+// the per-process circuit breaker; otherwise N consecutive failures
+// trip a model and skip it for that duration.
+type FallbackPolicy struct {
+	OnKinds         []string
+	CircuitFailures int
+	CircuitOpen     time.Duration
+}
+
 // RouteResult is the outcome of one Router.Complete or Router.CompleteStream
 // call. Exactly one of Response/Stream is populated on success. On failure
 // the response side is nil but Attempts is still populated so audit can
@@ -69,7 +86,7 @@ type breakerState struct {
 	openUntil time.Time
 }
 
-func NewRouter(cat *catalog.Catalog, factories map[string]AdapterFactory, log *slog.Logger) (*Router, error) {
+func NewRouter(cat *catalog.Catalog, factories map[string]AdapterFactory, policy FallbackPolicy, log *slog.Logger) (*Router, error) {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -114,19 +131,19 @@ func NewRouter(cat *catalog.Catalog, factories map[string]AdapterFactory, log *s
 		aliases[strings.ToLower(name)] = chain
 	}
 
-	policy := fallbackPolicy{
-		onKinds:         make(map[provider.Kind]struct{}, len(cat.Fallback.OnKinds)),
-		circuitFailures: cat.Fallback.CircuitFailures,
-		circuitOpen:     cat.Fallback.CircuitOpen,
+	internalPolicy := fallbackPolicy{
+		onKinds:         make(map[provider.Kind]struct{}, len(policy.OnKinds)),
+		circuitFailures: policy.CircuitFailures,
+		circuitOpen:     policy.CircuitOpen,
 	}
-	for _, k := range cat.Fallback.OnKinds {
-		policy.onKinds[provider.Kind(strings.ToLower(k))] = struct{}{}
+	for _, k := range policy.OnKinds {
+		internalPolicy.onKinds[provider.Kind(strings.ToLower(k))] = struct{}{}
 	}
 
 	return &Router{
 		byModel:  byModel,
 		aliases:  aliases,
-		policy:   policy,
+		policy:   internalPolicy,
 		log:      log,
 		breakers: make(map[string]*breakerState),
 	}, nil

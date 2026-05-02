@@ -14,6 +14,15 @@ import (
 	"llmgate/internal/provider"
 )
 
+// testPolicy mirrors the production defaults so the router behaves the
+// same in tests as it does at runtime — fallback on transient classes,
+// circuit trips after 3 strikes, 30s cooldown.
+var testPolicy = FallbackPolicy{
+	OnKinds:         []string{"rate_limit", "upstream", "timeout", "network"},
+	CircuitFailures: 3,
+	CircuitOpen:     30 * time.Second,
+}
+
 func TestRouter_OpenAIOnly(t *testing.T) {
 	var logs bytes.Buffer
 	openAI := &fakeProvider{name: "openai"}
@@ -22,7 +31,7 @@ func TestRouter_OpenAIOnly(t *testing.T) {
 		"openai": func(ep *catalog.Endpoint) (provider.Provider, error) {
 			return openAI, nil
 		},
-	}, slog.New(slog.NewTextHandler(&logs, nil)))
+	}, testPolicy, slog.New(slog.NewTextHandler(&logs, nil)))
 	if err != nil {
 		t.Fatalf("NewRouter() error = %v", err)
 	}
@@ -45,7 +54,7 @@ func TestRouter_Both(t *testing.T) {
 		"anthropic": func(ep *catalog.Endpoint) (provider.Provider, error) {
 			return &fakeProvider{name: "anthropic"}, nil
 		},
-	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}, testPolicy, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatalf("NewRouter() error = %v", err)
 	}
@@ -59,7 +68,7 @@ func TestRouter_UnknownModel(t *testing.T) {
 		"openai": func(ep *catalog.Endpoint) (provider.Provider, error) {
 			return &fakeProvider{name: "openai"}, nil
 		},
-	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}, testPolicy, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatalf("NewRouter() error = %v", err)
 	}
@@ -90,7 +99,7 @@ func TestRouter_Dispatch(t *testing.T) {
 		"anthropic": func(ep *catalog.Endpoint) (provider.Provider, error) {
 			return anthropic, nil
 		},
-	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}, testPolicy, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatalf("NewRouter() error = %v", err)
 	}
@@ -270,7 +279,7 @@ func mustRouter(t *testing.T, cat *catalog.Catalog, openAI provider.Provider, an
 	if anth != nil {
 		factories["anthropic"] = func(*catalog.Endpoint) (provider.Provider, error) { return anth, nil }
 	}
-	r, err := NewRouter(cat, factories, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	r, err := NewRouter(cat, factories, testPolicy, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}
@@ -281,11 +290,6 @@ func fallbackCatalog() *catalog.Catalog {
 	cat := stubCatalog()
 	cat.Aliases = map[string]*catalog.Alias{
 		"coder": {Name: "coder", Chain: []string{"deepseek-v4-pro", "deepseek-v4-flash", "kimi-k2.6", "glm-5.1"}},
-	}
-	cat.Fallback = catalog.FallbackPolicy{
-		OnKinds:         []string{"rate_limit", "upstream", "timeout", "network"},
-		CircuitFailures: 3,
-		CircuitOpen:     30 * time.Second,
 	}
 	return cat
 }
@@ -331,7 +335,6 @@ func stubCatalog() *catalog.Catalog {
 	return &catalog.Catalog{
 		Endpoints: endpoints,
 		Models:    models,
-		Defaults:  catalog.Defaults{Model: "deepseek-v4-flash"},
 	}
 }
 

@@ -12,9 +12,8 @@ catalog/                      data only — operator-facing yaml directory
   models/<id>.yaml            one yaml per endpoint (id + vendor + type +
                               base_url + auth_env)
   aliases/<name>.yaml         one yaml per alias (alias + chain)
-  policy.yaml                 fallback rules + circuit breaker + defaults
 internal/catalog/             loader package (yaml -> Catalog struct)
-internal/config/              env-driven Server config
+internal/config/              env-driven Server config (incl. router tuning)
 internal/provider/            Provider interface + OpenAI-shaped types
 internal/provider/openai/     OpenAI-protocol adapter
 internal/provider/anthropic/  Anthropic-protocol adapter (response normalized to OpenAI wire)

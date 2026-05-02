@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"strings"
+	"sync"
 	"time"
 
 	"llmgate/internal/provider"
@@ -49,6 +50,8 @@ type stream struct {
 	body         io.Closer
 	reader       *provider.SSEReader
 	providerName string
+	closeOnce    sync.Once
+	closeErr     error
 
 	// accumulated state for Summary()
 	model        string
@@ -100,7 +103,10 @@ func (s *stream) Recv() (*provider.Event, error) {
 }
 
 func (s *stream) Close() error {
-	return s.body.Close()
+	s.closeOnce.Do(func() {
+		s.closeErr = s.body.Close()
+	})
+	return s.closeErr
 }
 
 func (s *stream) Summary() *provider.Summary {

@@ -28,10 +28,12 @@ type Handler struct {
 	router            ChatRouter
 	log               *slog.Logger
 	recorder          audit.Recorder
+	requestTimeout    time.Duration
 	streamIdleTimeout time.Duration
 }
 
 type HandlerConfig struct {
+	RequestTimeout    time.Duration
 	StreamIdleTimeout time.Duration
 }
 
@@ -46,12 +48,24 @@ func NewHandlerWithConfig(router ChatRouter, log *slog.Logger, recorder audit.Re
 	if recorder == nil {
 		recorder = audit.Nop{}
 	}
-	return &Handler{router: router, log: log, recorder: recorder, streamIdleTimeout: cfg.StreamIdleTimeout}
+	return &Handler{
+		router:            router,
+		log:               log,
+		recorder:          recorder,
+		requestTimeout:    cfg.RequestTimeout,
+		streamIdleTimeout: cfg.StreamIdleTimeout,
+	}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	ctx := r.Context()
+	if h.requestTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, h.requestTimeout)
+		defer cancel()
+		r = r.WithContext(ctx)
+	}
 
 	rec := &audit.Record{
 		Timestamp: start,
@@ -199,6 +213,18 @@ func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *provi
 	sink.WriteHeaders()
 	rec.StatusCode = http.StatusOK
 
+	if result.FirstEvent != nil {
+		payload, err := json.Marshal(result.FirstEvent)
+		if err != nil {
+			perr := &provider.Error{Kind: provider.KindUnknown, Message: "encode stream event: " + err.Error(), Cause: err}
+			rec.ErrorKind = perr.Kind
+			sink.SendError(perr)
+			sink.SendDone()
+			return
+		}
+		sink.Send(payload)
+	}
+
 	for {
 		event, err := recvWithIdleTimeout(r.Context(), stream, h.streamIdleTimeout)
 		if errors.Is(err, io.EOF) {
@@ -237,26 +263,30 @@ type recvResult struct {
 }
 
 func recvWithIdleTimeout(ctx context.Context, stream provider.Stream, timeout time.Duration) (*provider.Event, error) {
-	if timeout <= 0 {
-		return stream.Recv()
-	}
 	ch := make(chan recvResult, 1)
 	go func() {
 		event, err := stream.Recv()
 		ch <- recvResult{event: event, err: err}
 	}()
 
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
+	var timeoutC <-chan time.Time
+	var timer *time.Timer
+	if timeout > 0 {
+		timer = time.NewTimer(timeout)
+		defer timer.Stop()
+		timeoutC = timer.C
+	}
 
 	select {
 	case got := <-ch:
 		return got.event, got.err
-	case <-timer.C:
+	case <-timeoutC:
 		_ = stream.Close()
+		<-ch
 		return nil, &provider.Error{Kind: provider.KindTimeout, Message: "stream idle timeout"}
 	case <-ctx.Done():
 		_ = stream.Close()
+		<-ch
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return nil, &provider.Error{Kind: provider.KindTimeout, Message: ctx.Err().Error(), Cause: ctx.Err()}
 		}

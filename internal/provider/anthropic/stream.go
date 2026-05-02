@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"io"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"llmgate/internal/provider"
@@ -51,7 +53,9 @@ func (c *Client) CompleteStream(ctx context.Context, req *provider.Request) (pro
 type stream struct {
 	body           io.ReadCloser
 	scanner        *bufio.Scanner
-	closed         bool
+	closed         atomic.Bool
+	closeOnce      sync.Once
+	closeErr       error
 	msgID          string
 	msgModel       string
 	inputTokens    int
@@ -79,7 +83,7 @@ type anthropicEnd struct {
 }
 
 func (s *stream) Recv() (*provider.Event, error) {
-	if s.closed {
+	if s.closed.Load() {
 		return nil, io.EOF
 	}
 	if s.pendingFinish != nil && !s.pendingEmitted {
@@ -88,7 +92,7 @@ func (s *stream) Recv() (*provider.Event, error) {
 		return s.buildFinishEvent(s.pendingFinish), nil
 	}
 	if s.pendingEmitted {
-		s.closed = true
+		s.closed.Store(true)
 		return nil, io.EOF
 	}
 
@@ -230,13 +234,13 @@ func (s *stream) Summary() *provider.Summary {
 }
 
 func (s *stream) Close() error {
-	s.closed = true
-	if s.body == nil {
-		return nil
-	}
-	body := s.body
-	s.body = nil
-	return body.Close()
+	s.closeOnce.Do(func() {
+		s.closed.Store(true)
+		if s.body != nil {
+			s.closeErr = s.body.Close()
+		}
+	})
+	return s.closeErr
 }
 
 func (s *stream) buildFinishEvent(end *anthropicEnd) *provider.Event {

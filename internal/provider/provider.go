@@ -18,6 +18,8 @@ type Provider interface {
 
 type Stream interface {
 	Recv() (*Event, error)
+	// Close must be safe to call while Recv is blocked; timeout enforcement
+	// uses it to unblock an in-flight read before the handler returns.
 	Close() error
 	// Summary returns the aggregated end-state of the stream. It is safe to
 	// call at any time; the typical caller invokes it after Recv returns

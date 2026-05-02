@@ -58,14 +58,14 @@ func run() error {
 	}
 
 	policy := router.FallbackPolicy{
-		OnKinds:                cfg.FallbackOn,
-		CircuitFailures:        cfg.CircuitFailures,
-		CircuitOpen:            cfg.CircuitOpen,
-		CircuitMaxOpen:         cfg.CircuitMaxOpen,
-		CircuitJitter:          cfg.CircuitJitter,
-		CompleteRequestTimeout: cfg.CompleteRequestTimeout,
-		CompleteAttemptTimeout: cfg.CompleteAttemptTimeout,
-		StreamStartTimeout:     cfg.StreamStartTimeout,
+		OnKinds:            cfg.FallbackOn,
+		CircuitFailures:    cfg.CircuitFailures,
+		CircuitOpen:        cfg.CircuitOpen,
+		CircuitMaxOpen:     cfg.CircuitMaxOpen,
+		CircuitJitter:      cfg.CircuitJitter,
+		RequestTimeout:     cfg.RequestTimeout,
+		CompleteTimeout:    cfg.CompleteTimeout,
+		StreamStartTimeout: cfg.StreamStartTimeout,
 	}
 	rtr, err := router.NewRouter(cat, factories, policy, logger)
 	if err != nil {
@@ -80,6 +80,7 @@ func run() error {
 	}()
 
 	handler := server.NewHandlerWithConfig(rtr, logger, recorder, server.HandlerConfig{
+		RequestTimeout:    cfg.RequestTimeout,
 		StreamIdleTimeout: cfg.StreamIdleTimeout,
 	})
 	srv := server.New(cfg, logger, handler)

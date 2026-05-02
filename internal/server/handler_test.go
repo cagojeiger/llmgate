@@ -202,7 +202,6 @@ func TestHandler_Stream_NormalEOF(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
 	streamObj := &fakeStream{
 		events: []*provider.Event{
-			{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: "hello"}}}},
 			{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: " world"}}}},
 		},
 		summary: &provider.Summary{
@@ -212,9 +211,10 @@ func TestHandler_Stream_NormalEOF(t *testing.T) {
 	r := &fakeRouter{
 		buildStreamResult: func(req *provider.Request) (*router.RouteResult, error) {
 			return &router.RouteResult{
-				Stream:    streamObj,
-				Vendor:    "opencode",
-				ModelUsed: req.Model,
+				Stream:     streamObj,
+				FirstEvent: &provider.Event{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: "hello"}}}},
+				Vendor:     "opencode",
+				ModelUsed:  req.Model,
 				Attempts: []provider.Attempt{
 					{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()},
 				},
@@ -268,18 +268,16 @@ func TestHandler_Stream_NormalEOF(t *testing.T) {
 func TestHandler_Stream_RecvError_PropagatesErrorKind(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
 	streamObj := &fakeStream{
-		events: []*provider.Event{
-			{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: "partial"}}}},
-		},
 		recvErr: &provider.Error{Kind: provider.KindUpstream, Message: "boom mid-stream"},
 		summary: &provider.Summary{},
 	}
 	r := &fakeRouter{
 		buildStreamResult: func(req *provider.Request) (*router.RouteResult, error) {
 			return &router.RouteResult{
-				Stream:    streamObj,
-				Vendor:    "opencode",
-				ModelUsed: req.Model,
+				Stream:     streamObj,
+				FirstEvent: &provider.Event{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: "partial"}}}},
+				Vendor:     "opencode",
+				ModelUsed:  req.Model,
 				Attempts: []provider.Attempt{
 					{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()},
 				},
@@ -365,6 +363,53 @@ func TestHandler_Stream_IdleTimeoutSendsError(t *testing.T) {
 	}
 	if streamObj.closedCount() == 0 {
 		t.Errorf("Stream.Close() calls = 0, want at least 1")
+	}
+}
+
+func TestHandler_Stream_RequestTimeoutSendsError(t *testing.T) {
+	captured, recorder := newCaptureRecorder()
+	streamObj := &fakeStream{
+		recvDelay: 50 * time.Millisecond,
+		summary:   &provider.Summary{},
+	}
+	r := &fakeRouter{
+		buildStreamResult: func(req *provider.Request) (*router.RouteResult, error) {
+			return &router.RouteResult{
+				Stream:    streamObj,
+				Vendor:    "opencode",
+				ModelUsed: req.Model,
+				Attempts: []provider.Attempt{
+					{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()},
+				},
+			}, nil
+		},
+	}
+	h := NewHandlerWithConfig(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{
+		RequestTimeout: time.Millisecond,
+	})
+
+	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (stream already started)", w.Code)
+	}
+	body2 := w.Body.String()
+	if !strings.Contains(body2, `"type":"timeout"`) {
+		t.Errorf("body missing timeout error envelope: %q", body2)
+	}
+	if !strings.HasSuffix(body2, "data: [DONE]\n\n") {
+		t.Errorf("body must end with [DONE]: %q", body2)
+	}
+
+	got := captured.last(t)
+	if got.ErrorKind != provider.KindTimeout {
+		t.Errorf("rec.ErrorKind = %q, want timeout", got.ErrorKind)
+	}
+	if len(got.Attempts) != 1 || got.Attempts[0].ErrorKind != provider.KindTimeout {
+		t.Errorf("Attempts[0].ErrorKind not propagated: %+v", got.Attempts)
 	}
 }
 

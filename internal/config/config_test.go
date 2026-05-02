@@ -24,8 +24,8 @@ func resetEnv(t *testing.T) {
 		"LLMGATE_CIRCUIT_OPEN_DURATION",
 		"LLMGATE_CIRCUIT_MAX_OPEN_DURATION",
 		"LLMGATE_CIRCUIT_JITTER",
-		"LLMGATE_COMPLETE_REQUEST_TIMEOUT",
-		"LLMGATE_COMPLETE_ATTEMPT_TIMEOUT",
+		"LLMGATE_REQUEST_TIMEOUT",
+		"LLMGATE_COMPLETE_TIMEOUT",
 		"LLMGATE_STREAM_START_TIMEOUT",
 		"LLMGATE_STREAM_IDLE_TIMEOUT",
 	} {
@@ -67,11 +67,11 @@ func TestLoadServer_Defaults(t *testing.T) {
 	if cfg.CircuitJitter != 0.2 {
 		t.Errorf("CircuitJitter = %v, want 0.2", cfg.CircuitJitter)
 	}
-	if cfg.CompleteRequestTimeout != 3*time.Minute {
-		t.Errorf("CompleteRequestTimeout = %v, want 3m", cfg.CompleteRequestTimeout)
+	if cfg.RequestTimeout != 5*time.Minute {
+		t.Errorf("RequestTimeout = %v, want 5m", cfg.RequestTimeout)
 	}
-	if cfg.CompleteAttemptTimeout != time.Minute {
-		t.Errorf("CompleteAttemptTimeout = %v, want 1m", cfg.CompleteAttemptTimeout)
+	if cfg.CompleteTimeout != time.Minute {
+		t.Errorf("CompleteTimeout = %v, want 1m", cfg.CompleteTimeout)
 	}
 	if cfg.StreamStartTimeout != 30*time.Second {
 		t.Errorf("StreamStartTimeout = %v, want 30s", cfg.StreamStartTimeout)
@@ -149,18 +149,18 @@ func TestLoadServer_CircuitBackoffOverrides(t *testing.T) {
 
 func TestLoadServer_CompleteTimeoutOverrides(t *testing.T) {
 	resetEnv(t)
-	t.Setenv("LLMGATE_COMPLETE_REQUEST_TIMEOUT", "45s")
-	t.Setenv("LLMGATE_COMPLETE_ATTEMPT_TIMEOUT", "10s")
+	t.Setenv("LLMGATE_REQUEST_TIMEOUT", "45s")
+	t.Setenv("LLMGATE_COMPLETE_TIMEOUT", "10s")
 
 	cfg, err := LoadServer()
 	if err != nil {
 		t.Fatalf("LoadServer: %v", err)
 	}
-	if cfg.CompleteRequestTimeout != 45*time.Second {
-		t.Errorf("CompleteRequestTimeout = %v, want 45s", cfg.CompleteRequestTimeout)
+	if cfg.RequestTimeout != 45*time.Second {
+		t.Errorf("RequestTimeout = %v, want 45s", cfg.RequestTimeout)
 	}
-	if cfg.CompleteAttemptTimeout != 10*time.Second {
-		t.Errorf("CompleteAttemptTimeout = %v, want 10s", cfg.CompleteAttemptTimeout)
+	if cfg.CompleteTimeout != 10*time.Second {
+		t.Errorf("CompleteTimeout = %v, want 10s", cfg.CompleteTimeout)
 	}
 }
 

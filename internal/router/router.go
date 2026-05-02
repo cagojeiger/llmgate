@@ -13,6 +13,7 @@ import (
 	"math/rand"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"llmgate/internal/catalog"
@@ -38,14 +39,14 @@ type AdapterFactory func(*catalog.Model) (provider.Provider, error)
 // repeated-open exponential backoff. CircuitJitter applies symmetric
 // randomization, where 0.2 means +/-20%.
 type FallbackPolicy struct {
-	OnKinds                []string
-	CircuitFailures        int
-	CircuitOpen            time.Duration
-	CircuitMaxOpen         time.Duration
-	CircuitJitter          float64
-	CompleteRequestTimeout time.Duration
-	CompleteAttemptTimeout time.Duration
-	StreamStartTimeout     time.Duration
+	OnKinds            []string
+	CircuitFailures    int
+	CircuitOpen        time.Duration
+	CircuitMaxOpen     time.Duration
+	CircuitJitter      float64
+	RequestTimeout     time.Duration
+	CompleteTimeout    time.Duration
+	StreamStartTimeout time.Duration
 }
 
 // RouteResult is the outcome of one Router.Complete or Router.CompleteStream
@@ -57,16 +58,19 @@ type FallbackPolicy struct {
 // last entry corresponds to the body returned (success) or the final
 // failure. Vendor/ModelUsed reflect that last entry.
 //
-// For CompleteStream: the stream is started but not yet drained, so the
-// single Attempt has StartedAt set but DurationMS/Usage/ErrorKind/VendorCost
-// are zero-valued. The caller must finalize that Attempt at end-of-stream
-// from Stream.Summary() and any Recv error.
+// For CompleteStream: the final attempt's stream is started but not yet
+// drained, so that Attempt has StartedAt set and FirstEvent contains the
+// pre-read event used to prove the stream really started before bytes are
+// sent to the client. The caller must send FirstEvent, then drain Stream
+// and finalize the Attempt at end-of-stream from Stream.Summary() and any
+// Recv error.
 type RouteResult struct {
-	Response  *provider.Response
-	Stream    provider.Stream
-	Vendor    string
-	ModelUsed string
-	Attempts  []provider.Attempt
+	Response   *provider.Response
+	Stream     provider.Stream
+	FirstEvent *provider.Event
+	Vendor     string
+	ModelUsed  string
+	Attempts   []provider.Attempt
 }
 
 // Router dispatches a Request to the right Provider based on model id,
@@ -88,14 +92,14 @@ type Router struct {
 }
 
 type fallbackPolicy struct {
-	onKinds                map[provider.Kind]struct{}
-	circuitFailures        int
-	circuitOpen            time.Duration
-	circuitMaxOpen         time.Duration
-	circuitJitter          float64
-	completeRequestTimeout time.Duration
-	completeAttemptTimeout time.Duration
-	streamStartTimeout     time.Duration
+	onKinds            map[provider.Kind]struct{}
+	circuitFailures    int
+	circuitOpen        time.Duration
+	circuitMaxOpen     time.Duration
+	circuitJitter      float64
+	requestTimeout     time.Duration
+	completeTimeout    time.Duration
+	streamStartTimeout time.Duration
 }
 
 type breakerState struct {
@@ -140,14 +144,14 @@ func NewRouter(cat *catalog.Catalog, factories map[string]AdapterFactory, policy
 	}
 
 	internalPolicy := fallbackPolicy{
-		onKinds:                make(map[provider.Kind]struct{}, len(policy.OnKinds)),
-		circuitFailures:        policy.CircuitFailures,
-		circuitOpen:            policy.CircuitOpen,
-		circuitMaxOpen:         policy.CircuitMaxOpen,
-		circuitJitter:          policy.CircuitJitter,
-		completeRequestTimeout: policy.CompleteRequestTimeout,
-		completeAttemptTimeout: policy.CompleteAttemptTimeout,
-		streamStartTimeout:     policy.StreamStartTimeout,
+		onKinds:            make(map[provider.Kind]struct{}, len(policy.OnKinds)),
+		circuitFailures:    policy.CircuitFailures,
+		circuitOpen:        policy.CircuitOpen,
+		circuitMaxOpen:     policy.CircuitMaxOpen,
+		circuitJitter:      policy.CircuitJitter,
+		requestTimeout:     policy.RequestTimeout,
+		completeTimeout:    policy.CompleteTimeout,
+		streamStartTimeout: policy.StreamStartTimeout,
 	}
 	for _, k := range policy.OnKinds {
 		internalPolicy.onKinds[provider.Kind(strings.ToLower(k))] = struct{}{}
@@ -178,9 +182,9 @@ func (r *Router) Complete(ctx context.Context, req *provider.Request) (*RouteRes
 		return result, &provider.Error{Kind: provider.KindBadRequest, Message: "request is nil"}
 	}
 	routeCtx := ctx
-	if r.policy.completeRequestTimeout > 0 {
+	if r.policy.requestTimeout > 0 {
 		var cancel context.CancelFunc
-		routeCtx, cancel = context.WithTimeout(ctx, r.policy.completeRequestTimeout)
+		routeCtx, cancel = context.WithTimeout(ctx, r.policy.requestTimeout)
 		defer cancel()
 	}
 
@@ -198,8 +202,8 @@ func (r *Router) Complete(ctx context.Context, req *provider.Request) (*RouteRes
 		attemptReq := requestForCandidate(req, candidate)
 		attemptCtx := routeCtx
 		cancelAttempt := func() {}
-		if r.policy.completeAttemptTimeout > 0 {
-			attemptCtx, cancelAttempt = context.WithTimeout(routeCtx, r.policy.completeAttemptTimeout)
+		if r.policy.completeTimeout > 0 {
+			attemptCtx, cancelAttempt = context.WithTimeout(routeCtx, r.policy.completeTimeout)
 		}
 
 		start := time.Now()
@@ -242,7 +246,7 @@ func (r *Router) Complete(ctx context.Context, req *provider.Request) (*RouteRes
 		}
 		r.recordFailure(candidate.model)
 		if err := routeCtx.Err(); err != nil {
-			return result, contextError(lastErr)
+			return result, contextError(err)
 		}
 		r.log.Info("fallback triggered",
 			slog.String("model", candidate.model),
@@ -267,29 +271,41 @@ func (r *Router) CompleteStream(ctx context.Context, req *provider.Request) (*Ro
 	if req == nil {
 		return result, &provider.Error{Kind: provider.KindBadRequest, Message: "request is nil"}
 	}
+	routeCtx := ctx
+	cancelRoute := func() {}
+	if r.policy.requestTimeout > 0 {
+		routeCtx, cancelRoute = context.WithTimeout(ctx, r.policy.requestTimeout)
+	}
+
 	candidates, err := r.candidates(req.Model)
 	if err != nil {
+		cancelRoute()
 		return result, err
 	}
 
 	var lastErr error
 	for _, candidate := range candidates {
-		attemptReq := requestForCandidate(req, candidate)
-		attemptCtx := ctx
-		cancelAttempt := func() {}
-		if r.policy.streamStartTimeout > 0 {
-			attemptCtx, cancelAttempt = context.WithTimeout(ctx, r.policy.streamStartTimeout)
+		if err := routeCtx.Err(); err != nil {
+			cancelRoute()
+			return result, contextError(err)
 		}
+		attemptReq := requestForCandidate(req, candidate)
+		startCtx, cancelStart, stopStart, streamStartTimedOut := streamStartContext(routeCtx, r.policy.streamStartTimeout)
 
 		att := provider.Attempt{
 			Vendor:    candidate.provider.Name(),
 			Model:     candidate.model,
 			StartedAt: time.Now(),
 		}
-		stream, err := candidate.provider.CompleteStream(attemptCtx, &attemptReq)
-		cancelAttempt()
+		stream, err := candidate.provider.CompleteStream(startCtx, &attemptReq)
 		if err != nil {
+			stopStart()
+			cancelStart()
 			adoptAttemptError(&att, err)
+			if ctxErr := streamStartError(startCtx, routeCtx, streamStartTimedOut); ctxErr != nil {
+				adoptAttemptError(&att, ctxErr)
+				err = ctxErr
+			}
 			att.DurationMS = time.Since(att.StartedAt).Milliseconds()
 			result.Attempts = append(result.Attempts, att)
 			result.Vendor = candidate.provider.Name()
@@ -297,23 +313,153 @@ func (r *Router) CompleteStream(ctx context.Context, req *provider.Request) (*Ro
 			lastErr = err
 
 			if !r.fallbackEligible(att.ErrorKind) {
+				cancelRoute()
 				return result, err
 			}
 			r.recordFailure(candidate.model)
+			if err := routeCtx.Err(); err != nil {
+				cancelRoute()
+				return result, contextError(err)
+			}
 			r.log.Info("stream fallback triggered",
 				slog.String("model", candidate.model),
 				slog.String("error_kind", string(att.ErrorKind)),
 			)
 			continue
 		}
+
+		firstEvent, err := recvFirstEvent(startCtx, stream)
+		if err != nil {
+			_ = stream.Close()
+			stopStart()
+			cancelStart()
+			adoptAttemptError(&att, err)
+			if ctxErr := streamStartError(startCtx, routeCtx, streamStartTimedOut); ctxErr != nil {
+				adoptAttemptError(&att, ctxErr)
+				err = ctxErr
+			}
+			att.DurationMS = time.Since(att.StartedAt).Milliseconds()
+			result.Attempts = append(result.Attempts, att)
+			result.Vendor = candidate.provider.Name()
+			result.ModelUsed = candidate.model
+			lastErr = err
+
+			if !r.fallbackEligible(att.ErrorKind) {
+				cancelRoute()
+				return result, err
+			}
+			r.recordFailure(candidate.model)
+			if err := routeCtx.Err(); err != nil {
+				cancelRoute()
+				return result, contextError(err)
+			}
+			r.log.Info("stream fallback triggered",
+				slog.String("model", candidate.model),
+				slog.String("error_kind", string(att.ErrorKind)),
+			)
+			continue
+		}
+		if !stopStart() && streamStartTimedOut() {
+			_ = stream.Close()
+			cancelStart()
+			err := streamStartError(startCtx, routeCtx, streamStartTimedOut)
+			if err == nil {
+				err = contextError(startCtx.Err())
+			}
+			adoptAttemptError(&att, err)
+			att.DurationMS = time.Since(att.StartedAt).Milliseconds()
+			result.Attempts = append(result.Attempts, att)
+			result.Vendor = candidate.provider.Name()
+			result.ModelUsed = candidate.model
+			lastErr = err
+			if !r.fallbackEligible(att.ErrorKind) {
+				cancelRoute()
+				return result, err
+			}
+			r.recordFailure(candidate.model)
+			continue
+		}
+
 		result.Attempts = append(result.Attempts, att)
-		result.Stream = stream
+		streamCancel := cancelStart
+		if r.policy.requestTimeout > 0 {
+			streamCancel = func() {
+				cancelStart()
+				cancelRoute()
+			}
+		}
+		result.Stream = &cancelOnCloseStream{Stream: stream, cancel: streamCancel}
+		result.FirstEvent = firstEvent
 		result.Vendor = candidate.provider.Name()
 		result.ModelUsed = candidate.model
 		r.recordSuccess(candidate.model)
 		return result, nil
 	}
+	cancelRoute()
 	return result, lastErr
+}
+
+type streamStartStopper func() bool
+type streamStartTimedOut func() bool
+
+func streamStartContext(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc, streamStartStopper, streamStartTimedOut) {
+	ctx, cancel := context.WithCancel(parent)
+	if timeout <= 0 {
+		return ctx, cancel, func() bool { return true }, func() bool { return false }
+	}
+	var timedOut atomic.Bool
+	timer := time.AfterFunc(timeout, func() {
+		timedOut.Store(true)
+		cancel()
+	})
+	return ctx, cancel, timer.Stop, timedOut.Load
+}
+
+func streamStartError(startCtx, routeCtx context.Context, timedOut streamStartTimedOut) error {
+	if routeErr := routeCtx.Err(); routeErr != nil {
+		return contextError(routeErr)
+	}
+	if timedOut != nil && timedOut() {
+		return &provider.Error{Kind: provider.KindTimeout, Message: "stream start timeout"}
+	}
+	if err := startCtx.Err(); err != nil && !errors.Is(err, context.Canceled) {
+		return contextError(err)
+	}
+	return nil
+}
+
+type streamRecvResult struct {
+	event *provider.Event
+	err   error
+}
+
+func recvFirstEvent(ctx context.Context, stream provider.Stream) (*provider.Event, error) {
+	ch := make(chan streamRecvResult, 1)
+	go func() {
+		event, err := stream.Recv()
+		ch <- streamRecvResult{event: event, err: err}
+	}()
+
+	select {
+	case got := <-ch:
+		return got.event, got.err
+	case <-ctx.Done():
+		_ = stream.Close()
+		<-ch
+		return nil, contextError(ctx.Err())
+	}
+}
+
+type cancelOnCloseStream struct {
+	provider.Stream
+	cancel context.CancelFunc
+	once   sync.Once
+}
+
+func (s *cancelOnCloseStream) Close() error {
+	err := s.Stream.Close()
+	s.once.Do(s.cancel)
+	return err
 }
 
 func requestForCandidate(req *provider.Request, candidate routeCandidate) provider.Request {

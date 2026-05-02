@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,14 +18,14 @@ import (
 // same in tests as it does at runtime — fallback on transient classes,
 // circuit trips after 3 strikes, 30s cooldown.
 var testPolicy = FallbackPolicy{
-	OnKinds:                []string{"rate_limit", "upstream", "timeout", "network"},
-	CircuitFailures:        3,
-	CircuitOpen:            30 * time.Second,
-	CircuitMaxOpen:         5 * time.Minute,
-	CircuitJitter:          0.2,
-	CompleteRequestTimeout: 3 * time.Minute,
-	CompleteAttemptTimeout: time.Minute,
-	StreamStartTimeout:     30 * time.Second,
+	OnKinds:            []string{"rate_limit", "upstream", "timeout", "network"},
+	CircuitFailures:    3,
+	CircuitOpen:        30 * time.Second,
+	CircuitMaxOpen:     5 * time.Minute,
+	CircuitJitter:      0.2,
+	RequestTimeout:     5 * time.Minute,
+	CompleteTimeout:    time.Minute,
+	StreamStartTimeout: 30 * time.Second,
 }
 
 func TestRouter_MissingProtocolFactoryFailsFast(t *testing.T) {
@@ -121,6 +122,9 @@ func TestRouter_Dispatch(t *testing.T) {
 	if streamRes.Stream == nil {
 		t.Fatalf("CompleteStream: result.Stream is nil")
 	}
+	if streamRes.FirstEvent == nil {
+		t.Fatalf("CompleteStream: result.FirstEvent is nil")
+	}
 	if len(streamRes.Attempts) != 1 || streamRes.Attempts[0].Model != "minimax-m2.5" {
 		t.Fatalf("stream attempts = %+v, want one minimax-m2.5", streamRes.Attempts)
 	}
@@ -196,6 +200,9 @@ func TestRouter_StreamAliasFallback_RetriesOnEligiblePreStreamError(t *testing.T
 	}
 	if result.Stream == nil {
 		t.Fatal("CompleteStream: result.Stream is nil")
+	}
+	if result.FirstEvent == nil {
+		t.Fatal("CompleteStream: result.FirstEvent is nil")
 	}
 	if result.ModelUsed != "deepseek-v4-flash" {
 		t.Errorf("ModelUsed = %q, want deepseek-v4-flash", result.ModelUsed)
@@ -368,6 +375,35 @@ func TestRouter_StreamStartTimeoutFallsBack(t *testing.T) {
 	}
 }
 
+func TestRouter_StreamStartTimeoutIncludesFirstEvent(t *testing.T) {
+	openAI := &fakeProvider{
+		name: "openai",
+		streamRecvDelays: map[string]time.Duration{
+			"deepseek-v4-pro": 50 * time.Millisecond,
+		},
+	}
+	policy := testPolicy
+	policy.StreamStartTimeout = time.Millisecond
+	router := mustRouterWithPolicy(t, fallbackCatalog(t), openAI, nil, policy)
+
+	result, err := router.CompleteStream(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if result.ModelUsed != "deepseek-v4-flash" {
+		t.Fatalf("ModelUsed = %q, want deepseek-v4-flash after primary first-event timeout", result.ModelUsed)
+	}
+	if len(result.Attempts) != 2 {
+		t.Fatalf("attempts = %d, want 2", len(result.Attempts))
+	}
+	if result.Attempts[0].ErrorKind != provider.KindTimeout {
+		t.Fatalf("attempt[0].ErrorKind = %q, want timeout", result.Attempts[0].ErrorKind)
+	}
+	if result.FirstEvent == nil {
+		t.Fatal("FirstEvent = nil, want secondary first event")
+	}
+}
+
 func TestRouter_CircuitOpensAfterRepeatedFailures(t *testing.T) {
 	// Only the primary fails — secondary always succeeds. Three failed
 	// runs trip the breaker on the primary; the fourth call must skip
@@ -484,7 +520,7 @@ func TestRouter_CircuitOpenExpiryKeepsOpenCountUntilSuccess(t *testing.T) {
 	}
 }
 
-func TestRouter_CompleteAttemptTimeoutFallsBack(t *testing.T) {
+func TestRouter_CompleteTimeoutFallsBack(t *testing.T) {
 	openAI := &fakeProvider{
 		name: "openai",
 		completeDelays: map[string]time.Duration{
@@ -492,7 +528,7 @@ func TestRouter_CompleteAttemptTimeoutFallsBack(t *testing.T) {
 		},
 	}
 	policy := testPolicy
-	policy.CompleteAttemptTimeout = time.Millisecond
+	policy.CompleteTimeout = time.Millisecond
 	router := mustRouterWithPolicy(t, fallbackCatalog(t), openAI, nil, policy)
 
 	result, err := router.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
@@ -510,7 +546,7 @@ func TestRouter_CompleteAttemptTimeoutFallsBack(t *testing.T) {
 	}
 }
 
-func TestRouter_CompleteRequestTimeoutStopsChain(t *testing.T) {
+func TestRouter_RequestTimeoutStopsChain(t *testing.T) {
 	openAI := &fakeProvider{
 		name: "openai",
 		completeDelays: map[string]time.Duration{
@@ -518,8 +554,8 @@ func TestRouter_CompleteRequestTimeoutStopsChain(t *testing.T) {
 		},
 	}
 	policy := testPolicy
-	policy.CompleteRequestTimeout = time.Millisecond
-	policy.CompleteAttemptTimeout = time.Minute
+	policy.RequestTimeout = time.Millisecond
+	policy.CompleteTimeout = time.Minute
 	router := mustRouterWithPolicy(t, fallbackCatalog(t), openAI, nil, policy)
 
 	result, err := router.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
@@ -623,12 +659,13 @@ type fakeProvider struct {
 	lastStreamReq   *provider.Request
 
 	// per-model and global error simulation. Per-model takes precedence.
-	errors         map[string]*provider.Error
-	errorAll       *provider.Error
-	streamErrors   map[string]*provider.Error
-	streamErrorAll *provider.Error
-	completeDelays map[string]time.Duration
-	streamDelays   map[string]time.Duration
+	errors           map[string]*provider.Error
+	errorAll         *provider.Error
+	streamErrors     map[string]*provider.Error
+	streamErrorAll   *provider.Error
+	completeDelays   map[string]time.Duration
+	streamDelays     map[string]time.Duration
+	streamRecvDelays map[string]time.Duration
 }
 
 func (p *fakeProvider) Name() string { return p.name }
@@ -676,11 +713,52 @@ func (p *fakeProvider) CompleteStream(ctx context.Context, req *provider.Request
 	if p.streamErrorAll != nil {
 		return nil, p.streamErrorAll
 	}
-	return fakeStream{}, nil
+	return &fakeStream{
+		events: []*provider.Event{
+			{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: "ok"}}}},
+		},
+		recvDelay: p.streamRecvDelays[req.Model],
+	}, nil
 }
 
-type fakeStream struct{}
+type fakeStream struct {
+	mu        sync.Mutex
+	closeOnce sync.Once
+	done      chan struct{}
+	events    []*provider.Event
+	cursor    int
+	recvDelay time.Duration
+}
 
-func (fakeStream) Recv() (*provider.Event, error) { return nil, provider.ErrStreamDone }
-func (fakeStream) Close() error                   { return nil }
-func (fakeStream) Summary() *provider.Summary     { return &provider.Summary{} }
+func (s *fakeStream) Recv() (*provider.Event, error) {
+	if s.recvDelay > 0 {
+		select {
+		case <-time.After(s.recvDelay):
+		case <-s.doneChan():
+			return nil, provider.ErrStreamDone
+		}
+	}
+	if s.cursor < len(s.events) {
+		event := s.events[s.cursor]
+		s.cursor++
+		return event, nil
+	}
+	return nil, provider.ErrStreamDone
+}
+
+func (s *fakeStream) Close() error {
+	done := s.doneChan()
+	s.closeOnce.Do(func() { close(done) })
+	return nil
+}
+
+func (s *fakeStream) Summary() *provider.Summary { return &provider.Summary{} }
+
+func (s *fakeStream) doneChan() chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.done == nil {
+		s.done = make(chan struct{})
+	}
+	return s.done
+}

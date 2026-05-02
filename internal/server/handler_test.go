@@ -198,22 +198,213 @@ func TestAdoptStreamSummary_PropagatesRecvErrorKindToAttempt(t *testing.T) {
 	}
 }
 
-// fakeRouter implements ChatRouter for handler tests. buildResult lets
-// each test case shape the RouteResult — including pre-populated
-// Attempts so we exercise the audit-copy path without spinning up a
-// real Router.
+func TestHandler_Stream_NormalEOF(t *testing.T) {
+	captured, recorder := newCaptureRecorder()
+	streamObj := &fakeStream{
+		events: []*provider.Event{
+			{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: "hello"}}}},
+			{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: " world"}}}},
+		},
+		summary: &provider.Summary{
+			Usage: &provider.Usage{PromptTokens: 3, CompletionTokens: 2, TotalTokens: 5},
+		},
+	}
+	r := &fakeRouter{
+		buildStreamResult: func(req *provider.Request) (*router.RouteResult, error) {
+			return &router.RouteResult{
+				Stream:    streamObj,
+				Vendor:    "opencode",
+				ModelUsed: req.Model,
+				Attempts: []provider.Attempt{
+					{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()},
+				},
+			}, nil
+		},
+	}
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder)
+
+	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("Content-Type"); got != "text/event-stream" {
+		t.Errorf("Content-Type = %q, want text/event-stream", got)
+	}
+	if !strings.Contains(w.Body.String(), `"hello"`) || !strings.Contains(w.Body.String(), `" world"`) {
+		t.Errorf("body missing chunks: %q", w.Body.String())
+	}
+	if !strings.HasSuffix(w.Body.String(), "data: [DONE]\n\n") {
+		t.Errorf("body must end with [DONE] frame: %q", w.Body.String())
+	}
+	if streamObj.closed != 1 {
+		t.Errorf("Stream.Close() calls = %d, want 1", streamObj.closed)
+	}
+
+	got := captured.last(t)
+	if got.Method != "chat.completions.stream" {
+		t.Errorf("Method = %q, want chat.completions.stream", got.Method)
+	}
+	if got.StatusCode != 200 {
+		t.Errorf("StatusCode = %d, want 200", got.StatusCode)
+	}
+	if got.Usage == nil || got.Usage.TotalTokens != 5 {
+		t.Errorf("Usage = %+v, want total=5 from Summary", got.Usage)
+	}
+	if len(got.Attempts) != 1 {
+		t.Fatalf("Attempts = %d, want 1", len(got.Attempts))
+	}
+	if got.Attempts[0].Usage == nil || got.Attempts[0].Usage.TotalTokens != 5 {
+		t.Errorf("Attempts[0].Usage not finalized from Summary: %+v", got.Attempts[0].Usage)
+	}
+	if got.ResponseBytes <= 0 {
+		t.Errorf("ResponseBytes = %d, want > 0", got.ResponseBytes)
+	}
+}
+
+func TestHandler_Stream_RecvError_PropagatesErrorKind(t *testing.T) {
+	captured, recorder := newCaptureRecorder()
+	streamObj := &fakeStream{
+		events: []*provider.Event{
+			{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: "partial"}}}},
+		},
+		recvErr: &provider.Error{Kind: provider.KindUpstream, Message: "boom mid-stream"},
+		summary: &provider.Summary{},
+	}
+	r := &fakeRouter{
+		buildStreamResult: func(req *provider.Request) (*router.RouteResult, error) {
+			return &router.RouteResult{
+				Stream:    streamObj,
+				Vendor:    "opencode",
+				ModelUsed: req.Model,
+				Attempts: []provider.Attempt{
+					{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()},
+				},
+			}, nil
+		},
+	}
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder)
+
+	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	// HTTP 200 was already written before the error — error rides as an
+	// SSE frame, then [DONE] terminates.
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (header already flushed before mid-stream err)", w.Code)
+	}
+	body2 := w.Body.String()
+	if !strings.Contains(body2, `"partial"`) {
+		t.Errorf("body missing pre-error chunk: %q", body2)
+	}
+	if !strings.Contains(body2, `"type":"upstream"`) {
+		t.Errorf("body missing upstream error envelope: %q", body2)
+	}
+	if !strings.HasSuffix(body2, "data: [DONE]\n\n") {
+		t.Errorf("body must end with [DONE]: %q", body2)
+	}
+
+	got := captured.last(t)
+	if got.ErrorKind != provider.KindUpstream {
+		t.Errorf("rec.ErrorKind = %q, want upstream", got.ErrorKind)
+	}
+	if len(got.Attempts) != 1 || got.Attempts[0].ErrorKind != provider.KindUpstream {
+		t.Errorf("Attempts[0].ErrorKind not propagated: %+v", got.Attempts)
+	}
+}
+
+func TestHandler_Stream_PreStreamRouterError(t *testing.T) {
+	captured, recorder := newCaptureRecorder()
+	r := &fakeRouter{
+		buildStreamResult: func(req *provider.Request) (*router.RouteResult, error) {
+			return &router.RouteResult{
+				Vendor:    "opencode",
+				ModelUsed: req.Model,
+				Attempts: []provider.Attempt{
+					{Vendor: "opencode", Model: req.Model, ErrorKind: provider.KindAuth, StatusCode: 401, StartedAt: time.Now()},
+				},
+			}, &provider.Error{Kind: provider.KindAuth, Message: "no key"}
+		},
+	}
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder)
+
+	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 (pre-stream error → JSON envelope)", w.Code)
+	}
+	if got := w.Header().Get("Content-Type"); got != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json (pre-stream)", got)
+	}
+	if !strings.Contains(w.Body.String(), `"type":"auth"`) {
+		t.Errorf("body missing auth envelope: %q", w.Body.String())
+	}
+
+	got := captured.last(t)
+	if got.ErrorKind != provider.KindAuth {
+		t.Errorf("rec.ErrorKind = %q, want auth", got.ErrorKind)
+	}
+	if got.StatusCode != http.StatusUnauthorized {
+		t.Errorf("rec.StatusCode = %d, want 401", got.StatusCode)
+	}
+	if len(got.Attempts) != 1 || got.Attempts[0].ErrorKind != provider.KindAuth {
+		t.Errorf("Attempts[0] = %+v, want auth attempt", got.Attempts)
+	}
+}
+
+// fakeRouter implements ChatRouter for handler tests. buildResult /
+// buildStreamResult let each test case shape the RouteResult —
+// including pre-populated Attempts — so we exercise the audit-copy
+// path without spinning up a real Router.
 type fakeRouter struct {
-	vendor      string
-	buildResult func(req *provider.Request) *router.RouteResult
+	vendor            string
+	buildResult       func(req *provider.Request) *router.RouteResult
+	buildStreamResult func(req *provider.Request) (*router.RouteResult, error)
 }
 
 func (f *fakeRouter) Complete(_ context.Context, req *provider.Request) (*router.RouteResult, error) {
 	return f.buildResult(req), nil
 }
 
-func (f *fakeRouter) CompleteStream(_ context.Context, _ *provider.Request) (*router.RouteResult, error) {
+func (f *fakeRouter) CompleteStream(_ context.Context, req *provider.Request) (*router.RouteResult, error) {
+	if f.buildStreamResult != nil {
+		return f.buildStreamResult(req)
+	}
 	return &router.RouteResult{}, &provider.Error{Kind: provider.KindUpstream, Message: "stream not implemented in this fake"}
 }
+
+// fakeStream returns events in order, then optionally yields recvErr
+// on the next Recv (or io.EOF if recvErr is nil).
+type fakeStream struct {
+	events  []*provider.Event
+	cursor  int
+	recvErr error
+	summary *provider.Summary
+	closed  int
+}
+
+func (s *fakeStream) Recv() (*provider.Event, error) {
+	if s.cursor < len(s.events) {
+		e := s.events[s.cursor]
+		s.cursor++
+		return e, nil
+	}
+	if s.recvErr != nil {
+		return nil, s.recvErr
+	}
+	return nil, io.EOF
+}
+
+func (s *fakeStream) Close() error                { s.closed++; return nil }
+func (s *fakeStream) Summary() *provider.Summary  { return s.summary }
 
 type captureRecorder struct {
 	mu      sync.Mutex

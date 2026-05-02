@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"llmgate/internal/catalog"
+	"llmgate/catalog"
 	"llmgate/internal/provider"
 )
 

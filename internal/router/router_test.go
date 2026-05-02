@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"llmgate/internal/catalog"
+	"llmgate/catalog"
 	"llmgate/internal/provider"
 )
 

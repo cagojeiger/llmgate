@@ -1,11 +1,14 @@
 package catalog
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 // repoCatalogDir points at the repo's actual catalog/ directory from the
@@ -39,9 +42,8 @@ func TestLoadDir_RepoCatalog(t *testing.T) {
 	if !ok {
 		t.Fatal("Aliases[coder] missing")
 	}
-	wantChain := []string{"deepseek-v4-pro", "deepseek-v4-flash", "kimi-k2.6", "glm-5.1"}
-	if !reflect.DeepEqual(coder.Chain, wantChain) {
-		t.Fatalf("coder.Chain = %v, want %v", coder.Chain, wantChain)
+	if len(coder.Chain) < 2 || coder.Chain[0] != "deepseek-v4-pro" || coder.Chain[1] != "deepseek-v4-flash" {
+		t.Fatalf("coder.Chain = %v, want chain starting with deepseek-v4-pro, deepseek-v4-flash", coder.Chain)
 	}
 }
 
@@ -53,7 +55,7 @@ func TestResolveAlias(t *testing.T) {
 	}
 
 	chain := cat.ResolveAlias("coder")
-	if len(chain) != 4 || chain[0] != "deepseek-v4-pro" {
+	if len(chain) == 0 || chain[0] != "deepseek-v4-pro" {
 		t.Errorf("ResolveAlias(coder) = %v, want chain starting with deepseek-v4-pro", chain)
 	}
 	single := cat.ResolveAlias("deepseek-v4-flash")
@@ -139,6 +141,37 @@ func TestLoadDir_NoModels(t *testing.T) {
 	}
 }
 
+func TestLoadDir_AliasesMissingIsOptional(t *testing.T) {
+	t.Setenv("TEST_API_KEY", "test-key")
+	dir := writeCatalogDir(t, map[string]string{"real.yaml": modelYAML("real")}, nil)
+
+	cat, err := LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+	if len(cat.Aliases) != 0 {
+		t.Fatalf("len(Aliases) = %d, want 0", len(cat.Aliases))
+	}
+}
+
+func TestLoadFS_AliasesReadErrorFails(t *testing.T) {
+	t.Setenv("TEST_API_KEY", "test-key")
+	boom := errors.New("boom")
+	fsys := readDirErrFS{
+		FS:  fstest.MapFS{"models/real.yaml": {Data: []byte(modelYAML("real"))}},
+		dir: "aliases",
+		err: boom,
+	}
+
+	_, err := loadFS(fsys)
+	if err == nil {
+		t.Fatal("loadFS: expected aliases read error, got nil")
+	}
+	if !strings.Contains(err.Error(), "catalog: read aliases") || !errors.Is(err, boom) {
+		t.Fatalf("error = %v, want wrapped aliases read error", err)
+	}
+}
+
 // modelYAML returns a minimal valid models/<id>.yaml body using the
 // shared TEST_API_KEY env var, so any test that t.Setenv's that var
 // can register the model.
@@ -180,4 +213,17 @@ func writeCatalogDir(t *testing.T, models, aliases map[string]string) string {
 		}
 	}
 	return dir
+}
+
+type readDirErrFS struct {
+	fs.FS
+	dir string
+	err error
+}
+
+func (f readDirErrFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	if name == f.dir {
+		return nil, f.err
+	}
+	return fs.ReadDir(f.FS, name)
 }

@@ -23,6 +23,7 @@
 package catalog
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -210,7 +211,10 @@ func walkYAML(fsys fs.FS, dir string, fn func(name string, data []byte) error) e
 func walkYAMLOptional(fsys fs.FS, dir string, fn func(name string, data []byte) error) error {
 	entries, err := fs.ReadDir(fsys, dir)
 	if err != nil {
-		return nil
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("catalog: read %s: %w", dir, err)
 	}
 	return walkEntries(fsys, dir, entries, fn)
 }

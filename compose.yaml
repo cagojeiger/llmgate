@@ -1,0 +1,18 @@
+# Local-only compose for hand-testing the gateway in a container.
+# Mounts catalog/ read-only so editing yaml in the repo flows through
+# without rebuilding the image. .env at the repo root supplies
+# LLMGATE_OPENCODE_API_KEY (loaded automatically by compose).
+
+services:
+  llmgate:
+    build: .
+    image: llmgate:dev
+    ports:
+      - "8080:8080"
+    environment:
+      LLMGATE_OPENCODE_API_KEY: ${LLMGATE_OPENCODE_API_KEY}
+      LLMGATE_CATALOG: /etc/llmgate/catalog
+      LLMGATE_LOG_LEVEL: info
+    volumes:
+      - ./catalog:/etc/llmgate/catalog:ro
+    restart: "no"

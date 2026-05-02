@@ -1,0 +1,19 @@
+# Build context shrinks: skip everything that isn't required to compile
+# the gateway. .env stays out of the image so secrets never bake in.
+.git
+.gitignore
+.dockerignore
+.env
+.env.example
+.omc/
+.repos/
+.tmp/
+.venv/
+.pytest_cache/
+__pycache__/
+bin/
+docs/
+tests/
+scripts/
+README.md
+*.md

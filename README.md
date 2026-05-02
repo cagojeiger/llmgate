@@ -57,12 +57,29 @@ walks the chain on fallback-eligible errors.
 `make run` reads from `./catalog` by default (relative to cwd, so always
 run from the repo root). Set `LLMGATE_CATALOG=/path/to/dir` to point at
 an external directory instead. The directory must contain `models/` (one
-yaml per endpoint) and may contain `aliases/` and `policy.yaml`.
+yaml per endpoint) and may contain `aliases/`. Router policy
+(`LLMGATE_FALLBACK_ON`, `LLMGATE_CIRCUIT_FAILURES`,
+`LLMGATE_CIRCUIT_OPEN_DURATION`) lives in env, not yaml.
 Hot-reload is not supported — change the catalog and restart.
+
+## Run in a container
+
+`compose.yaml` bind-mounts `./catalog` read-only into the container and
+reads `LLMGATE_OPENCODE_API_KEY` from `.env`, so editing yaml on the
+host flows through without rebuilding the image:
+
+```bash
+docker compose up --build
+# (in another shell)
+curl http://localhost:8080/healthz
+docker compose down
+```
+
+The image is distroless static, ~12MB, runs as nonroot. Suitable as a
+starting point for k8s manifests / configMap mounts.
 
 ## End-to-end checks against upstream
 
 ```bash
-make e2e-probe-via-gate
 make e2e
 ```

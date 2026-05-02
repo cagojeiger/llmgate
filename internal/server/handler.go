@@ -14,6 +14,7 @@ import (
 
 	"llmgate/internal/audit"
 	"llmgate/internal/provider"
+	"llmgate/internal/router"
 )
 
 const maxChatRequestBytes = 1 << 20
@@ -22,8 +23,8 @@ const maxChatRequestBytes = 1 << 20
 // here (consumer side) so the router package can return RouteResult
 // without exporting an interface contract for it.
 type ChatRouter interface {
-	Complete(ctx context.Context, req *provider.Request) (*provider.RouteResult, error)
-	CompleteStream(ctx context.Context, req *provider.Request) (*provider.RouteResult, error)
+	Complete(ctx context.Context, req *provider.Request) (*router.RouteResult, error)
+	CompleteStream(ctx context.Context, req *provider.Request) (*router.RouteResult, error)
 }
 
 type Handler struct {
@@ -85,7 +86,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // adoptRoute copies routing metadata onto rec. Non-stream callers see a
 // fully-populated RouteResult (chain done); stream callers see a single
 // in-flight Attempt that is finalized later from Stream.Summary.
-func adoptRoute(rec *audit.Record, result *provider.RouteResult) {
+func adoptRoute(rec *audit.Record, result *router.RouteResult) {
 	if result == nil {
 		return
 	}

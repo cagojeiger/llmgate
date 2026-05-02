@@ -1,4 +1,9 @@
-package provider
+// Package router resolves a logical model name to an ordered chain of
+// concrete adapter calls, applies fallback policy on eligible upstream
+// errors, and tracks per-process circuit-breaker state. The package is
+// the only consumer of catalog policy at runtime; the provider package
+// stays a pure adapter contract.
+package router
 
 import (
 	"context"
@@ -9,9 +14,10 @@ import (
 	"time"
 
 	"llmgate/internal/catalog"
+	"llmgate/internal/provider"
 )
 
-type AdapterFactory func(*catalog.Endpoint) (Provider, error)
+type AdapterFactory func(*catalog.Endpoint) (provider.Provider, error)
 
 // RouteResult is the outcome of one Router.Complete or Router.CompleteStream
 // call. Exactly one of Response/Stream is populated on success. On failure
@@ -27,11 +33,11 @@ type AdapterFactory func(*catalog.Endpoint) (Provider, error)
 // are zero-valued. The caller must finalize that Attempt at end-of-stream
 // from Stream.Summary() and any Recv error.
 type RouteResult struct {
-	Response  *Response
-	Stream    Stream
+	Response  *provider.Response
+	Stream    provider.Stream
 	Vendor    string
 	ModelUsed string
-	Attempts  []Attempt
+	Attempts  []provider.Attempt
 }
 
 // Router dispatches a Request to the right Provider based on model id,
@@ -43,7 +49,7 @@ type RouteResult struct {
 // scope (first-byte semantics + partial billing make it fragile —
 // downgrade non-stream first, validate, then revisit).
 type Router struct {
-	byModel map[string]Provider
+	byModel map[string]provider.Provider
 	aliases map[string][]string
 	policy  fallbackPolicy
 	log     *slog.Logger
@@ -53,7 +59,7 @@ type Router struct {
 }
 
 type fallbackPolicy struct {
-	onKinds         map[Kind]struct{}
+	onKinds         map[provider.Kind]struct{}
 	circuitFailures int
 	circuitOpen     time.Duration
 }
@@ -68,7 +74,7 @@ func NewRouter(cat *catalog.Catalog, factories map[string]AdapterFactory, log *s
 		log = slog.Default()
 	}
 
-	byEndpoint := make(map[string]Provider, len(cat.Endpoints))
+	byEndpoint := make(map[string]provider.Provider, len(cat.Endpoints))
 	for _, ep := range cat.Endpoints {
 		factory, ok := factories[ep.Protocol]
 		if !ok {
@@ -87,7 +93,7 @@ func NewRouter(cat *catalog.Catalog, factories map[string]AdapterFactory, log *s
 		byEndpoint[ep.Name] = p
 	}
 
-	byModel := make(map[string]Provider, len(cat.Models))
+	byModel := make(map[string]provider.Provider, len(cat.Models))
 	for modelID, model := range cat.Models {
 		p, ok := byEndpoint[model.Endpoint]
 		if !ok {
@@ -109,12 +115,12 @@ func NewRouter(cat *catalog.Catalog, factories map[string]AdapterFactory, log *s
 	}
 
 	policy := fallbackPolicy{
-		onKinds:         make(map[Kind]struct{}, len(cat.Fallback.OnKinds)),
+		onKinds:         make(map[provider.Kind]struct{}, len(cat.Fallback.OnKinds)),
 		circuitFailures: cat.Fallback.CircuitFailures,
 		circuitOpen:     cat.Fallback.CircuitOpen,
 	}
 	for _, k := range cat.Fallback.OnKinds {
-		policy.onKinds[Kind(strings.ToLower(k))] = struct{}{}
+		policy.onKinds[provider.Kind(strings.ToLower(k))] = struct{}{}
 	}
 
 	return &Router{
@@ -136,10 +142,10 @@ func NewRouter(cat *catalog.Catalog, factories map[string]AdapterFactory, log *s
 // RouteResult is non-nil for every return; Attempts is populated even
 // on error so the caller can audit the partial chain. The error is
 // non-nil iff no chain entry produced a body.
-func (r *Router) Complete(ctx context.Context, req *Request) (*RouteResult, error) {
+func (r *Router) Complete(ctx context.Context, req *provider.Request) (*RouteResult, error) {
 	result := &RouteResult{}
 	if req == nil {
-		return result, &Error{Kind: KindBadRequest, Message: "request is nil"}
+		return result, &provider.Error{Kind: provider.KindBadRequest, Message: "request is nil"}
 	}
 
 	chain, err := r.resolveChain(req.Model)
@@ -171,7 +177,7 @@ func (r *Router) Complete(ctx context.Context, req *Request) (*RouteResult, erro
 		dur := time.Since(start)
 		calledAny = true
 
-		att := Attempt{
+		att := provider.Attempt{
 			Vendor:     p.Name(),
 			Model:      modelID,
 			StartedAt:  start,
@@ -195,12 +201,12 @@ func (r *Router) Complete(ctx context.Context, req *Request) (*RouteResult, erro
 			return result, nil
 		}
 
-		var perr *Error
+		var perr *provider.Error
 		if errors.As(err, &perr) {
 			att.ErrorKind = perr.Kind
 			att.StatusCode = perr.StatusCode
 		} else {
-			att.ErrorKind = KindUnknown
+			att.ErrorKind = provider.KindUnknown
 		}
 		result.Attempts = append(result.Attempts, att)
 		result.Vendor = p.Name()
@@ -221,7 +227,7 @@ func (r *Router) Complete(ctx context.Context, req *Request) (*RouteResult, erro
 		// Every chain entry was either unregistered or had its circuit
 		// open. Surface this as upstream-unavailable so callers can
 		// distinguish from "request was bad".
-		return result, &Error{Kind: KindUpstream, Message: "all models in chain are currently unavailable"}
+		return result, &provider.Error{Kind: provider.KindUpstream, Message: "all models in chain are currently unavailable"}
 	}
 	return result, lastErr
 }
@@ -233,10 +239,10 @@ func (r *Router) Complete(ctx context.Context, req *Request) (*RouteResult, erro
 // Attempt with StartedAt set; the caller drains the stream and finalizes
 // that Attempt (DurationMS, Usage, VendorCost, ErrorKind) at end-of-stream.
 // On a pre-stream error the Attempt is finalized in place before return.
-func (r *Router) CompleteStream(ctx context.Context, req *Request) (*RouteResult, error) {
+func (r *Router) CompleteStream(ctx context.Context, req *provider.Request) (*RouteResult, error) {
 	result := &RouteResult{}
 	if req == nil {
-		return result, &Error{Kind: KindBadRequest, Message: "request is nil"}
+		return result, &provider.Error{Kind: provider.KindBadRequest, Message: "request is nil"}
 	}
 	chain, err := r.resolveChain(req.Model)
 	if err != nil {
@@ -250,19 +256,19 @@ func (r *Router) CompleteStream(ctx context.Context, req *Request) (*RouteResult
 		attemptReq := *req
 		attemptReq.Model = modelID
 
-		att := Attempt{
+		att := provider.Attempt{
 			Vendor:    p.Name(),
 			Model:     modelID,
 			StartedAt: time.Now(),
 		}
 		stream, err := p.CompleteStream(ctx, &attemptReq)
 		if err != nil {
-			var perr *Error
+			var perr *provider.Error
 			if errors.As(err, &perr) {
 				att.ErrorKind = perr.Kind
 				att.StatusCode = perr.StatusCode
 			} else {
-				att.ErrorKind = KindUnknown
+				att.ErrorKind = provider.KindUnknown
 			}
 			att.DurationMS = time.Since(att.StartedAt).Milliseconds()
 			result.Attempts = append(result.Attempts, att)
@@ -276,7 +282,7 @@ func (r *Router) CompleteStream(ctx context.Context, req *Request) (*RouteResult
 		result.ModelUsed = modelID
 		return result, nil
 	}
-	return result, &Error{Kind: KindBadRequest, Message: "unknown model: " + req.Model}
+	return result, &provider.Error{Kind: provider.KindBadRequest, Message: "unknown model: " + req.Model}
 }
 
 // resolveChain returns the lowercased chain for a model name. Aliases
@@ -291,10 +297,10 @@ func (r *Router) resolveChain(model string) ([]string, error) {
 	if _, ok := r.byModel[key]; ok {
 		return []string{key}, nil
 	}
-	return nil, &Error{Kind: KindBadRequest, Message: "unknown model: " + model}
+	return nil, &provider.Error{Kind: provider.KindBadRequest, Message: "unknown model: " + model}
 }
 
-func (r *Router) fallbackEligible(k Kind) bool {
+func (r *Router) fallbackEligible(k provider.Kind) bool {
 	if k == "" {
 		return false
 	}

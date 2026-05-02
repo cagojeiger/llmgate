@@ -13,14 +13,15 @@ import (
 
 	"llmgate/internal/audit"
 	"llmgate/internal/provider"
+	"llmgate/internal/router"
 )
 
 func TestHandler_SingleAttempt_RecordPopulated(t *testing.T) {
 	rec, recorder := newCaptureRecorder()
 	r := &fakeRouter{
 		vendor: "opencode",
-		buildResult: func(req *provider.Request) *provider.RouteResult {
-			return &provider.RouteResult{
+		buildResult: func(req *provider.Request) *router.RouteResult {
+			return &router.RouteResult{
 				Response: &provider.Response{
 					Model:   req.Model,
 					Choices: []provider.Choice{{Index: 0, Message: provider.Message{Role: "assistant", Content: "ok"}}},
@@ -62,8 +63,8 @@ func TestHandler_FallbackChain_AttemptsRecorded(t *testing.T) {
 	rec, recorder := newCaptureRecorder()
 	r := &fakeRouter{
 		vendor: "opencode",
-		buildResult: func(req *provider.Request) *provider.RouteResult {
-			return &provider.RouteResult{
+		buildResult: func(req *provider.Request) *router.RouteResult {
+			return &router.RouteResult{
 				Response: &provider.Response{
 					Model:   "deepseek-v4-flash",
 					Choices: []provider.Choice{{Index: 0, Message: provider.Message{Role: "assistant", Content: "ok"}}},
@@ -203,15 +204,15 @@ func TestAdoptStreamSummary_PropagatesRecvErrorKindToAttempt(t *testing.T) {
 // real Router.
 type fakeRouter struct {
 	vendor      string
-	buildResult func(req *provider.Request) *provider.RouteResult
+	buildResult func(req *provider.Request) *router.RouteResult
 }
 
-func (f *fakeRouter) Complete(_ context.Context, req *provider.Request) (*provider.RouteResult, error) {
+func (f *fakeRouter) Complete(_ context.Context, req *provider.Request) (*router.RouteResult, error) {
 	return f.buildResult(req), nil
 }
 
-func (f *fakeRouter) CompleteStream(_ context.Context, _ *provider.Request) (*provider.RouteResult, error) {
-	return &provider.RouteResult{}, &provider.Error{Kind: provider.KindUpstream, Message: "stream not implemented in this fake"}
+func (f *fakeRouter) CompleteStream(_ context.Context, _ *provider.Request) (*router.RouteResult, error) {
+	return &router.RouteResult{}, &provider.Error{Kind: provider.KindUpstream, Message: "stream not implemented in this fake"}
 }
 
 type captureRecorder struct {

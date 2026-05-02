@@ -18,6 +18,7 @@ import (
 	"llmgate/internal/provider"
 	"llmgate/internal/provider/anthropic"
 	"llmgate/internal/provider/openai"
+	"llmgate/internal/router"
 	"llmgate/internal/server"
 )
 
@@ -52,12 +53,12 @@ func run() error {
 		slog.String("default_model", cat.Defaults.Model),
 	)
 
-	factories := map[string]provider.AdapterFactory{
+	factories := map[string]router.AdapterFactory{
 		"openai":    openaiFactory,
 		"anthropic": anthropicFactory,
 	}
 
-	router, err := provider.NewRouter(cat, factories, logger)
+	rtr, err := router.NewRouter(cat, factories, logger)
 	if err != nil {
 		return err
 	}
@@ -69,7 +70,7 @@ func run() error {
 		}
 	}()
 
-	handler := server.NewHandler(router, logger, recorder)
+	handler := server.NewHandler(rtr, logger, recorder)
 	srv := server.New(cfg, logger, handler)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

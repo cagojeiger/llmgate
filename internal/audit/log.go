@@ -5,10 +5,7 @@ import (
 	"log/slog"
 )
 
-// LogRecorder emits each Record as a single structured slog line at
-// INFO with msg="audit". Suitable for any environment that captures
-// stdout JSON; Postgres / ClickHouse / Prometheus implementations slot
-// in alongside via Composite.
+// LogRecorder emits each Record as one structured slog line.
 type LogRecorder struct {
 	log *slog.Logger
 }

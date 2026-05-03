@@ -16,9 +16,7 @@ import (
 
 const maxChatRequestBytes = 1 << 20
 
-// ChatRouter is what Handler needs from the upstream layer. Defined
-// here (consumer side) so the router package can return RouteResult
-// without exporting an interface contract for it.
+// ChatRouter is the upstream contract Handler needs.
 type ChatRouter interface {
 	Complete(ctx context.Context, req *provider.Request) (*router.RouteResult, error)
 	CompleteStream(ctx context.Context, req *provider.Request) (*router.RouteResult, error)
@@ -103,9 +101,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.serveComplete(w, r, req, rec)
 }
 
-// adoptRoute copies routing metadata onto rec. Non-stream callers see a
-// fully-populated RouteResult (chain done); stream callers see a single
-// in-flight Attempt that is finalized later from Stream.Summary.
+// adoptRoute copies routing metadata onto rec.
 func adoptRoute(rec *audit.Record, result *router.RouteResult) {
 	if result == nil {
 		return
@@ -115,9 +111,7 @@ func adoptRoute(rec *audit.Record, result *router.RouteResult) {
 	rec.ModelUsed = result.ModelUsed
 }
 
-// adoptError populates rec.ErrorKind / rec.StatusCode from err. Pure on
-// rec — no logging, no HTTP write — so call sites that handle different
-// error sources stay tiny and audit assembly stays unit-testable.
+// adoptError populates rec.ErrorKind and rec.StatusCode from err.
 func adoptError(rec *audit.Record, err error) {
 	var perr *provider.Error
 	if errors.As(err, &perr) {
@@ -126,10 +120,7 @@ func adoptError(rec *audit.Record, err error) {
 	rec.StatusCode = errStatus(err)
 }
 
-// adoptStreamSummary syncs end-of-stream Summary onto rec and finalizes
-// the in-flight Attempt's DurationMS (relative to now). When the stream
-// errored mid-flight, rec.ErrorKind is already set by the Recv loop;
-// this propagates it onto the Attempt for symmetry with non-stream.
+// adoptStreamSummary finalizes stream audit fields after the stream ends.
 func adoptStreamSummary(rec *audit.Record, sum *provider.Summary, now time.Time) {
 	if len(rec.Attempts) > 0 {
 		last := &rec.Attempts[len(rec.Attempts)-1]

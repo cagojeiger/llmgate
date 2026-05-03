@@ -138,9 +138,7 @@ func anthropicFactory(m *catalog.Model) (provider.Provider, error) {
 	})
 }
 
-// readAuthKey resolves the credential env var the catalog declared for this
-// model. The catalog only stores the env *name*; the value is read here so
-// catalog parsing stays a pure file → struct operation.
+// readAuthKey resolves the credential env var named by the catalog model.
 func readAuthKey(m *catalog.Model) (string, error) {
 	v := os.Getenv(m.AuthEnv)
 	if v == "" {

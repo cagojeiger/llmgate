@@ -15,13 +15,7 @@ type Server struct {
 	ShutdownDrainTimeout  time.Duration
 	LogLevel              slog.Level
 
-	// FallbackOn / CircuitFailures / CircuitOpen tune the router's
-	// fallback behavior. They live here, not in catalog yaml, because
-	// they describe gateway-internal algorithm settings — not vendor
-	// or model data. main.go assembles them into a router.FallbackPolicy.
-	// Defaults are sized for typical LLM upstreams (transient 429/5xx,
-	// 3 strikes, 30s base cooldown with capped backoff); operators only
-	// set the env vars when the defaults don't fit.
+	// Router fallback, breaker, and timeout settings.
 	FallbackOn         []string
 	CircuitFailures    int
 	CircuitOpen        time.Duration
@@ -108,8 +102,7 @@ func positiveDuration(key, def string) (time.Duration, error) {
 	return d, nil
 }
 
-// nonNegativeDuration accepts 0 (= disabled) so operators can turn the
-// circuit breaker off explicitly with LLMGATE_CIRCUIT_OPEN_DURATION=0s.
+// nonNegativeDuration accepts 0 for settings that can be disabled.
 func nonNegativeDuration(key, def string) (time.Duration, error) {
 	raw := orDefault(key, def)
 	d, err := time.ParseDuration(raw)
@@ -122,9 +115,7 @@ func nonNegativeDuration(key, def string) (time.Duration, error) {
 	return d, nil
 }
 
-// nonNegativeInt accepts 0 (= disabled) for the same reason as
-// nonNegativeDuration: setting LLMGATE_CIRCUIT_FAILURES=0 disables the
-// circuit breaker.
+// nonNegativeInt accepts 0 for settings that can be disabled.
 func nonNegativeInt(key, def string) (int, error) {
 	raw := orDefault(key, def)
 	n, err := strconv.Atoi(raw)
@@ -158,8 +149,7 @@ func parseLogLevel(key, def string) (slog.Level, error) {
 	return level, nil
 }
 
-// parseCSV reads a comma-separated string from env (or default), trims
-// each token, and drops empty entries. Used for LLMGATE_FALLBACK_ON.
+// parseCSV reads a comma-separated env value, trims tokens, and drops blanks.
 func parseCSV(key, def string) []string {
 	raw := orDefault(key, def)
 	if raw == "" {

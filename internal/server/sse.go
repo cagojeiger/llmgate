@@ -5,11 +5,7 @@ import (
 	"net/http"
 )
 
-// sseWriter wraps an http.ResponseWriter + Flusher for SSE writes,
-// tracking bytes written so the handler can fold the count into the
-// audit Record on the way out. Frame formatting (data: ...\n\n,
-// terminating [DONE]) lives here so the handler stays a control-flow
-// shell.
+// sseWriter writes SSE frames and tracks response bytes for audit.
 type sseWriter struct {
 	w       http.ResponseWriter
 	flusher http.Flusher
@@ -20,8 +16,7 @@ func newSSEWriter(w http.ResponseWriter, flusher http.Flusher) *sseWriter {
 	return &sseWriter{w: w, flusher: flusher}
 }
 
-// WriteHeaders emits the standard SSE headers and a 200 status, then
-// flushes so clients see the response start before the first chunk.
+// WriteHeaders emits standard SSE headers and flushes them.
 func (s *sseWriter) WriteHeaders() {
 	s.w.Header().Set("Content-Type", "text/event-stream")
 	s.w.Header().Set("Cache-Control", "no-cache")
@@ -38,9 +33,7 @@ func (s *sseWriter) Send(payload []byte) {
 	s.flusher.Flush()
 }
 
-// SendError writes the OpenAI-style error envelope as one SSE data
-// frame. Mid-stream errors cannot change HTTP status (already 200), so
-// they surface as event payloads.
+// SendError writes an error envelope as one SSE data frame.
 func (s *sseWriter) SendError(err error) {
 	_, _, payload := errorPayload(err)
 	n, _ := fmt.Fprintf(s.w, "data: %s\n\n", payload)
@@ -48,8 +41,7 @@ func (s *sseWriter) SendError(err error) {
 	s.flusher.Flush()
 }
 
-// SendDone writes the terminating [DONE] sentinel. This is the last
-// frame any stream emits, success or error.
+// SendDone writes the terminating [DONE] sentinel.
 func (s *sseWriter) SendDone() {
 	n, _ := s.w.Write([]byte("data: [DONE]\n\n"))
 	s.bytes += int64(n)

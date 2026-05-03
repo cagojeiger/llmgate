@@ -1,8 +1,5 @@
-// Package router resolves a logical model name to an ordered chain of
-// concrete adapter calls, applies fallback policy on eligible upstream
-// errors, and tracks per-process circuit-breaker state. The package is
-// the only consumer of catalog policy at runtime; the provider package
-// stays a pure adapter contract.
+// Package router resolves model aliases, applies fallback policy, and tracks
+// per-process circuit-breaker state.
 package router
 
 import (
@@ -20,24 +17,12 @@ import (
 	"llmgate/internal/provider"
 )
 
-// AdapterFactory builds one Provider for one Model. The factory resolves
-// the credential env (m.AuthEnv) at call time and passes the value into the
-// adapter — keeping env reads out of the catalog package.
+// AdapterFactory builds one Provider for one catalog Model.
 type AdapterFactory func(*catalog.Model) (provider.Provider, error)
 
-// FallbackPolicy is the runtime tuning the router applies to every
-// alias chain. It does not live in catalog yaml because it has nothing
-// to do with vendor or model data — it shapes how the algorithm reacts
-// to upstream errors. main.go assembles it from env-driven config and
-// passes it in.
-//
-// OnKinds is matched against provider.Kind. When the list is empty
-// fallback is effectively disabled (no error class is eligible to
-// advance the chain). CircuitFailures<=0 or CircuitOpen<=0 disables
-// the per-process circuit breaker; otherwise N consecutive failures
-// trip a model and skip it for that duration. CircuitMaxOpen caps
-// repeated-open exponential backoff. CircuitJitter applies symmetric
-// randomization, where 0.2 means +/-20%.
+// FallbackPolicy is env-driven router tuning. OnKinds controls which
+// provider errors can advance the chain. CircuitFailures or CircuitOpen <= 0
+// disables the breaker. CircuitJitter is symmetric, so 0.2 means +/-20%.
 type FallbackPolicy struct {
 	OnKinds            []string
 	CircuitFailures    int
@@ -49,21 +34,8 @@ type FallbackPolicy struct {
 	StreamStartTimeout time.Duration
 }
 
-// RouteResult is the outcome of one Router.Complete or Router.CompleteStream
-// call. Exactly one of Response/Stream is populated on success. On failure
-// the response side is nil but Attempts is still populated so audit can
-// log the partial chain.
-//
-// For Complete: Attempts records every upstream call in chain order; the
-// last entry corresponds to the body returned (success) or the final
-// failure. Vendor/ModelUsed reflect that last entry.
-//
-// For CompleteStream: the final attempt's stream is started but not yet
-// drained, so that Attempt has StartedAt set and FirstEvent contains the
-// pre-read event used to prove the stream really started before bytes are
-// sent to the client. The caller must send FirstEvent, then drain Stream
-// and finalize the Attempt at end-of-stream from Stream.Summary() and any
-// Recv error.
+// RouteResult carries the chosen response or stream plus the attempts made
+// before success or final failure.
 type RouteResult struct {
 	Response   *provider.Response
 	Stream     provider.Stream
@@ -73,14 +45,8 @@ type RouteResult struct {
 	Attempts   []provider.Attempt
 }
 
-// Router dispatches a Request to the right Provider based on model id,
-// resolving aliases to ordered fallback chains and tracking per-process
-// circuit-breaker state for each model.
-//
-// Fallback applies to non-streaming Complete and to CompleteStream only
-// before a stream is established. Once streaming starts, mid-stream
-// fallback is intentionally out of scope: partial output may already
-// have reached the caller.
+// Router dispatches requests to Providers and maintains breaker state.
+// Streaming fallback only applies before the first event reaches the client.
 type Router struct {
 	byModel map[string]provider.Provider
 	aliases map[string][]string
@@ -166,16 +132,7 @@ func NewRouter(cat *catalog.Catalog, factories map[string]AdapterFactory, policy
 	}, nil
 }
 
-// Complete walks the fallback chain for the requested model. On a
-// fallback-eligible error it tries the next entry; on a non-eligible
-// error it returns immediately. Each upstream call is appended to
-// RouteResult.Attempts so audit can replay the chain. Skipped
-// (circuit-open) models do not produce Attempt entries because no
-// upstream call was made.
-//
-// RouteResult is non-nil for every return; Attempts is populated even
-// on error so the caller can audit the partial chain. The error is
-// non-nil iff no chain entry produced a body.
+// Complete walks the fallback chain for a non-stream request.
 func (r *Router) Complete(ctx context.Context, req *provider.Request) (*RouteResult, error) {
 	result := &RouteResult{}
 	if req == nil {
@@ -257,15 +214,8 @@ func (r *Router) Complete(ctx context.Context, req *provider.Request) (*RouteRes
 	return result, lastErr
 }
 
-// CompleteStream walks the chain until a stream is established. It can
-// fall back on pre-stream failures because no SSE bytes have reached the
-// caller yet. After returning Stream, mid-stream Recv failures are not
-// routed through fallback.
-//
-// On success the returned RouteResult has Stream populated and the final
-// Attempt has StartedAt set; the caller drains the stream and finalizes
-// that Attempt (DurationMS, Usage, VendorCost, ErrorKind) at end-of-stream.
-// On pre-stream errors, Attempts are finalized before fallback or return.
+// CompleteStream walks the fallback chain until the first stream event is
+// received. After that, mid-stream errors are returned to the caller.
 func (r *Router) CompleteStream(ctx context.Context, req *provider.Request) (*RouteResult, error) {
 	result := &RouteResult{}
 	if req == nil {
@@ -515,10 +465,7 @@ func (r *Router) candidates(model string) ([]routeCandidate, error) {
 	return out, nil
 }
 
-// resolveChain returns the lowercased chain for a model name. Aliases
-// expand to their declared chain; raw model ids resolve to a one-element
-// chain. Returns BadRequest when the name is neither a known alias nor a
-// known model.
+// resolveChain expands aliases; raw model ids become a one-item chain.
 func (r *Router) resolveChain(model string) ([]string, error) {
 	key := strings.ToLower(model)
 	if chain, ok := r.aliases[key]; ok {
@@ -551,7 +498,8 @@ func (r *Router) isCircuitOpen(modelID string) bool {
 	if !b.openUntil.IsZero() && time.Now().Before(b.openUntil) {
 		return true
 	}
-	// expired open window — half-open: allow one attempt by resetting state.
+	// On expiry, close the circuit but keep opens until a success so repeated
+	// outages continue exponential backoff.
 	if !b.openUntil.IsZero() {
 		b.openUntil = time.Time{}
 		b.failures = 0

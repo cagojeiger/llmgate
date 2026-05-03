@@ -1,6 +1,4 @@
-// Package provider defines the single contract that every LLM upstream
-// adapter implements. Adding auth, quota, or observability at the
-// Provider boundary covers every gateway call site.
+// Package provider defines the contract implemented by LLM upstream adapters.
 package provider
 
 import (
@@ -21,16 +19,11 @@ type Stream interface {
 	// Close must be safe to call while Recv is blocked; timeout enforcement
 	// uses it to unblock an in-flight read before the handler returns.
 	Close() error
-	// Summary returns the aggregated end-state of the stream. It is safe to
-	// call at any time; the typical caller invokes it after Recv returns
-	// io.EOF (or any error) so audit can extract usage / finish reason / cost
-	// without re-implementing per-vendor accumulation in the handler.
+	// Summary returns best-effort stream totals for audit.
 	Summary() *Summary
 }
 
-// Summary captures aggregated stream state for audit purposes. Fields are
-// best-effort — partial streams populate what they got, fully-failed streams
-// may have everything zero. Stream/non-stream paths produce comparable shapes.
+// Summary captures best-effort stream state for audit.
 type Summary struct {
 	Model        string
 	FinishReason string
@@ -50,10 +43,7 @@ type Request struct {
 	Stop        []string `json:"stop,omitempty"`
 	Seed        *int     `json:"seed,omitempty"`
 	User        string   `json:"user,omitempty"`
-	// Stream is a tri-state: nil = client did not specify, *false = explicit
-	// non-stream, *true = SSE. Handler dispatches to serveStream when true.
-	// Adapters that always force stream (openai/stream.go) override this on
-	// a copy before marshaling.
+	// Stream is tri-state: nil = omitted, false = non-stream, true = SSE.
 	Stream *bool `json:"stream,omitempty"`
 
 	Extra map[string]json.RawMessage `json:"-"`
@@ -132,8 +122,7 @@ type ChoiceDelta struct {
 	Extra map[string]json.RawMessage `json:"-"`
 }
 
-// Delta is the inner object of a streaming choice — role/content/etc. arrive
-// here, not on ChoiceDelta itself, matching the OpenAI chunk wire format.
+// Delta is the inner object of a streaming choice.
 type Delta struct {
 	Role             string `json:"role,omitempty"`
 	Content          string `json:"content,omitempty"`

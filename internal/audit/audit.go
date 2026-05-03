@@ -1,6 +1,4 @@
-// Package audit records one row per gateway request: who, what model,
-// outcome, latency, bytes, tokens, cost. Implementations vary
-// (slog, Postgres, ClickHouse, Prometheus); the interface stays one.
+// Package audit records one row per gateway request.
 package audit
 
 import (
@@ -10,17 +8,7 @@ import (
 	"llmgate/internal/provider"
 )
 
-// Record captures the per-request audit payload. Populated by the handler
-// across the request lifecycle and emitted exactly once via Recorder.
-//
-// ModelRequested is the name on the incoming request (may be a logical
-// alias resolved by the router). Vendor + ModelUsed identify the upstream
-// that actually returned the body the client received. On total failure
-// (all attempts errored), Vendor / ModelUsed may be empty.
-//
-// Attempts captures every model that was tried in order, including failed
-// ones. Downstream consumers can compute "billable tokens" by their own
-// policy — the gateway emits facts only.
+// Record captures the per-request audit payload.
 type Record struct {
 	Timestamp time.Time
 	RequestID string
@@ -44,9 +32,7 @@ type Record struct {
 	Attempts []provider.Attempt
 }
 
-// Recorder receives one Record per gateway request. Implementations must
-// not block the caller — they should buffer or fail silently and log
-// internally. Returning an error from Record was deliberately rejected.
+// Recorder receives one Record per gateway request.
 type Recorder interface {
 	Record(ctx context.Context, r *Record)
 	Close() error

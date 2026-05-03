@@ -193,6 +193,78 @@ func TestComplete_MaxTokensDefault(t *testing.T) {
 	}
 }
 
+// TestClassify_ContentFilterOverridesStatus ensures the envelope's
+// content_filter signal beats the broader HTTP status code (400/422
+// would otherwise lock us into KindBadRequest), matching the OpenAI
+// adapter's behavior.
+func TestClassify_ContentFilterOverridesStatus(t *testing.T) {
+	c := mustNew(t, Config{BaseURL: "http://example.invalid", APIKey: "k", Name: "opencode"})
+	cases := []struct {
+		name   string
+		status int
+		body   string
+		want   provider.Kind
+	}{
+		{
+			name:   "400 + content_filter",
+			status: 400,
+			body:   `{"type":"error","error":{"type":"content_filter","message":"blocked by policy"}}`,
+			want:   provider.KindContentFilter,
+		},
+		{
+			name:   "422 + content_filter_error",
+			status: 422,
+			body:   `{"type":"error","error":{"type":"content_filter_error","message":"blocked"}}`,
+			want:   provider.KindContentFilter,
+		},
+		{
+			name:   "400 + invalid_request_error stays bad_request",
+			status: 400,
+			body:   `{"type":"error","error":{"type":"invalid_request_error","message":"bad field"}}`,
+			want:   provider.KindBadRequest,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			perr := c.classify(tc.status, []byte(tc.body), "")
+			if perr.Kind != tc.want {
+				t.Errorf("Kind = %q, want %q", perr.Kind, tc.want)
+			}
+			if perr.StatusCode != tc.status {
+				t.Errorf("StatusCode = %d, want %d", perr.StatusCode, tc.status)
+			}
+		})
+	}
+}
+
+// TestKindFromAnthropicErrorType pins the envelope error.type → Kind
+// mapping. Update this table when Anthropic ships new error types.
+func TestKindFromAnthropicErrorType(t *testing.T) {
+	cases := []struct {
+		errorType string
+		want      provider.Kind
+	}{
+		{"authentication_error", provider.KindAuth},
+		{"permission_error", provider.KindAuth},
+		{"invalid_request_error", provider.KindBadRequest},
+		{"not_found_error", provider.KindBadRequest},
+		{"request_too_large", provider.KindBadRequest},
+		{"rate_limit_error", provider.KindRateLimit},
+		{"content_filter", provider.KindContentFilter},
+		{"content_filter_error", provider.KindContentFilter},
+		{"overloaded_error", provider.KindUpstream},
+		{"api_error", provider.KindUpstream},
+		{"future_unknown_2030", provider.KindUpstream},
+	}
+	for _, tc := range cases {
+		t.Run(tc.errorType, func(t *testing.T) {
+			if got := kindFromAnthropicErrorType(tc.errorType); got != tc.want {
+				t.Errorf("Kind = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestComplete_StopReasonMapping(t *testing.T) {
 	cases := []struct {
 		stopReason string

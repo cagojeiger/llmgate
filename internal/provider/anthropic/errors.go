@@ -41,6 +41,12 @@ func (c *Client) classify(status int, body []byte, retryAfterHeader string) *pro
 	if kind == provider.KindUnknown && errorType != "" {
 		kind = kindFromAnthropicErrorType(errorType)
 	}
+	// content_filter overrides status-based classification — the envelope
+	// is the authoritative signal, matching the OpenAI adapter's
+	// isContentFilter behavior.
+	if isAnthropicContentFilter(errorType) {
+		kind = provider.KindContentFilter
+	}
 
 	return &provider.Error{
 		Kind:       kind,
@@ -52,6 +58,14 @@ func (c *Client) classify(status int, body []byte, retryAfterHeader string) *pro
 	}
 }
 
+func isAnthropicContentFilter(errorType string) bool {
+	switch strings.ToLower(errorType) {
+	case "content_filter", "content_filter_error":
+		return true
+	}
+	return false
+}
+
 func kindFromAnthropicErrorType(errorType string) provider.Kind {
 	switch strings.ToLower(errorType) {
 	case "authentication_error", "permission_error":
@@ -60,6 +74,8 @@ func kindFromAnthropicErrorType(errorType string) provider.Kind {
 		return provider.KindBadRequest
 	case "rate_limit_error":
 		return provider.KindRateLimit
+	case "content_filter", "content_filter_error":
+		return provider.KindContentFilter
 	case "overloaded_error", "api_error":
 		return provider.KindUpstream
 	default:

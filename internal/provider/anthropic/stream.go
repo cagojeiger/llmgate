@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 	"sync/atomic"
 
 	"llmgate/internal/provider"
@@ -39,7 +40,8 @@ func (c *Client) CompleteStream(ctx context.Context, req *provider.Request) (pro
 			Body:         resp.Body,
 			ProviderName: c.cfg.Name,
 		},
-		reader: upstream.NewSSEReader(resp.Body),
+		reader:    upstream.NewSSEReader(resp.Body),
+		toolCalls: make(map[int]*streamToolCallState),
 	})
 }
 
@@ -55,6 +57,32 @@ type stream struct {
 	inputTokens    int
 	pendingFinish  *anthropicEnd
 	pendingEmitted bool
+
+	// tool_use accumulator. Anthropic announces each tool call as a
+	// separate content_block_start (type=tool_use) keyed by an index that
+	// is unique within the message; we map that index to per-call state
+	// so subsequent input_json_delta events can find the right slot. The
+	// OpenAI tool_calls delta requires its own zero-based index, which we
+	// allocate via nextToolCallIndex.
+	toolCalls         map[int]*streamToolCallState
+	nextToolCallIndex int
+}
+
+// streamToolCallState accumulates one Anthropic tool_use block as the
+// matching OpenAI tool_calls entry is being emitted. Started records
+// whether we have already sent the *first* delta for this call (id +
+// name + initial arguments); subsequent deltas omit id/name and only
+// extend arguments. Placeholder marks the case where Anthropic begins
+// the block with input "{}" and intends to send the real arguments in
+// later input_json_delta events — when no deltas arrive (zero-arg tool)
+// we emit the empty object on content_block_stop.
+type streamToolCallState struct {
+	ID          string
+	Name        string
+	Index       int
+	Arguments   strings.Builder
+	Started     bool
+	Placeholder bool
 }
 
 // Close marks the stream closed (so a blocked Recv returns EOF) before
@@ -155,14 +183,18 @@ func (s *stream) dispatch(event *anthropicStreamEvent, payload []byte) (emitted 
 	switch event.Type {
 	case "message_start":
 		return true, s.handleMessageStart(event), nil
+	case "content_block_start":
+		return s.handleContentBlockStart(event)
 	case "content_block_delta":
 		return s.handleContentBlockDelta(event)
+	case "content_block_stop":
+		return s.handleContentBlockStop(event)
 	case "message_delta":
 		s.handleMessageDelta(event)
 		return false, nil, nil
 	case "message_stop":
 		return true, s.handleMessageStop(), nil
-	case "ping", "content_block_start", "content_block_stop":
+	case "ping":
 		return false, nil, nil
 	case "error":
 		return false, nil, errorFromStreamEvent(payload, s.ProviderName)
@@ -197,22 +229,32 @@ func (s *stream) handleMessageStart(event *anthropicStreamEvent) *provider.Event
 // handleContentBlockDelta translates one Anthropic delta block to an
 // OpenAI delta chunk. text_delta becomes Content; thinking_delta
 // becomes ReasoningContent (with text fallback when Thinking is empty
-// — older API shape). Unknown delta types are silently skipped.
+// — older API shape); input_json_delta extends the matching tool_use
+// accumulator and emits an OpenAI tool_calls argument fragment.
+// Unknown delta types are silently skipped.
 func (s *stream) handleContentBlockDelta(event *anthropicStreamEvent) (bool, *provider.Event, error) {
-	var delta provider.Delta
 	switch event.Delta.Type {
 	case "text_delta":
-		delta.Content = event.Delta.Text
+		return true, s.buildDeltaEvent(provider.Delta{Content: event.Delta.Text}), nil
 	case "thinking_delta":
-		delta.ReasoningContent = event.Delta.Thinking
-		if delta.ReasoningContent == "" {
-			delta.ReasoningContent = event.Delta.Text
+		thinking := event.Delta.Thinking
+		if thinking == "" {
+			thinking = event.Delta.Text
 		}
+		return true, s.buildDeltaEvent(provider.Delta{ReasoningContent: thinking}), nil
+	case "input_json_delta":
+		return s.handleInputJSONDelta(event)
 	default:
 		return false, nil, nil
 	}
+}
+
+// buildDeltaEvent wraps a provider.Delta into the surrounding chunk
+// envelope (id, model, single choice). RecordEmit is called as part of
+// every emitted chunk so audit chunk counts stay accurate.
+func (s *stream) buildDeltaEvent(delta provider.Delta) *provider.Event {
 	s.RecordEmit()
-	return true, &provider.Event{
+	return &provider.Event{
 		ID:     s.msgID,
 		Object: "chat.completion.chunk",
 		Model:  s.msgModel,
@@ -220,7 +262,123 @@ func (s *stream) handleContentBlockDelta(event *anthropicStreamEvent) (bool, *pr
 			Index: 0,
 			Delta: delta,
 		}},
-	}, nil
+	}
+}
+
+// handleContentBlockStart opens a tool_use accumulator when Anthropic
+// begins a content block of type tool_use, and emits the first OpenAI
+// tool_calls fragment carrying id + function.name. Other block types
+// (text / thinking) need no preamble in the OpenAI wire — the deltas
+// themselves carry everything callers expect.
+func (s *stream) handleContentBlockStart(event *anthropicStreamEvent) (bool, *provider.Event, error) {
+	if event.ContentBlock == nil || event.ContentBlock.Type != "tool_use" {
+		return false, nil, nil
+	}
+	state := &streamToolCallState{
+		ID:    event.ContentBlock.ID,
+		Name:  event.ContentBlock.Name,
+		Index: s.nextToolCallIndex,
+	}
+	s.nextToolCallIndex++
+
+	initial := initialToolArguments(event.ContentBlock.Input)
+	state.Placeholder = initial == "{}"
+	if state.Placeholder {
+		// Wait for input_json_delta events to fill in the real args; if
+		// none arrive (zero-arg tool) content_block_stop will flush "{}".
+		s.toolCalls[event.Index] = state
+		return false, nil, nil
+	}
+	if initial != "" {
+		_, _ = state.Arguments.WriteString(initial)
+	}
+	state.Started = true
+	s.toolCalls[event.Index] = state
+	return true, s.buildDeltaEvent(buildToolCallStartDelta(state, initial)), nil
+}
+
+// handleInputJSONDelta is the body of content_block_delta when Anthropic
+// is incrementally streaming a tool_use block's JSON input. The first
+// delta also carries the id + name (because content_block_start used a
+// placeholder); subsequent deltas only extend arguments.
+func (s *stream) handleInputJSONDelta(event *anthropicStreamEvent) (bool, *provider.Event, error) {
+	if event.Delta.PartialJSON == "" {
+		return false, nil, nil
+	}
+	state, ok := s.toolCalls[event.Index]
+	if !ok || state == nil {
+		return false, nil, nil
+	}
+	if state.Placeholder {
+		state.Arguments.Reset()
+		state.Placeholder = false
+	}
+	_, _ = state.Arguments.WriteString(event.Delta.PartialJSON)
+	if !state.Started {
+		state.Started = true
+		return true, s.buildDeltaEvent(buildToolCallStartDelta(state, event.Delta.PartialJSON)), nil
+	}
+	return true, s.buildDeltaEvent(buildToolCallArgsDelta(state.Index, event.Delta.PartialJSON)), nil
+}
+
+// handleContentBlockStop flushes the deferred placeholder case for a
+// zero-argument tool (content_block_start saw input "{}", no
+// input_json_delta events arrived, content_block_stop now closes the
+// block). Other paths have already emitted their deltas.
+func (s *stream) handleContentBlockStop(event *anthropicStreamEvent) (bool, *provider.Event, error) {
+	state, ok := s.toolCalls[event.Index]
+	if !ok || state == nil || state.Started {
+		return false, nil, nil
+	}
+	if !state.Placeholder {
+		return false, nil, nil
+	}
+	state.Started = true
+	return true, s.buildDeltaEvent(buildToolCallStartDelta(state, "{}")), nil
+}
+
+// initialToolArguments returns the trimmed JSON form of an Anthropic
+// content_block_start input field. An empty input (no field on the
+// wire) returns ""; a present-but-empty object returns "{}" so the
+// caller can detect the placeholder case.
+func initialToolArguments(input json.RawMessage) string {
+	if len(input) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(string(input))
+}
+
+// buildToolCallStartDelta builds the *first* OpenAI tool_calls fragment
+// for a tool call: includes the openai-allocated index, id, type, and
+// function name plus the initial arguments fragment.
+func buildToolCallStartDelta(state *streamToolCallState, args string) provider.Delta {
+	return toolCallDelta([]map[string]any{{
+		"index": state.Index,
+		"id":    state.ID,
+		"type":  "function",
+		"function": map[string]any{
+			"name":      state.Name,
+			"arguments": args,
+		},
+	}})
+}
+
+// buildToolCallArgsDelta builds a continuation tool_calls fragment
+// (no id / name) extending an in-flight call's arguments.
+func buildToolCallArgsDelta(index int, args string) provider.Delta {
+	return toolCallDelta([]map[string]any{{
+		"index": index,
+		"function": map[string]any{
+			"arguments": args,
+		},
+	}})
+}
+
+func toolCallDelta(toolCalls []map[string]any) provider.Delta {
+	raw, _ := json.Marshal(toolCalls)
+	return provider.Delta{
+		Extra: map[string]json.RawMessage{"tool_calls": raw},
+	}
 }
 
 // handleMessageDelta buffers the finish reason and output usage so the
@@ -317,13 +475,16 @@ func (s *stream) buildFinishEvent(end *anthropicEnd) *provider.Event {
 }
 
 type anthropicStreamEvent struct {
-	Type    string             `json:"type"`
-	Message *anthropicResponse `json:"message,omitempty"`
-	Delta   struct {
-		Type       string  `json:"type"`
-		Text       string  `json:"text,omitempty"`
-		Thinking   string  `json:"thinking,omitempty"`
-		StopReason *string `json:"stop_reason"`
+	Type         string             `json:"type"`
+	Index        int                `json:"index,omitempty"`
+	Message      *anthropicResponse `json:"message,omitempty"`
+	ContentBlock *anthropicContent  `json:"content_block,omitempty"`
+	Delta        struct {
+		Type        string  `json:"type"`
+		Text        string  `json:"text,omitempty"`
+		Thinking    string  `json:"thinking,omitempty"`
+		PartialJSON string  `json:"partial_json,omitempty"`
+		StopReason  *string `json:"stop_reason"`
 	} `json:"delta"`
 	Usage anthropicUsage `json:"usage"`
 }

@@ -199,21 +199,27 @@ func (r *Router) CompleteStream(ctx context.Context, req *provider.Request) (*Ro
 		return result, &provider.Error{Kind: provider.KindBadRequest, Message: "request is nil"}
 	}
 	routeCtx := ctx
-	cancelRoute := func() {}
+	cancelRoute := context.CancelFunc(func() {})
 	if r.policy.requestTimeout > 0 {
 		routeCtx, cancelRoute = context.WithTimeout(ctx, r.policy.requestTimeout)
 	}
+	// routeCtx is canceled by this defer unless ownership is transferred
+	// to the returned stream on the success path below.
+	routeOwned := true
+	defer func() {
+		if routeOwned {
+			cancelRoute()
+		}
+	}()
 
 	candidates, err := r.candidates(req.Model)
 	if err != nil {
-		cancelRoute()
 		return result, err
 	}
 
 	var lastErr error
 	for _, candidate := range candidates {
 		if err := routeCtx.Err(); err != nil {
-			cancelRoute()
 			return result, contextError(err)
 		}
 		attemptReq := requestForCandidate(req, candidate)
@@ -230,7 +236,7 @@ func (r *Router) CompleteStream(ctx context.Context, req *provider.Request) (*Ro
 			cancelStart()
 			err = startTimeoutErr(err, startCtx, routeCtx, startTimedOut)
 			lastErr = err
-			if bail := r.finalizeStreamFailure(result, candidate, &att, err, routeCtx, cancelRoute); bail != nil {
+			if bail := r.finalizeStreamFailure(result, candidate, &att, err, routeCtx); bail != nil {
 				return result, bail
 			}
 			continue
@@ -243,7 +249,7 @@ func (r *Router) CompleteStream(ctx context.Context, req *provider.Request) (*Ro
 			cancelStart()
 			err = startTimeoutErr(err, startCtx, routeCtx, startTimedOut)
 			lastErr = err
-			if bail := r.finalizeStreamFailure(result, candidate, &att, err, routeCtx, cancelRoute); bail != nil {
+			if bail := r.finalizeStreamFailure(result, candidate, &att, err, routeCtx); bail != nil {
 				return result, bail
 			}
 			continue
@@ -258,7 +264,7 @@ func (r *Router) CompleteStream(ctx context.Context, req *provider.Request) (*Ro
 				err = contextError(startCtx.Err())
 			}
 			lastErr = err
-			if bail := r.finalizeStreamFailure(result, candidate, &att, err, routeCtx, cancelRoute); bail != nil {
+			if bail := r.finalizeStreamFailure(result, candidate, &att, err, routeCtx); bail != nil {
 				return result, bail
 			}
 			continue
@@ -274,16 +280,16 @@ func (r *Router) CompleteStream(ctx context.Context, req *provider.Request) (*Ro
 		result.Vendor = candidate.provider.Name()
 		result.ModelUsed = candidate.model
 		r.breakers.recordSuccess(candidate.model)
+		routeOwned = false
 		return result, nil
 	}
-	cancelRoute()
 	return result, lastErr
 }
 
 // finalizeStreamFailure stamps a failed stream attempt and decides
 // whether to fall back. Returns the error to surface (caller returns)
 // or nil (caller continues to next candidate).
-func (r *Router) finalizeStreamFailure(result *RouteResult, candidate routeCandidate, att *provider.Attempt, err error, routeCtx context.Context, cancelRoute context.CancelFunc) error {
+func (r *Router) finalizeStreamFailure(result *RouteResult, candidate routeCandidate, att *provider.Attempt, err error, routeCtx context.Context) error {
 	adoptAttemptError(att, err)
 	att.DurationMS = time.Since(att.StartedAt).Milliseconds()
 	result.Attempts = append(result.Attempts, *att)
@@ -291,12 +297,10 @@ func (r *Router) finalizeStreamFailure(result *RouteResult, candidate routeCandi
 	result.ModelUsed = candidate.model
 
 	if !r.fallbackEligible(att.ErrorKind) {
-		cancelRoute()
 		return err
 	}
 	r.breakers.recordFailure(candidate.model)
 	if rcErr := routeCtx.Err(); rcErr != nil {
-		cancelRoute()
 		return contextError(rcErr)
 	}
 	r.log.Info("stream fallback triggered",

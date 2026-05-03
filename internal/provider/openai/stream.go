@@ -3,10 +3,7 @@ package openai
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"strings"
-	"sync"
-	"time"
 
 	"llmgate/internal/provider"
 	"llmgate/internal/upstream"
@@ -27,48 +24,41 @@ func (c *Client) CompleteStream(ctx context.Context, req *provider.Request) (pro
 		return nil, c.badRequest("build request", err, nil)
 	}
 
-	resp, err := c.http.Do(httpReq)
+	resp, statusErr, err := upstream.OpenSSE(c.http, httpReq, c.cfg.Name)
 	if err != nil {
-		return nil, c.lowLevelError("send request", err)
+		return nil, err
 	}
-	if resp.StatusCode >= 400 {
-		defer resp.Body.Close()
-		raw, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, c.lowLevelError("read error response", err)
-		}
-		return nil, c.classify(resp.StatusCode, raw, resp.Header.Get("Retry-After"))
+	if statusErr != nil {
+		return nil, c.classify(statusErr.Status, statusErr.Body, statusErr.RetryAfter)
 	}
 
 	return &stream{
-		body:         resp.Body,
-		reader:       upstream.NewSSEReader(resp.Body),
-		providerName: c.cfg.Name,
+		StreamBase: provider.StreamBase{
+			Body:         resp.Body,
+			ProviderName: c.cfg.Name,
+		},
+		reader: upstream.NewSSEReader(resp.Body),
 	}, nil
 }
 
 type stream struct {
-	body         io.Closer
-	reader       *upstream.SSEReader
-	providerName string
-	closeOnce    sync.Once
-	closeErr     error
+	provider.StreamBase
+
+	reader *upstream.SSEReader
 
 	// accumulated state for Summary()
 	model        string
 	finishReason string
 	usage        *provider.Usage
 	vendorCost   string
-	chunkCount   int
-	firstByteAt  time.Time
 }
 
 func (s *stream) Recv() (*provider.Event, error) {
 	data, err := s.reader.Recv()
 	if err != nil {
-		return nil, provider.StampProvider(err, s.providerName)
+		return nil, provider.StampProvider(err, s.ProviderName)
 	}
-	if perr := parseStreamError(data, s.providerName); perr != nil {
+	if perr := parseStreamError(data, s.ProviderName); perr != nil {
 		return nil, perr
 	}
 
@@ -76,17 +66,14 @@ func (s *stream) Recv() (*provider.Event, error) {
 	if err := json.Unmarshal(data, &event); err != nil {
 		return nil, &provider.Error{
 			Kind:     provider.KindUpstream,
-			Provider: s.providerName,
+			Provider: s.ProviderName,
 			Message:  "decode stream event: " + err.Error(),
 			Cause:    err,
 			Raw:      upstream.FirstBytes(data),
 		}
 	}
 
-	if s.firstByteAt.IsZero() {
-		s.firstByteAt = time.Now()
-	}
-	s.chunkCount++
+	s.RecordEmit()
 	if event.Model != "" {
 		s.model = event.Model
 	}
@@ -103,21 +90,14 @@ func (s *stream) Recv() (*provider.Event, error) {
 	return &event, nil
 }
 
-func (s *stream) Close() error {
-	s.closeOnce.Do(func() {
-		s.closeErr = s.body.Close()
-	})
-	return s.closeErr
-}
-
 func (s *stream) Summary() *provider.Summary {
 	return &provider.Summary{
 		Model:        s.model,
 		FinishReason: s.finishReason,
 		Usage:        s.usage,
 		VendorCost:   s.vendorCost,
-		ChunkCount:   s.chunkCount,
-		FirstByteAt:  s.firstByteAt,
+		ChunkCount:   s.ChunkCount,
+		FirstByteAt:  s.FirstByteAt,
 	}
 }
 

@@ -4,10 +4,49 @@ import (
 	"bufio"
 	"bytes"
 	"io"
+	"net/http"
 	"strings"
 
 	"llmgate/internal/provider"
 )
+
+// StatusError carries a non-2xx HTTP response from an SSE stream-open
+// attempt. The adapter classifies Status into a provider.Error.Kind via
+// its vendor-specific envelope knowledge.
+type StatusError struct {
+	Status     int
+	Body       []byte
+	RetryAfter string
+}
+
+// OpenSSE sends req and validates the response is ready for streaming.
+//
+//   - Transport failure → err already stamped with providerName.
+//   - Non-2xx status → *StatusError with body fully drained for the
+//     adapter to classify. resp.Body has been closed.
+//   - Success → *http.Response with body open; caller owns Close.
+//
+// Adapters use this so the four-step send → status-check → drain dance
+// lives in one place.
+func OpenSSE(client *http.Client, req *http.Request, providerName string) (*http.Response, *StatusError, error) {
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, nil, LowLevelError(providerName, "send request", err)
+	}
+	if resp.StatusCode >= 400 {
+		defer resp.Body.Close()
+		raw, ioErr := io.ReadAll(resp.Body)
+		if ioErr != nil {
+			return nil, nil, LowLevelError(providerName, "read error response", ioErr)
+		}
+		return nil, &StatusError{
+			Status:     resp.StatusCode,
+			Body:       raw,
+			RetryAfter: resp.Header.Get("Retry-After"),
+		}, nil
+	}
+	return resp, nil, nil
+}
 
 // SSEReader pulls one server-sent event payload at a time from an
 // upstream provider's response stream. Each Recv returns the next

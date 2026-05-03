@@ -2,6 +2,8 @@ package provider
 
 import (
 	"context"
+	"errors"
+	"io"
 )
 
 // ValidateFirstEvent eagerly reads one event from raw to confirm the
@@ -30,6 +32,9 @@ func ValidateFirstEvent(ctx context.Context, raw Stream) (Stream, error) {
 	case r := <-ch:
 		if r.err != nil {
 			_ = raw.Close()
+			if errors.Is(r.err, io.EOF) {
+				return nil, &Error{Kind: KindUpstream, Message: "stream ended before first event", Cause: r.err}
+			}
 			return nil, r.err
 		}
 		// Race guard: the first event arrived but ctx (e.g. a stream-start

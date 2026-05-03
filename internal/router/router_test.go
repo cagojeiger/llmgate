@@ -394,6 +394,30 @@ func TestRouter_StreamStartTimeoutIncludesFirstEvent(t *testing.T) {
 	}
 }
 
+func TestRouter_StreamEmptyFirstEventFallsBack(t *testing.T) {
+	openAI := &fakeProvider{
+		name: "openai",
+		streamEmptyEOF: map[string]bool{
+			"deepseek-v4-pro": true,
+		},
+	}
+	router := mustRouter(t, fallbackCatalog(t), openAI, nil)
+
+	result, err := router.CompleteStream(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if result.ModelUsed != "deepseek-v4-flash" {
+		t.Fatalf("ModelUsed = %q, want deepseek-v4-flash after primary empty stream", result.ModelUsed)
+	}
+	if len(result.Attempts) != 2 {
+		t.Fatalf("attempts = %d, want 2", len(result.Attempts))
+	}
+	if result.Attempts[0].ErrorKind != provider.KindUpstream {
+		t.Fatalf("attempt[0].ErrorKind = %q, want upstream", result.Attempts[0].ErrorKind)
+	}
+}
+
 func TestRouter_CircuitOpensAfterRepeatedFailures(t *testing.T) {
 	// Only the primary fails — secondary always succeeds. Three failed
 	// runs trip the breaker on the primary; the fourth call must skip
@@ -573,6 +597,7 @@ type fakeProvider struct {
 	completeDelays   map[string]time.Duration
 	streamDelays     map[string]time.Duration
 	streamRecvDelays map[string]time.Duration
+	streamEmptyEOF   map[string]bool
 }
 
 func (p *fakeProvider) Name() string { return p.name }
@@ -620,10 +645,14 @@ func (p *fakeProvider) CompleteStream(ctx context.Context, req *provider.Request
 	if p.streamErrorAll != nil {
 		return nil, p.streamErrorAll
 	}
+	events := []*provider.Event{
+		{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: "ok"}}}},
+	}
+	if p.streamEmptyEOF[req.Model] {
+		events = nil
+	}
 	raw := &fakeStream{
-		events: []*provider.Event{
-			{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: "ok"}}}},
-		},
+		events:    events,
 		recvDelay: p.streamRecvDelays[req.Model],
 	}
 	return provider.ValidateFirstEvent(ctx, raw)
@@ -670,4 +699,3 @@ func (s *fakeStream) doneChan() chan struct{} {
 	}
 	return s.done
 }
-

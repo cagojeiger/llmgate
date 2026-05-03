@@ -215,6 +215,10 @@ func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *provi
 			return
 		}
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				h.recordClientClosed(r.Context(), rec, err)
+				return
+			}
 			var perr *provider.Error
 			if errors.As(err, &perr) {
 				rec.ErrorKind = perr.Kind

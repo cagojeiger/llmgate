@@ -29,6 +29,7 @@ func New(cfg *config.Server, log *slog.Logger, h *Handler) *http.Server {
 		Addr:              cfg.Addr,
 		Handler:           r,
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       cfg.RequestTimeout,
 		IdleTimeout:       60 * time.Second,
 		WriteTimeout:      0,
 	}

@@ -416,6 +416,44 @@ func TestHandler_Stream_RequestTimeoutSendsError(t *testing.T) {
 	}
 }
 
+func TestHandler_Stream_ContextCanceledRecordsClientClosed(t *testing.T) {
+	captured, recorder := newCaptureRecorder()
+	streamObj := &fakeStream{
+		recvDelay: 50 * time.Millisecond,
+		summary:   &provider.Summary{},
+	}
+	r := &fakeRouter{
+		buildStreamResult: func(req *provider.Request) (*router.RouteResult, error) {
+			return &router.RouteResult{
+				Stream:    streamObj,
+				Vendor:    "opencode",
+				ModelUsed: req.Model,
+				Attempts: []provider.Attempt{
+					{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()},
+				},
+			}, nil
+		},
+	}
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+
+	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
+	baseReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	ctx, cancel := context.WithCancel(baseReq.Context())
+	req := baseReq.WithContext(ctx)
+	cancel()
+
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	got := captured.last(t)
+	if got.ErrorKind != provider.KindClientClosed {
+		t.Fatalf("ErrorKind = %q, want client_closed", got.ErrorKind)
+	}
+	if streamObj.closedCount() == 0 {
+		t.Errorf("Stream.Close() calls = 0, want at least 1")
+	}
+}
+
 // TestHandler_Stream_ClientDisconnect_MidStream simulates a client that
 // hangs up after the first SSE frame. The handler must (a) record the
 // terminal state as KindClientClosed in audit and (b) stop draining the

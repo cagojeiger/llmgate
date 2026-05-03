@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"llmgate/internal/catalog"
@@ -21,15 +19,16 @@ type AdapterFactory func(*catalog.Model) (provider.Provider, error)
 // FallbackPolicy is env-driven router tuning. CircuitFailures or
 // CircuitOpen <= 0 disables the breaker; CircuitJitter is symmetric
 // (0.2 means ±20%). The total request budget lives in the caller's
-// ctx (handler middleware) — router only owns per-attempt budgets.
+// ctx (handler middleware); router owns the per-attempt non-stream
+// budget. Streaming uses the caller's ctx end-to-end — first-event
+// validation lives in the adapter via provider.ValidateFirstEvent.
 type FallbackPolicy struct {
-	OnKinds            []string
-	CircuitFailures    int
-	CircuitOpen        time.Duration
-	CircuitMaxOpen     time.Duration
-	CircuitJitter      float64
-	CompleteTimeout    time.Duration
-	StreamStartTimeout time.Duration
+	OnKinds         []string
+	CircuitFailures int
+	CircuitOpen     time.Duration
+	CircuitMaxOpen  time.Duration
+	CircuitJitter   float64
+	CompleteTimeout time.Duration
 }
 
 type RouteResult struct {
@@ -51,9 +50,8 @@ type Router struct {
 }
 
 type fallbackPolicy struct {
-	onKinds            map[provider.Kind]struct{}
-	completeTimeout    time.Duration
-	streamStartTimeout time.Duration
+	onKinds         map[provider.Kind]struct{}
+	completeTimeout time.Duration
 }
 
 type routeCandidate struct {
@@ -92,9 +90,8 @@ func NewRouter(cat *catalog.Catalog, factories map[string]AdapterFactory, policy
 	}
 
 	internalPolicy := fallbackPolicy{
-		onKinds:            make(map[provider.Kind]struct{}, len(policy.OnKinds)),
-		completeTimeout:    policy.CompleteTimeout,
-		streamStartTimeout: policy.StreamStartTimeout,
+		onKinds:         make(map[provider.Kind]struct{}, len(policy.OnKinds)),
+		completeTimeout: policy.CompleteTimeout,
 	}
 	for _, k := range policy.OnKinds {
 		internalPolicy.onKinds[provider.Kind(strings.ToLower(k))] = struct{}{}
@@ -201,31 +198,22 @@ func (r *Router) CompleteStream(ctx context.Context, req *provider.Request) (*Ro
 			return result, contextError(err)
 		}
 		attemptReq := requestForCandidate(req, candidate)
-		startCtx, cancelStart, stopStart, startTimedOut := streamStartContext(ctx, r.policy.streamStartTimeout)
-
 		att := provider.Attempt{
 			Vendor:    candidate.provider.Name(),
 			Model:     candidate.model,
 			StartedAt: time.Now(),
 		}
-		stream, err := candidate.provider.CompleteStream(startCtx, &attemptReq)
+		stream, err := candidate.provider.CompleteStream(ctx, &attemptReq)
 		if err != nil {
-			stopStart()
-			cancelStart()
-			err = startTimeoutErr(err, startCtx, ctx, startTimedOut)
 			lastErr = err
 			if bail := r.finalizeStreamFailure(result, candidate, &att, err, ctx); bail != nil {
 				return result, bail
 			}
 			continue
 		}
-		// Adapter's ValidateFirstEvent already proved the stream alive.
-		// Stop the start-timer (without canceling startCtx) so the
-		// established stream's underlying ctx survives until Close.
-		stopStart()
 
 		result.Attempts = append(result.Attempts, att)
-		result.Stream = &cancelOnCloseStream{Stream: stream, cancel: cancelStart}
+		result.Stream = stream
 		result.Vendor = candidate.provider.Name()
 		result.ModelUsed = candidate.model
 		r.breakers.recordSuccess(candidate.model)
@@ -256,60 +244,6 @@ func (r *Router) finalizeStreamFailure(result *RouteResult, candidate routeCandi
 		slog.String("error_kind", string(att.ErrorKind)),
 	)
 	return nil
-}
-
-// startTimeoutErr returns the disambiguated start-phase error, or the
-// original adapter error when neither route ctx nor start timer fired.
-func startTimeoutErr(orig error, startCtx, routeCtx context.Context, timedOut func() bool) error {
-	if ctxErr := streamStartError(startCtx, routeCtx, timedOut); ctxErr != nil {
-		return ctxErr
-	}
-	return orig
-}
-
-// streamStartContext bounds CompleteStream + first-event read with one
-// timer. After both succeed the caller stops the timer (without
-// cancelling ctx) so the returned stream's underlying ctx survives.
-func streamStartContext(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc, func() bool, func() bool) {
-	ctx, cancel := context.WithCancel(parent)
-	if timeout <= 0 {
-		return ctx, cancel, func() bool { return true }, func() bool { return false }
-	}
-	var timedOut atomic.Bool
-	timer := time.AfterFunc(timeout, func() {
-		timedOut.Store(true)
-		cancel()
-	})
-	return ctx, cancel, timer.Stop, timedOut.Load
-}
-
-// streamStartError disambiguates a pre-first-event failure: route-level
-// cancellation > start-timeout > nil (caller falls back to original err).
-func streamStartError(startCtx, routeCtx context.Context, timedOut func() bool) error {
-	if routeErr := routeCtx.Err(); routeErr != nil {
-		return contextError(routeErr)
-	}
-	if timedOut != nil && timedOut() {
-		return &provider.Error{Kind: provider.KindTimeout, Message: "stream start timeout"}
-	}
-	if err := startCtx.Err(); err != nil && !errors.Is(err, context.Canceled) {
-		return contextError(err)
-	}
-	return nil
-}
-
-// cancelOnCloseStream defers cancellation of the route-level ctx until
-// the caller closes the stream.
-type cancelOnCloseStream struct {
-	provider.Stream
-	cancel context.CancelFunc
-	once   sync.Once
-}
-
-func (s *cancelOnCloseStream) Close() error {
-	err := s.Stream.Close()
-	s.once.Do(s.cancel)
-	return err
 }
 
 func requestForCandidate(req *provider.Request, candidate routeCandidate) provider.Request {

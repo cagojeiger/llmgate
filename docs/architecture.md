@@ -97,7 +97,6 @@ catalog/
 | `LLMGATE_CIRCUIT_JITTER` | `0.2` | 차단 시간 ±지터 비율 |
 | `LLMGATE_REQUEST_TIMEOUT` | `5m` | 요청 1회 총 wall-clock budget |
 | `LLMGATE_COMPLETE_TIMEOUT` | `1m` | non-stream 한 시도당 budget |
-| `LLMGATE_STREAM_START_TIMEOUT` | `30s` | 스트림 시작 + 첫 이벤트까지 budget |
 | `LLMGATE_STREAM_IDLE_TIMEOUT` | `1m` | 스트림 중간 idle (이벤트 사이) 한도 |
 
 ### 부팅 순서

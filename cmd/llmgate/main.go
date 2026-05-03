@@ -58,13 +58,12 @@ func run() error {
 	}
 
 	policy := router.FallbackPolicy{
-		OnKinds:            cfg.FallbackOn,
-		CircuitFailures:    cfg.CircuitFailures,
-		CircuitOpen:        cfg.CircuitOpen,
-		CircuitMaxOpen:     cfg.CircuitMaxOpen,
-		CircuitJitter:      cfg.CircuitJitter,
-		CompleteTimeout:    cfg.CompleteTimeout,
-		StreamStartTimeout: cfg.StreamStartTimeout,
+		OnKinds:         cfg.FallbackOn,
+		CircuitFailures: cfg.CircuitFailures,
+		CircuitOpen:     cfg.CircuitOpen,
+		CircuitMaxOpen:  cfg.CircuitMaxOpen,
+		CircuitJitter:   cfg.CircuitJitter,
+		CompleteTimeout: cfg.CompleteTimeout,
 	}
 	rtr, err := router.NewRouter(cat, factories, policy, logger)
 	if err != nil {

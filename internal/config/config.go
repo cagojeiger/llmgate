@@ -16,15 +16,14 @@ type Server struct {
 	LogLevel              slog.Level
 
 	// Router fallback, breaker, and timeout settings.
-	FallbackOn         []string
-	CircuitFailures    int
-	CircuitOpen        time.Duration
-	CircuitMaxOpen     time.Duration
-	CircuitJitter      float64
-	RequestTimeout     time.Duration
-	CompleteTimeout    time.Duration
-	StreamStartTimeout time.Duration
-	StreamIdleTimeout  time.Duration
+	FallbackOn        []string
+	CircuitFailures   int
+	CircuitOpen       time.Duration
+	CircuitMaxOpen    time.Duration
+	CircuitJitter     float64
+	RequestTimeout    time.Duration
+	CompleteTimeout   time.Duration
+	StreamIdleTimeout time.Duration
 }
 
 func LoadServer() (*Server, error) {
@@ -64,10 +63,6 @@ func LoadServer() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	streamStartTimeout, err := nonNegativeDuration("LLMGATE_STREAM_START_TIMEOUT", "30s")
-	if err != nil {
-		return nil, err
-	}
 	streamIdleTimeout, err := nonNegativeDuration("LLMGATE_STREAM_IDLE_TIMEOUT", "1m")
 	if err != nil {
 		return nil, err
@@ -85,7 +80,6 @@ func LoadServer() (*Server, error) {
 		CircuitJitter:         circuitJitter,
 		RequestTimeout:        requestTimeout,
 		CompleteTimeout:       completeTimeout,
-		StreamStartTimeout:    streamStartTimeout,
 		StreamIdleTimeout:     streamIdleTimeout,
 	}, nil
 }

@@ -18,13 +18,12 @@ import (
 // same in tests as it does at runtime — fallback on transient classes,
 // circuit trips after 3 strikes, 30s cooldown.
 var testPolicy = FallbackPolicy{
-	OnKinds:            []string{"rate_limit", "upstream", "timeout", "network"},
-	CircuitFailures:    3,
-	CircuitOpen:        30 * time.Second,
-	CircuitMaxOpen:     5 * time.Minute,
-	CircuitJitter:      0.2,
-	CompleteTimeout:    time.Minute,
-	StreamStartTimeout: 30 * time.Second,
+	OnKinds:         []string{"rate_limit", "upstream", "timeout", "network"},
+	CircuitFailures: 3,
+	CircuitOpen:     30 * time.Second,
+	CircuitMaxOpen:  5 * time.Minute,
+	CircuitJitter:   0.2,
+	CompleteTimeout: time.Minute,
 }
 
 func TestRouter_MissingProtocolFactoryFailsFast(t *testing.T) {
@@ -339,58 +338,6 @@ func TestRouter_StreamPreStreamFailuresOpenCircuit(t *testing.T) {
 	}
 	if result.ModelUsed != "deepseek-v4-flash" {
 		t.Fatalf("fourth ModelUsed = %q, want deepseek-v4-flash", result.ModelUsed)
-	}
-}
-
-func TestRouter_StreamStartTimeoutFallsBack(t *testing.T) {
-	openAI := &fakeProvider{
-		name: "openai",
-		streamDelays: map[string]time.Duration{
-			"deepseek-v4-pro": 50 * time.Millisecond,
-		},
-	}
-	policy := testPolicy
-	policy.StreamStartTimeout = time.Millisecond
-	router := mustRouterWithPolicy(t, fallbackCatalog(t), openAI, nil, policy)
-
-	result, err := router.CompleteStream(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
-	if err != nil {
-		t.Fatalf("CompleteStream: %v", err)
-	}
-	if result.ModelUsed != "deepseek-v4-flash" {
-		t.Fatalf("ModelUsed = %q, want deepseek-v4-flash after primary stream start timeout", result.ModelUsed)
-	}
-	if len(result.Attempts) != 2 {
-		t.Fatalf("attempts = %d, want 2", len(result.Attempts))
-	}
-	if result.Attempts[0].ErrorKind != provider.KindTimeout {
-		t.Fatalf("attempt[0].ErrorKind = %q, want timeout", result.Attempts[0].ErrorKind)
-	}
-}
-
-func TestRouter_StreamStartTimeoutIncludesFirstEvent(t *testing.T) {
-	openAI := &fakeProvider{
-		name: "openai",
-		streamRecvDelays: map[string]time.Duration{
-			"deepseek-v4-pro": 50 * time.Millisecond,
-		},
-	}
-	policy := testPolicy
-	policy.StreamStartTimeout = time.Millisecond
-	router := mustRouterWithPolicy(t, fallbackCatalog(t), openAI, nil, policy)
-
-	result, err := router.CompleteStream(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
-	if err != nil {
-		t.Fatalf("CompleteStream: %v", err)
-	}
-	if result.ModelUsed != "deepseek-v4-flash" {
-		t.Fatalf("ModelUsed = %q, want deepseek-v4-flash after primary first-event timeout", result.ModelUsed)
-	}
-	if len(result.Attempts) != 2 {
-		t.Fatalf("attempts = %d, want 2", len(result.Attempts))
-	}
-	if result.Attempts[0].ErrorKind != provider.KindTimeout {
-		t.Fatalf("attempt[0].ErrorKind = %q, want timeout", result.Attempts[0].ErrorKind)
 	}
 }
 

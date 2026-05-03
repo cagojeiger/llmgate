@@ -54,6 +54,8 @@ func errorPayload(err error) (int, time.Duration, []byte) {
 			status, code = http.StatusBadRequest, "content_filter"
 		case provider.KindUpstream, provider.KindNetwork, provider.KindTimeout, provider.KindEmpty:
 			status = http.StatusBadGateway
+		case provider.KindClientClosed:
+			status = 499
 		}
 		if kind == "" {
 			kind = provider.KindUnknown

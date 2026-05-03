@@ -27,25 +27,30 @@ func (s *sseWriter) WriteHeaders() {
 }
 
 // Send writes one SSE data frame whose payload is the marshaled chunk.
-func (s *sseWriter) Send(payload []byte) {
-	n, _ := fmt.Fprintf(s.w, "data: %s\n\n", payload)
+// Returns the underlying writer's error so callers can stop draining
+// upstream when the client has disconnected.
+func (s *sseWriter) Send(payload []byte) error {
+	n, err := fmt.Fprintf(s.w, "data: %s\n\n", payload)
 	s.bytes += int64(n)
 	s.flusher.Flush()
+	return err
 }
 
 // SendError writes an error envelope as one SSE data frame.
-func (s *sseWriter) SendError(err error) {
+func (s *sseWriter) SendError(err error) error {
 	_, _, payload := errorPayload(err)
-	n, _ := fmt.Fprintf(s.w, "data: %s\n\n", payload)
+	n, werr := fmt.Fprintf(s.w, "data: %s\n\n", payload)
 	s.bytes += int64(n)
 	s.flusher.Flush()
+	return werr
 }
 
 // SendDone writes the terminating [DONE] sentinel.
-func (s *sseWriter) SendDone() {
-	n, _ := s.w.Write([]byte("data: [DONE]\n\n"))
+func (s *sseWriter) SendDone() error {
+	n, err := s.w.Write([]byte("data: [DONE]\n\n"))
 	s.bytes += int64(n)
 	s.flusher.Flush()
+	return err
 }
 
 // Bytes returns the running total of bytes written.

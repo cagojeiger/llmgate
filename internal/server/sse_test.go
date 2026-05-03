@@ -1,6 +1,9 @@
 package server
 
 import (
+	"errors"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -115,3 +118,49 @@ func TestSSEWriter_BytesAccumulatesAcrossOps(t *testing.T) {
 type stubFlusher struct{ calls int }
 
 func (s *stubFlusher) Flush() { s.calls++ }
+
+// errResponseWriter simulates a client-disconnected ResponseWriter:
+// every Write returns errBrokenPipe with zero bytes accepted. Header()
+// works so callers that set headers before WriteHeader still pass.
+type errResponseWriter struct {
+	header http.Header
+	err    error
+}
+
+func newErrResponseWriter(err error) *errResponseWriter {
+	return &errResponseWriter{header: http.Header{}, err: err}
+}
+
+func (e *errResponseWriter) Header() http.Header        { return e.header }
+func (e *errResponseWriter) Write([]byte) (int, error)  { return 0, e.err }
+func (e *errResponseWriter) WriteHeader(statusCode int) {}
+
+func TestSSEWriter_Send_PropagatesWriteError(t *testing.T) {
+	target := errors.New("broken pipe")
+	sw := newSSEWriter(newErrResponseWriter(target), &stubFlusher{})
+
+	if err := sw.Send([]byte("x")); !errors.Is(err, target) {
+		t.Fatalf("Send err = %v, want %v", err, target)
+	}
+	if sw.Bytes() != 0 {
+		t.Errorf("Bytes() = %d, want 0 when writer rejected all bytes", sw.Bytes())
+	}
+}
+
+func TestSSEWriter_SendError_PropagatesWriteError(t *testing.T) {
+	target := errors.New("broken pipe")
+	sw := newSSEWriter(newErrResponseWriter(target), &stubFlusher{})
+
+	if err := sw.SendError(io.ErrUnexpectedEOF); !errors.Is(err, target) {
+		t.Fatalf("SendError err = %v, want underlying %v", err, target)
+	}
+}
+
+func TestSSEWriter_SendDone_PropagatesWriteError(t *testing.T) {
+	target := errors.New("broken pipe")
+	sw := newSSEWriter(newErrResponseWriter(target), &stubFlusher{})
+
+	if err := sw.SendDone(); !errors.Is(err, target) {
+		t.Fatalf("SendDone err = %v, want %v", err, target)
+	}
+}

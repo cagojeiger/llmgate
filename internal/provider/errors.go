@@ -18,6 +18,7 @@ const (
 	KindTimeout       Kind = "timeout"
 	KindNetwork       Kind = "network"
 	KindEmpty         Kind = "empty_response"
+	KindClientClosed  Kind = "client_closed"
 	KindUnknown       Kind = "unknown"
 )
 

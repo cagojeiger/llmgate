@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -412,6 +413,195 @@ func TestHandler_Stream_RequestTimeoutSendsError(t *testing.T) {
 		t.Errorf("Attempts[0].ErrorKind not propagated: %+v", got.Attempts)
 	}
 }
+
+// TestHandler_Stream_ClientDisconnect_MidStream simulates a client that
+// hangs up after the first SSE frame. The handler must (a) record the
+// terminal state as KindClientClosed in audit and (b) stop draining the
+// upstream stream — leaving later events un-consumed.
+func TestHandler_Stream_ClientDisconnect_MidStream(t *testing.T) {
+	captured, recorder := newCaptureRecorder()
+	streamObj := &fakeStream{
+		events: []*provider.Event{
+			{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: " two"}}}},
+			{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: " three"}}}},
+		},
+		summary: &provider.Summary{},
+	}
+	r := &fakeRouter{
+		buildStreamResult: func(req *provider.Request) (*router.RouteResult, error) {
+			return &router.RouteResult{
+				Stream:     streamObj,
+				FirstEvent: &provider.Event{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: "one"}}}},
+				Vendor:     "opencode",
+				ModelUsed:  req.Model,
+				Attempts: []provider.Attempt{
+					{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()},
+				},
+			}, nil
+		},
+	}
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder)
+
+	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	// Allow one frame (FirstEvent) through; next Send call fails.
+	w := newDisconnectAfterN(1)
+	h.ServeHTTP(w, req)
+
+	got := captured.last(t)
+	if got.ErrorKind != provider.KindClientClosed {
+		t.Fatalf("ErrorKind = %q, want client_closed", got.ErrorKind)
+	}
+	// Loop runs exactly one Recv: receives event[0], marshals it, Send fails,
+	// handler bails. event[1] must remain in the buffer.
+	if streamObj.cursor != 1 {
+		t.Errorf("stream cursor = %d, want 1 (one Recv call before bail-out)", streamObj.cursor)
+	}
+	if streamObj.closedCount() == 0 {
+		t.Errorf("Stream.Close() not called (defer must run)")
+	}
+}
+
+// TestHandler_Stream_ClientDisconnect_OnDone covers the EOF success
+// path: stream drains cleanly but the [DONE] sentinel write fails.
+// Audit must still record client_closed — the wire handshake didn't
+// complete even though upstream finished cleanly.
+func TestHandler_Stream_ClientDisconnect_OnDone(t *testing.T) {
+	captured, recorder := newCaptureRecorder()
+	streamObj := &fakeStream{
+		// no events: Recv returns io.EOF immediately
+		summary: &provider.Summary{},
+	}
+	r := &fakeRouter{
+		buildStreamResult: func(req *provider.Request) (*router.RouteResult, error) {
+			return &router.RouteResult{
+				Stream:     streamObj,
+				FirstEvent: &provider.Event{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: "only"}}}},
+				Vendor:     "opencode",
+				ModelUsed:  req.Model,
+				Attempts: []provider.Attempt{
+					{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()},
+				},
+			}, nil
+		},
+	}
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder)
+
+	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	// Allow FirstEvent through (1 write); next Write (the [DONE]) fails.
+	w := newDisconnectAfterN(1)
+	h.ServeHTTP(w, req)
+
+	got := captured.last(t)
+	if got.ErrorKind != provider.KindClientClosed {
+		t.Errorf("ErrorKind = %q, want client_closed (SendDone failed)", got.ErrorKind)
+	}
+}
+
+// TestHandler_Stream_ClientDisconnect_OnFirstEvent covers the path where
+// the very first SSE write fails — handler should bail without entering
+// the Recv loop.
+func TestHandler_Stream_ClientDisconnect_OnFirstEvent(t *testing.T) {
+	captured, recorder := newCaptureRecorder()
+	streamObj := &fakeStream{
+		events: []*provider.Event{
+			{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: "later"}}}},
+		},
+		summary: &provider.Summary{},
+	}
+	r := &fakeRouter{
+		buildStreamResult: func(req *provider.Request) (*router.RouteResult, error) {
+			return &router.RouteResult{
+				Stream:     streamObj,
+				FirstEvent: &provider.Event{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: "first"}}}},
+				Vendor:     "opencode",
+				ModelUsed:  req.Model,
+				Attempts: []provider.Attempt{
+					{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()},
+				},
+			}, nil
+		},
+	}
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder)
+
+	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	w := newDisconnectAfterN(0)
+	h.ServeHTTP(w, req)
+
+	got := captured.last(t)
+	if got.ErrorKind != provider.KindClientClosed {
+		t.Fatalf("ErrorKind = %q, want client_closed", got.ErrorKind)
+	}
+	if streamObj.cursor != 0 {
+		t.Errorf("stream cursor = %d, want 0 (Recv loop must not run when FirstEvent send fails)", streamObj.cursor)
+	}
+}
+
+// TestHandler_NonStream_ClientDisconnect verifies the JSON response
+// path also tags audit when the client write fails. StatusCode stays 200
+// (already on the wire), but ErrorKind reveals the terminal state.
+func TestHandler_NonStream_ClientDisconnect(t *testing.T) {
+	captured, recorder := newCaptureRecorder()
+	r := &fakeRouter{
+		buildResult: func(req *provider.Request) *router.RouteResult {
+			return &router.RouteResult{
+				Response: &provider.Response{
+					Model:   req.Model,
+					Choices: []provider.Choice{{Index: 0, Message: provider.Message{Role: "assistant", Content: "ok"}}},
+				},
+				Vendor:    "opencode",
+				ModelUsed: req.Model,
+				Attempts: []provider.Attempt{
+					{Vendor: "opencode", Model: req.Model, StatusCode: 200, StartedAt: time.Now()},
+				},
+			}
+		},
+	}
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder)
+
+	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	w := newDisconnectAfterN(0)
+	h.ServeHTTP(w, req)
+
+	got := captured.last(t)
+	if got.ErrorKind != provider.KindClientClosed {
+		t.Errorf("ErrorKind = %q, want client_closed", got.ErrorKind)
+	}
+	if got.StatusCode != http.StatusOK {
+		t.Errorf("StatusCode = %d, want 200 (already flushed before write failure)", got.StatusCode)
+	}
+}
+
+// disconnectAfterNWriter accepts the first n Write calls and fails
+// every subsequent one with a synthetic broken-pipe error. Implements
+// http.ResponseWriter and http.Flusher so handler streaming code paths
+// detect it as flushable.
+type disconnectAfterNWriter struct {
+	rec *httptest.ResponseRecorder
+	n   int
+	cnt int
+}
+
+func newDisconnectAfterN(n int) *disconnectAfterNWriter {
+	return &disconnectAfterNWriter{rec: httptest.NewRecorder(), n: n}
+}
+
+func (d *disconnectAfterNWriter) Header() http.Header { return d.rec.Header() }
+
+func (d *disconnectAfterNWriter) Write(b []byte) (int, error) {
+	if d.cnt >= d.n {
+		return 0, errors.New("simulated broken pipe")
+	}
+	d.cnt++
+	return d.rec.Write(b)
+}
+
+func (d *disconnectAfterNWriter) WriteHeader(statusCode int) { d.rec.WriteHeader(statusCode) }
+
+func (d *disconnectAfterNWriter) Flush() {}
 
 func TestHandler_Stream_PreStreamRouterError(t *testing.T) {
 	captured, recorder := newCaptureRecorder()

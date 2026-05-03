@@ -176,7 +176,13 @@ func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *pro
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(out)
+	if _, werr := w.Write(out); werr != nil {
+		rec.ErrorKind = provider.KindClientClosed
+		h.log.LogAttrs(r.Context(), slog.LevelInfo, "client write failed",
+			slog.String("vendor", rec.Vendor),
+			slog.String("err", werr.Error()),
+		)
+	}
 }
 
 func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *provider.Request, rec *audit.Record) {
@@ -209,17 +215,22 @@ func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *provi
 		if err != nil {
 			perr := &provider.Error{Kind: provider.KindUnknown, Message: "encode stream event: " + err.Error(), Cause: err}
 			rec.ErrorKind = perr.Kind
-			sink.SendError(perr)
-			sink.SendDone()
+			_ = sink.SendError(perr)
+			_ = sink.SendDone()
 			return
 		}
-		sink.Send(payload)
+		if werr := sink.Send(payload); werr != nil {
+			h.recordClientClosed(r.Context(), rec, werr)
+			return
+		}
 	}
 
 	for {
 		event, err := recvWithIdleTimeout(r.Context(), stream, h.streamIdleTimeout)
 		if errors.Is(err, io.EOF) {
-			sink.SendDone()
+			if werr := sink.SendDone(); werr != nil {
+				h.recordClientClosed(r.Context(), rec, werr)
+			}
 			return
 		}
 		if err != nil {
@@ -231,8 +242,8 @@ func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *provi
 				slog.String("vendor", rec.Vendor),
 				slog.String("err", err.Error()),
 			)
-			sink.SendError(err)
-			sink.SendDone()
+			_ = sink.SendError(err)
+			_ = sink.SendDone()
 			return
 		}
 
@@ -240,12 +251,26 @@ func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *provi
 		if err != nil {
 			perr := &provider.Error{Kind: provider.KindUnknown, Message: "encode stream event: " + err.Error(), Cause: err}
 			rec.ErrorKind = perr.Kind
-			sink.SendError(perr)
-			sink.SendDone()
+			_ = sink.SendError(perr)
+			_ = sink.SendDone()
 			return
 		}
-		sink.Send(payload)
+		if werr := sink.Send(payload); werr != nil {
+			h.recordClientClosed(r.Context(), rec, werr)
+			return
+		}
 	}
+}
+
+// recordClientClosed marks the audit record terminal state as a client
+// disconnect. Caller must return immediately afterwards — further writes
+// would just fail the same way and SendDone would too.
+func (h *Handler) recordClientClosed(ctx context.Context, rec *audit.Record, werr error) {
+	rec.ErrorKind = provider.KindClientClosed
+	h.log.LogAttrs(ctx, slog.LevelInfo, "client disconnected mid-stream",
+		slog.String("vendor", rec.Vendor),
+		slog.String("err", werr.Error()),
+	)
 }
 
 type recvResult struct {

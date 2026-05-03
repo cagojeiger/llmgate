@@ -16,7 +16,7 @@ internal/provider/           Provider 어댑터 계약 + 공통 타입 + Stream 
   └─ openai/                 OpenAI 와이어 어댑터
   └─ anthropic/              Anthropic 와이어 어댑터 (응답을 OpenAI 와이어로 정규화)
 internal/router/             별명 → chain 해석, 폴백 시도, 회로 차단 (breaker.go 분리)
-internal/server/             chi + middleware + handler + sseWriter + errors
+internal/server/             chi + middleware + handler + streamResponder + sseWriter + errors
 internal/audit/              Recorder 인터페이스 + LogRecorder (stdout)
 cmd/llmgate/                 wiring + shutdown
 docs/adr/                    Accepted 결정 기록
@@ -63,12 +63,15 @@ graph LR
 
 | 컴포넌트 | 역할 |
 |---|---|
-| HTTP Server | chi 라우터 + request_id / access log / recoverer / 요청 타임아웃 미들웨어. `/v1/chat/completions`, `/healthz` 노출 |
-| Handler | 요청 디코드, stream/non-stream 분기, RouteResult (Response 또는 Stream + FirstEvent) 와 Stream.Summary 로 audit Record 조립 |
-| Router | 별명 → chain 해석, 폴백 시도, 회로 차단. 정책은 부팅 시 env 에서 받는다 |
-| OpenAI Adapter | OpenAI 와이어로 upstream 호출 |
-| Anthropic Adapter | Anthropic 와이어로 변환 후 호출, OpenAI 와이어로 응답 정규화 |
+| HTTP Server | chi 라우터 + request_id / access log / recoverer / read/request timeout. `/v1/chat/completions`, `/healthz` 노출 |
+| Handler | 요청 디코드, stream / non-stream 분기, RouteResult 와 Stream.Summary 로 audit Record 조립. 요청 총 wall-clock 한도의 권위자 (ADR 005) |
+| streamResponder | Stream 이 열린 뒤 SSE wire transcript 담당. 이벤트 전송, idle timeout, client_closed, mid-stream error, `[DONE]` 처리 (ADR 006). 스트림 idle 한도의 권위자 (ADR 005) |
+| Router | 별명 → chain 해석, 폴백 적격 판정, 회로 차단 (ADR 004). non-stream 시도당 한도의 권위자 (ADR 005) |
+| OpenAI Adapter | OpenAI 와이어로 upstream 호출. status 분류 + 스트리밍의 첫 이벤트 검증까지 (ADR 006) |
+| Anthropic Adapter | Anthropic 와이어로 변환 후 호출, OpenAI 와이어로 응답 정규화. status 분류 + 스트리밍의 첫 이벤트 검증까지 (ADR 006) |
 | Audit Recorder | 요청당 1 개 fact record 발행 (stdout / 향후 이벤트 파이프라인 등) |
+
+각 컴포넌트의 단일 책임 / *권위자가 한 명* 결정 근거는 ADR 007.
 
 ## 카탈로그 모양
 
@@ -88,6 +91,8 @@ catalog/
 
 ### 라우터 / 서버 정책 env
 
+폴백 적격성 / 회로 차단 결정 근거는 ADR 004, 타임아웃 권위자 분리는 ADR 005.
+
 | 변수 | 디폴트 | 의미 |
 |---|---|---|
 | `LLMGATE_FALLBACK_ON` | `rate_limit,upstream,timeout,network` | 어떤 에러 종류가 chain 을 진행시키는지 |
@@ -95,7 +100,7 @@ catalog/
 | `LLMGATE_CIRCUIT_OPEN_DURATION` | `30s` | 차단 기본 시간 (지수 백오프의 base) |
 | `LLMGATE_CIRCUIT_MAX_OPEN_DURATION` | `5m` | 차단 최대 시간 (백오프 cap) |
 | `LLMGATE_CIRCUIT_JITTER` | `0.2` | 차단 시간 ±지터 비율 |
-| `LLMGATE_REQUEST_TIMEOUT` | `5m` | 요청 1회 총 wall-clock budget |
+| `LLMGATE_REQUEST_TIMEOUT` | `5m` | 요청 1회 총 wall-clock budget. stream 은 시작/전송 전체가 이 budget 하나를 공유 |
 | `LLMGATE_COMPLETE_TIMEOUT` | `1m` | non-stream 한 시도당 budget |
 | `LLMGATE_STREAM_IDLE_TIMEOUT` | `1m` | 스트림 중간 idle (이벤트 사이) 한도 |
 
@@ -120,12 +125,24 @@ sequenceDiagram
     A->>H: POST /v1/chat/completions
     H->>R: Complete(req)
     Note over R: 별명 해석 → chain 순서대로 시도<br/>실패마다 Attempt 누적
-    R-->>H: RouteResult (Response/Stream+FirstEvent, Attempts, Vendor, ModelUsed)
+    R-->>H: RouteResult (Response/Stream, Attempts, Vendor, ModelUsed)
     H-->>A: 200 OK
     H->>Au: Record (fact)
 ```
 
-스트리밍 요청은 stream 시작 + 첫 이벤트 도착 전 실패에 한해 폴백한다. Router 가 첫 이벤트를 *eager 로* 읽어 `RouteResult.FirstEvent` 에 담아 돌려주므로, Handler 가 200 OK 를 커밋한 시점엔 stream 생존이 이미 검증된 상태. stream 이 열린 뒤의 mid-stream 실패는 partial output 이 이미 전달됐을 수 있어 폴백하지 않는다. end-of-stream 에서 `Stream.Summary()` 로 usage / finish reason 을 audit 에 finalize 한다.
+### 스트리밍 폴백 경계
+
+스트리밍 한 호출은 시간축으로 세 단계로 나뉜다. 처음 두 단계는 폴백 가능 영역, 마지막은 폴백 *불가* 영역. 결정 근거는 ADR 006.
+
+| 단계 | 시점 | 권위자 | 폴백 |
+|---|---|---|---|
+| status open | adapter 의 HTTP status 검증 | adapter | ✅ |
+| first event | adapter 의 첫 이벤트 검증 (`provider.ValidateFirstEvent`) | adapter | ✅ |
+| mid-stream | streamResponder 의 Recv 루프 | streamResponder | ❌ — SSE error frame + `[DONE]` 으로 그 응답 안에서 종결 |
+
+Router 는 status open / first event 단계의 실패만 받는다 — 와이어 분류는 adapter 가 끝낸 상태이므로 폴백 적격 판정 (ADR 004) 을 non-stream 과 같은 규칙으로 적용한다. stream 시작에 별도 timeout 을 만들지 않고 Handler 가 건 request context 를 그대로 넘긴다 (ADR 005) — stream 은 시작 / 첫 이벤트 / 전송 전체가 `LLMGATE_REQUEST_TIMEOUT` 하나를 공유한다. 이 예산이 소진되면 chain 을 더 진행하지 않고 요청 전체를 timeout 으로 끝낸다.
+
+Handler 가 200 OK 를 커밋한 뒤에는 streamResponder 가 SSE 전송을 맡는다. 이벤트 사이 idle 은 `LLMGATE_STREAM_IDLE_TIMEOUT` 으로 제한하고, end-of-stream 에서 `Stream.Summary()` 로 usage / finish reason 을 audit 에 finalize 한다. mid-stream 폴백을 거부하는 이유 (HTTP 시맨틱 / SDK 호환 / record 무결성) 는 ADR 006.
 
 ## 상태가 어디 사는가
 
@@ -140,4 +157,4 @@ sequenceDiagram
 
 ## 의도적 미지원
 
-멀티모달 capability 매칭 / `/v1/models` discovery / hot-reload / pre-call 한도 / mid-stream 폴백 / 모델 메타정보(가격 · context window) 보유 / multi-key smart distribution / k8s/CRD 인지 — 모두 V1 범위 밖. 누적 결정은 `docs/adr/003-out-of-scope.md` (작성 예정) 에 정리한다.
+멀티모달 capability 매칭 / `/v1/models` discovery / hot-reload / pre-call 한도 / mid-stream 폴백 / 모델 메타정보(가격 · context window) 보유 / multi-key smart distribution / k8s/CRD 인지 — 모두 V1 범위 밖. 누적 결정과 거절 근거는 `docs/adr/003-out-of-scope.md`.

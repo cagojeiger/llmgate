@@ -1,7 +1,8 @@
 # Local-only compose for hand-testing the gateway in a container.
-# Mounts catalog/ read-only so editing yaml in the repo flows through
-# without rebuilding the image. .env at the repo root supplies
-# LLMGATE_OPENCODE_API_KEY (loaded automatically by compose).
+# Mounts catalog/ and clients/ read-only so editing yaml in the repo
+# flows through without rebuilding the image. .env at the repo root
+# supplies LLMGATE_OPENCODE_API_KEY (loaded automatically by compose).
+# clients/ ships with example.yaml — see README "Caller registration".
 
 services:
   llmgate:
@@ -12,7 +13,9 @@ services:
     environment:
       LLMGATE_OPENCODE_API_KEY: ${LLMGATE_OPENCODE_API_KEY}
       LLMGATE_CATALOG: /etc/llmgate/catalog
+      LLMGATE_CLIENTS: /etc/llmgate/clients
       LLMGATE_LOG_LEVEL: info
     volumes:
       - ./catalog:/etc/llmgate/catalog:ro
+      - ./clients:/etc/llmgate/clients:ro
     restart: "no"

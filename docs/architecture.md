@@ -7,22 +7,26 @@ OpenAI SDK 와이어 호환 게이트웨이. 모델은 *기본 등록 단위*, *
 ## 코드 구조
 
 ```
-catalog/                     데이터 (운영자 영역, 코드 0줄)
+catalog/                     vendor 등록 (운영자 영역, 코드 0줄)
   models/<id>.yaml           id + vendor + protocol + base_url + auth_env + auth_scheme
   aliases/<name>.yaml        호출 단위 = chain
+clients/                     호출자 등록 (운영자 영역, 코드 0줄)
+  <name>.yaml                name + key_hashes (sha256 only — raw 키는 디스크 미존재)
 internal/catalog/            yaml → Catalog struct 로더 (strict 파싱)
+internal/clients/            yaml → Store (sha256 → client lookup, strict 파싱)
 internal/config/             env → Server 설정 (서버 + 라우터 정책)
 internal/provider/           Provider 어댑터 계약 + 공통 타입 + Stream 그레이스 (정책 0줄)
   └─ openai/                 OpenAI 와이어 어댑터
   └─ anthropic/              Anthropic 와이어 어댑터 (응답을 OpenAI 와이어로 정규화)
 internal/router/             별명 → chain 해석, 폴백 시도, 회로 차단 (breaker.go 분리)
-internal/server/             chi + middleware + handler + streamResponder + sseWriter + errors
+internal/server/             chi + middleware + auth + handler + streamResponder + sseWriter + errors
 internal/audit/              Recorder 인터페이스 + LogRecorder (stdout)
 cmd/llmgate/                 wiring + shutdown
+scripts/gen-client.sh        호출자 발급 헬퍼 (raw 키 + sha256 yaml)
 docs/adr/                    Accepted 결정 기록
 ```
 
-데이터 / 정책 / 코드가 세 자리에 산다. yaml 은 운영자가 손대는 운영 데이터, env 는 인프라 / 시크릿, 코드는 알고리즘. ADR 002 가 이 분리의 근거를 적었다.
+데이터 / 정책 / 코드가 세 자리에 산다. yaml 은 운영자가 손대는 운영 데이터 (vendor 메뉴 + 호출자 명단), env 는 인프라 / 시크릿, 코드는 알고리즘. catalog 결정 근거는 ADR 002, clients 결정 근거는 ADR 008.
 
 ## 컴포넌트 구성
 
@@ -31,7 +35,7 @@ graph LR
     Agent[Agent / OpenAI SDK]
 
     subgraph Gateway[llmgate process]
-        Server["HTTP Server<br/>(chi + middleware)"]
+        Server["HTTP Server<br/>(chi + middleware + auth)"]
         Handler[Handler]
         Router[Router]
         OAI[OpenAI Adapter]
@@ -40,12 +44,13 @@ graph LR
     end
 
     Catalog[(catalog/ yaml dir)]
+    Clients[(clients/ yaml dir)]
     Env[(env / Server config)]
     UpOAI[OpenAI-protocol upstream]
     UpAnth[Anthropic-protocol upstream]
     Sink[stdout]
 
-    Agent -->|/v1/chat/completions| Server
+    Agent -->|"/v1/chat/completions<br/>Authorization: Bearer"| Server
     Server --> Handler
     Handler -->|Request| Router
     Router -->|RouteResult| Handler
@@ -57,19 +62,22 @@ graph LR
     Audit --> Sink
 
     Catalog -.boot.-> Router
+    Clients -.boot.-> Server
     Env -.boot.-> Server
     Env -.boot.-> Router
 ```
 
 | 컴포넌트 | 역할 |
 |---|---|
-| HTTP Server | chi 라우터 + request_id / access log / recoverer / read/request timeout. `/v1/chat/completions`, `/healthz` 노출 |
-| Handler | 요청 디코드, stream / non-stream 분기, RouteResult 와 Stream.Summary 로 audit Record 조립. 요청 총 wall-clock 한도의 권위자 (ADR 005) |
+| HTTP Server | chi 라우터 + request_id / clientContext / access log / recoverer / read/request timeout. `/v1/chat/completions` (auth 보호), `/healthz` (공개) 노출 |
+| auth middleware | `Authorization: Bearer` 추출 → sha256 → clients Store lookup → ctx 에 ClientInfo 기록. 실패해도 short-circuit 하지 않고 handler 가 audit-always emit (ADR 008) |
+| Handler | 요청 디코드, stream / non-stream 분기, ctx 의 ClientInfo 로 audit Record 채움 + auth 실패 시 401 emit. 요청 총 wall-clock 한도의 권위자 (ADR 005) |
 | streamResponder | Stream 이 열린 뒤 SSE wire transcript 담당. 이벤트 전송, idle timeout, client_closed, mid-stream error, `[DONE]` 처리 (ADR 006). 스트림 idle 한도의 권위자 (ADR 005) |
 | Router | 별명 → chain 해석, 폴백 적격 판정, 회로 차단 (ADR 004). non-stream 시도당 한도의 권위자 (ADR 005) |
 | OpenAI Adapter | OpenAI 와이어로 upstream 호출. status 분류 + 스트리밍의 첫 이벤트 검증까지 (ADR 006) |
-| Anthropic Adapter | Anthropic 와이어로 변환 후 호출, OpenAI 와이어로 응답 정규화. status 분류 + 스트리밍의 첫 이벤트 검증까지 (ADR 006) |
-| Audit Recorder | 요청당 1 개 fact record 발행 (stdout / 향후 이벤트 파이프라인 등) |
+| Anthropic Adapter | Anthropic 와이어로 변환 후 호출, OpenAI 와이어로 응답 정규화. tools / tool_choice / tool_calls / tool_use 양방향 변환 (PR 1~3). status 분류 + 스트리밍의 첫 이벤트 검증까지 (ADR 006) |
+| clients Store | 부팅 시 `clients/` yaml 들을 sha256 → client 매핑 맵으로 빌드. 인증 lookup 의 read-only source. 0 개 / 부재 시 부팅 fail (닫힘 default — ADR 008) |
+| Audit Recorder | 요청당 1 개 fact record 발행 (stdout / 향후 이벤트 파이프라인 등). client_name / client_key_id 포함 — *누가 호출했나* 의 사실 |
 
 각 컴포넌트의 단일 책임 / *권위자가 한 명* 결정 근거는 ADR 007.
 
@@ -89,6 +97,22 @@ catalog/
 
 자세한 결정 근거는 `docs/adr/002-catalog-shape.md`.
 
+## 호출자 등록 (clients/)
+
+```
+clients/
+  <name>.yaml              name + key_hashes (sha256 only)
+```
+
+- **호출자 yaml** = 호출자 1 개 등록. 운영자가 `openssl rand -hex 32` 으로 raw 키 발급 → `sha256(raw)` 계산 → yaml 의 `key_hashes` 배열에 박음. raw 키는 디스크 미존재. 헬퍼: `scripts/gen-client.sh <name>`.
+- **multi-key 회전** — 한 호출자가 여러 활성 해시를 가질 수 있음. 새 해시 추가 → deploy → 호출자 새 키 전환 → 옛 해시 제거 → deploy. 두 해시 동시 유효 구간이 회전 윈도우.
+- **파일명 = name** — 불일치 시 부팅 fail. naming rule `^[a-z0-9][a-z0-9_-]{0,63}$` (모델 id / 별명 name 과 정합). 폐기된 name 재사용 금지 (운영자 책임 — audit 영구 식별자).
+- **인증** — `Authorization: Bearer <raw>` → 게이트웨이가 sha256 매칭. 실패 = 401 + KindAuth + audit-always (record 발행해서 brute-force 도 보임). `/healthz` 는 인증 면제.
+- **닫힘 default** — `clients/` 부재 / 비어있음 = 부팅 fail. 의도된 *완전 공개* 는 단일 `public.yaml` 등록 + 키 공유로 표현.
+- **strict 파싱 + audit 노출** — 모르는 필드 / 빈 key_hashes / 잘못된 hash 형식 / 중복 name / 중복 hash → 부팅 fail. audit Record 의 `client_name` (영구 식별자) + `client_key_id` (해시 앞 8 자, 회전 추적용) 으로 후처리에 노출.
+
+자세한 결정 근거는 `docs/adr/008-clients.md`.
+
 ### 라우터 / 서버 정책 env
 
 폴백 적격성 / 회로 차단 결정 근거는 ADR 004, 타임아웃 권위자 분리는 ADR 005.
@@ -103,6 +127,8 @@ catalog/
 | `LLMGATE_REQUEST_TIMEOUT` | `5m` | 요청 1회 총 wall-clock budget. stream 은 시작/전송 전체가 이 budget 하나를 공유 |
 | `LLMGATE_COMPLETE_TIMEOUT` | `1m` | non-stream 한 시도당 budget |
 | `LLMGATE_STREAM_IDLE_TIMEOUT` | `1m` | 스트림 중간 idle (이벤트 사이) 한도 |
+| `LLMGATE_CATALOG` | `./catalog` | vendor 카탈로그 디렉토리 위치. 부재 / 비어있음 → 부팅 fail (ADR 002) |
+| `LLMGATE_CLIENTS` | `./clients` | 호출자 카탈로그 디렉토리 위치. 부재 / 비어있음 → 부팅 fail (닫힘 default — ADR 008) |
 
 ### 부팅 순서
 
@@ -110,24 +136,29 @@ catalog/
 2. `catalog/` 또는 `LLMGATE_CATALOG=<dir>` 의 yaml 파싱 → models / aliases 확정
 3. protocol 별 adapter factory 호출 → 각 모델마다 Adapter 인스턴스 생성 (`auth_env` 도 이때 읽음)
 4. Router 조립 (model → adapter 매핑, 별명 chain, 회로 상태 초기화, 정책 주입)
-5. Audit Recorder 구성 → Handler / HTTP Server 기동
+5. `clients/` 또는 `LLMGATE_CLIENTS=<dir>` 의 yaml 파싱 → sha256 → client 매핑 빌드 (0 개면 부팅 fail)
+6. Audit Recorder 구성 → Handler 조립 → HTTP Server 미들웨어 체인 wire (request_id / clientContext / accessLog / recoverer + auth Group) → 기동
 
 ## 요청 생애주기
 
 ```mermaid
 sequenceDiagram
     participant A as Agent
+    participant M as auth middleware
     participant H as Handler
     participant R as Router
     participant P as Adapter
     participant Au as Audit
 
-    A->>H: POST /v1/chat/completions
+    A->>M: POST /v1/chat/completions<br/>Authorization: Bearer ...
+    Note over M: sha256(raw) lookup → ClientInfo on ctx<br/>(audit-always: pass through on failure)
+    M->>H: next(r)
+    Note over H: ctx 의 ClientInfo 로 audit Record 채움<br/>(auth 실패 시 401 emit + return)
     H->>R: Complete(req)
     Note over R: 별명 해석 → chain 순서대로 시도<br/>실패마다 Attempt 누적
     R-->>H: RouteResult (Response/Stream, Attempts, Vendor, ModelUsed)
     H-->>A: 200 OK
-    H->>Au: Record (fact)
+    H->>Au: Record (fact, client_name + client_key_id 포함)
 ```
 
 ### 스트리밍 폴백 경계
@@ -149,10 +180,13 @@ Handler 가 200 OK 를 커밋한 뒤에는 streamResponder 가 SSE 전송을 맡
 | 데이터 | 위치 | 수명 |
 |---|---|---|
 | 모델 / 별명 | `catalog/` (외부 yaml) | 외부 갱신 시 재시작 |
+| 호출자 등록 (해시만) | `clients/` (외부 yaml) | 외부 갱신 시 재시작 |
+| 호출자 raw 키 | **gateway 가 보관하지 않음** (호출자 측 vault) | — |
 | 라우터 정책 + 서버 런타임 | env → Server config | 프로세스 수명 |
 | 회로 차단 상태 | Router 의 breakerStore 메모리 (per-process) | 프로세스 수명 |
+| 호출자 lookup 매핑 | 부팅 시 빌드된 메모리 Store (per-process) | 프로세스 수명 |
 | 요청별 시도 이력 | RouteResult → Handler → Record | 요청 1 회 |
-| 감사 record | Sink 가 결정 | Sink 정책 |
+| 감사 record (client_name 포함) | Sink 가 결정 | Sink 정책 |
 | 비용 / 한도 / 카탈로그 단가 | **gateway 가 보관하지 않음** | 후처리 시스템 책임 |
 
 ## 의도적 미지원

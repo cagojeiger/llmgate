@@ -206,21 +206,6 @@ func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *provi
 	sink.WriteHeaders()
 	rec.StatusCode = http.StatusOK
 
-	if result.FirstEvent != nil {
-		payload, err := json.Marshal(result.FirstEvent)
-		if err != nil {
-			perr := &provider.Error{Kind: provider.KindUnknown, Message: "encode stream event: " + err.Error(), Cause: err}
-			rec.ErrorKind = perr.Kind
-			_ = sink.SendError(perr)
-			_ = sink.SendDone()
-			return
-		}
-		if werr := sink.Send(payload); werr != nil {
-			h.recordClientClosed(r.Context(), rec, werr)
-			return
-		}
-	}
-
 	for {
 		event, err := recvWithIdleTimeout(r.Context(), stream, h.streamIdleTimeout)
 		if errors.Is(err, io.EOF) {

@@ -32,6 +32,14 @@ func ValidateFirstEvent(ctx context.Context, raw Stream) (Stream, error) {
 			_ = raw.Close()
 			return nil, r.err
 		}
+		// Race guard: the first event arrived but ctx (e.g. a stream-start
+		// timer) may have fired in the same instant. Promote that to a
+		// failure so the caller can fall back rather than handing the
+		// client a stream whose underlying ctx is already canceled.
+		if err := ctx.Err(); err != nil {
+			_ = raw.Close()
+			return nil, err
+		}
 		return &replayStream{first: r.event, underlying: raw}, nil
 	case <-ctx.Done():
 		_ = raw.Close()

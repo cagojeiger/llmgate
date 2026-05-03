@@ -33,12 +33,11 @@ type FallbackPolicy struct {
 }
 
 type RouteResult struct {
-	Response   *provider.Response
-	Stream     provider.Stream
-	FirstEvent *provider.Event
-	Vendor     string
-	ModelUsed  string
-	Attempts   []provider.Attempt
+	Response  *provider.Response
+	Stream    provider.Stream
+	Vendor    string
+	ModelUsed string
+	Attempts  []provider.Attempt
 }
 
 // Router dispatches requests to Providers. Streaming fallback applies
@@ -241,34 +240,10 @@ func (r *Router) CompleteStream(ctx context.Context, req *provider.Request) (*Ro
 			}
 			continue
 		}
-
-		firstEvent, err := recvFirstEvent(startCtx, stream)
-		if err != nil {
-			_ = stream.Close()
-			stopStart()
-			cancelStart()
-			err = startTimeoutErr(err, startCtx, routeCtx, startTimedOut)
-			lastErr = err
-			if bail := r.finalizeStreamFailure(result, candidate, &att, err, routeCtx); bail != nil {
-				return result, bail
-			}
-			continue
-		}
-		// First event arrived, but the start timer fired anyway — the
-		// stream's underlying ctx is dead, treat as failure.
-		if !stopStart() && startTimedOut() {
-			_ = stream.Close()
-			cancelStart()
-			err = streamStartError(startCtx, routeCtx, startTimedOut)
-			if err == nil {
-				err = contextError(startCtx.Err())
-			}
-			lastErr = err
-			if bail := r.finalizeStreamFailure(result, candidate, &att, err, routeCtx); bail != nil {
-				return result, bail
-			}
-			continue
-		}
+		// Adapter's ValidateFirstEvent already proved the stream alive.
+		// Stop the start-timer (without canceling startCtx) so the
+		// established stream's underlying ctx survives.
+		stopStart()
 
 		result.Attempts = append(result.Attempts, att)
 		streamCancel := cancelStart
@@ -276,7 +251,6 @@ func (r *Router) CompleteStream(ctx context.Context, req *provider.Request) (*Ro
 			streamCancel = func() { cancelStart(); cancelRoute() }
 		}
 		result.Stream = &cancelOnCloseStream{Stream: stream, cancel: streamCancel}
-		result.FirstEvent = firstEvent
 		result.Vendor = candidate.provider.Name()
 		result.ModelUsed = candidate.model
 		r.breakers.recordSuccess(candidate.model)
@@ -348,28 +322,6 @@ func streamStartError(startCtx, routeCtx context.Context, timedOut func() bool) 
 		return contextError(err)
 	}
 	return nil
-}
-
-type streamRecvResult struct {
-	event *provider.Event
-	err   error
-}
-
-func recvFirstEvent(ctx context.Context, stream provider.Stream) (*provider.Event, error) {
-	ch := make(chan streamRecvResult, 1)
-	go func() {
-		event, err := stream.Recv()
-		ch <- streamRecvResult{event: event, err: err}
-	}()
-
-	select {
-	case got := <-ch:
-		return got.event, got.err
-	case <-ctx.Done():
-		_ = stream.Close()
-		provider.DrainOrAbandon(ch, provider.CloseGrace)
-		return nil, contextError(ctx.Err())
-	}
 }
 
 // cancelOnCloseStream defers cancellation of the route-level ctx until

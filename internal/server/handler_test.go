@@ -203,6 +203,7 @@ func TestHandler_Stream_NormalEOF(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
 	streamObj := &fakeStream{
 		events: []*provider.Event{
+			{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: "hello"}}}},
 			{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: " world"}}}},
 		},
 		summary: &provider.Summary{
@@ -212,10 +213,9 @@ func TestHandler_Stream_NormalEOF(t *testing.T) {
 	r := &fakeRouter{
 		buildStreamResult: func(req *provider.Request) (*router.RouteResult, error) {
 			return &router.RouteResult{
-				Stream:     streamObj,
-				FirstEvent: &provider.Event{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: "hello"}}}},
-				Vendor:     "opencode",
-				ModelUsed:  req.Model,
+				Stream:    streamObj,
+				Vendor:    "opencode",
+				ModelUsed: req.Model,
 				Attempts: []provider.Attempt{
 					{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()},
 				},
@@ -269,16 +269,18 @@ func TestHandler_Stream_NormalEOF(t *testing.T) {
 func TestHandler_Stream_RecvError_PropagatesErrorKind(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
 	streamObj := &fakeStream{
+		events: []*provider.Event{
+			{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: "partial"}}}},
+		},
 		recvErr: &provider.Error{Kind: provider.KindUpstream, Message: "boom mid-stream"},
 		summary: &provider.Summary{},
 	}
 	r := &fakeRouter{
 		buildStreamResult: func(req *provider.Request) (*router.RouteResult, error) {
 			return &router.RouteResult{
-				Stream:     streamObj,
-				FirstEvent: &provider.Event{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: "partial"}}}},
-				Vendor:     "opencode",
-				ModelUsed:  req.Model,
+				Stream:    streamObj,
+				Vendor:    "opencode",
+				ModelUsed: req.Model,
 				Attempts: []provider.Attempt{
 					{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()},
 				},
@@ -422,6 +424,7 @@ func TestHandler_Stream_ClientDisconnect_MidStream(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
 	streamObj := &fakeStream{
 		events: []*provider.Event{
+			{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: "one"}}}},
 			{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: " two"}}}},
 			{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: " three"}}}},
 		},
@@ -430,10 +433,9 @@ func TestHandler_Stream_ClientDisconnect_MidStream(t *testing.T) {
 	r := &fakeRouter{
 		buildStreamResult: func(req *provider.Request) (*router.RouteResult, error) {
 			return &router.RouteResult{
-				Stream:     streamObj,
-				FirstEvent: &provider.Event{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: "one"}}}},
-				Vendor:     "opencode",
-				ModelUsed:  req.Model,
+				Stream:    streamObj,
+				Vendor:    "opencode",
+				ModelUsed: req.Model,
 				Attempts: []provider.Attempt{
 					{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()},
 				},
@@ -444,7 +446,7 @@ func TestHandler_Stream_ClientDisconnect_MidStream(t *testing.T) {
 
 	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
-	// Allow one frame (FirstEvent) through; next Send call fails.
+	// Allow one frame through; the next Send call fails.
 	w := newDisconnectAfterN(1)
 	h.ServeHTTP(w, req)
 
@@ -452,10 +454,10 @@ func TestHandler_Stream_ClientDisconnect_MidStream(t *testing.T) {
 	if got.ErrorKind != provider.KindClientClosed {
 		t.Fatalf("ErrorKind = %q, want client_closed", got.ErrorKind)
 	}
-	// Loop runs exactly one Recv: receives event[0], marshals it, Send fails,
-	// handler bails. event[1] must remain in the buffer.
-	if streamObj.cursor != 1 {
-		t.Errorf("stream cursor = %d, want 1 (one Recv call before bail-out)", streamObj.cursor)
+	// Loop runs two Recvs: events[0] sends OK, events[1] send fails, handler
+	// bails. events[2] must remain unread.
+	if streamObj.cursor != 2 {
+		t.Errorf("stream cursor = %d, want 2 (two Recv calls before bail-out)", streamObj.cursor)
 	}
 	if streamObj.closedCount() == 0 {
 		t.Errorf("Stream.Close() not called (defer must run)")
@@ -469,16 +471,17 @@ func TestHandler_Stream_ClientDisconnect_MidStream(t *testing.T) {
 func TestHandler_Stream_ClientDisconnect_OnDone(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
 	streamObj := &fakeStream{
-		// no events: Recv returns io.EOF immediately
+		events: []*provider.Event{
+			{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: "only"}}}},
+		},
 		summary: &provider.Summary{},
 	}
 	r := &fakeRouter{
 		buildStreamResult: func(req *provider.Request) (*router.RouteResult, error) {
 			return &router.RouteResult{
-				Stream:     streamObj,
-				FirstEvent: &provider.Event{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: "only"}}}},
-				Vendor:     "opencode",
-				ModelUsed:  req.Model,
+				Stream:    streamObj,
+				Vendor:    "opencode",
+				ModelUsed: req.Model,
 				Attempts: []provider.Attempt{
 					{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()},
 				},
@@ -489,7 +492,7 @@ func TestHandler_Stream_ClientDisconnect_OnDone(t *testing.T) {
 
 	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
-	// Allow FirstEvent through (1 write); next Write (the [DONE]) fails.
+	// Allow the only event through (1 write); next Write (the [DONE]) fails.
 	w := newDisconnectAfterN(1)
 	h.ServeHTTP(w, req)
 
@@ -500,12 +503,13 @@ func TestHandler_Stream_ClientDisconnect_OnDone(t *testing.T) {
 }
 
 // TestHandler_Stream_ClientDisconnect_OnFirstEvent covers the path where
-// the very first SSE write fails — handler should bail without entering
-// the Recv loop.
+// the very first SSE write fails — handler should bail after consuming
+// just the first event.
 func TestHandler_Stream_ClientDisconnect_OnFirstEvent(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
 	streamObj := &fakeStream{
 		events: []*provider.Event{
+			{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: "first"}}}},
 			{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: "later"}}}},
 		},
 		summary: &provider.Summary{},
@@ -513,10 +517,9 @@ func TestHandler_Stream_ClientDisconnect_OnFirstEvent(t *testing.T) {
 	r := &fakeRouter{
 		buildStreamResult: func(req *provider.Request) (*router.RouteResult, error) {
 			return &router.RouteResult{
-				Stream:     streamObj,
-				FirstEvent: &provider.Event{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: "first"}}}},
-				Vendor:     "opencode",
-				ModelUsed:  req.Model,
+				Stream:    streamObj,
+				Vendor:    "opencode",
+				ModelUsed: req.Model,
 				Attempts: []provider.Attempt{
 					{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()},
 				},
@@ -534,8 +537,8 @@ func TestHandler_Stream_ClientDisconnect_OnFirstEvent(t *testing.T) {
 	if got.ErrorKind != provider.KindClientClosed {
 		t.Fatalf("ErrorKind = %q, want client_closed", got.ErrorKind)
 	}
-	if streamObj.cursor != 0 {
-		t.Errorf("stream cursor = %d, want 0 (Recv loop must not run when FirstEvent send fails)", streamObj.cursor)
+	if streamObj.cursor != 1 {
+		t.Errorf("stream cursor = %d, want 1 (one Recv before first Send fails)", streamObj.cursor)
 	}
 }
 

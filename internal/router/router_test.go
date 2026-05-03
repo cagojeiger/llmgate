@@ -122,9 +122,6 @@ func TestRouter_Dispatch(t *testing.T) {
 	if streamRes.Stream == nil {
 		t.Fatalf("CompleteStream: result.Stream is nil")
 	}
-	if streamRes.FirstEvent == nil {
-		t.Fatalf("CompleteStream: result.FirstEvent is nil")
-	}
 	if len(streamRes.Attempts) != 1 || streamRes.Attempts[0].Model != "minimax-m2.5" {
 		t.Fatalf("stream attempts = %+v, want one minimax-m2.5", streamRes.Attempts)
 	}
@@ -200,9 +197,6 @@ func TestRouter_StreamAliasFallback_RetriesOnEligiblePreStreamError(t *testing.T
 	}
 	if result.Stream == nil {
 		t.Fatal("CompleteStream: result.Stream is nil")
-	}
-	if result.FirstEvent == nil {
-		t.Fatal("CompleteStream: result.FirstEvent is nil")
 	}
 	if result.ModelUsed != "deepseek-v4-flash" {
 		t.Errorf("ModelUsed = %q, want deepseek-v4-flash", result.ModelUsed)
@@ -398,9 +392,6 @@ func TestRouter_StreamStartTimeoutIncludesFirstEvent(t *testing.T) {
 	}
 	if result.Attempts[0].ErrorKind != provider.KindTimeout {
 		t.Fatalf("attempt[0].ErrorKind = %q, want timeout", result.Attempts[0].ErrorKind)
-	}
-	if result.FirstEvent == nil {
-		t.Fatal("FirstEvent = nil, want secondary first event")
 	}
 }
 
@@ -627,12 +618,13 @@ func (p *fakeProvider) CompleteStream(ctx context.Context, req *provider.Request
 	if p.streamErrorAll != nil {
 		return nil, p.streamErrorAll
 	}
-	return &fakeStream{
+	raw := &fakeStream{
 		events: []*provider.Event{
 			{Choices: []provider.ChoiceDelta{{Delta: provider.Delta{Content: "ok"}}}},
 		},
 		recvDelay: p.streamRecvDelays[req.Model],
-	}, nil
+	}
+	return provider.ValidateFirstEvent(ctx, raw)
 }
 
 type fakeStream struct {
@@ -677,58 +669,3 @@ func (s *fakeStream) doneChan() chan struct{} {
 	return s.done
 }
 
-// stubbornStream simulates a misbehaving adapter that violates the
-// Stream contract: Recv blocks forever and Close does nothing to
-// unblock it. Used to verify the goroutine-leak safety net in
-// recvFirstEvent — the helper must return within streamCloseGrace
-// even when the goroutine cannot be reclaimed.
-type stubbornStream struct {
-	closeCalled int32
-	block       chan struct{}
-}
-
-func newStubbornStream() *stubbornStream {
-	return &stubbornStream{block: make(chan struct{})}
-}
-
-func (s *stubbornStream) Recv() (*provider.Event, error) {
-	<-s.block
-	return nil, io.EOF
-}
-
-func (s *stubbornStream) Close() error {
-	s.closeCalled++
-	return nil
-}
-
-func (s *stubbornStream) Summary() *provider.Summary { return &provider.Summary{} }
-
-// release lets any blocked Recv call return so the goroutine can exit
-// after the test finishes asserting recvFirstEvent's behavior.
-func (s *stubbornStream) release() { close(s.block) }
-
-func TestRecvFirstEvent_BoundedDrainOnContractViolation(t *testing.T) {
-	prev := provider.CloseGrace
-	provider.CloseGrace = 50 * time.Millisecond
-	defer func() { provider.CloseGrace = prev }()
-
-	s := newStubbornStream()
-	defer s.release()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	start := time.Now()
-	_, err := recvFirstEvent(ctx, s)
-	elapsed := time.Since(start)
-
-	if elapsed > 500*time.Millisecond {
-		t.Fatalf("recvFirstEvent returned in %v, want < 500ms (grace=50ms) — leak guard not engaged", elapsed)
-	}
-	if !errors.Is(err, context.Canceled) {
-		t.Errorf("err = %v, want context.Canceled", err)
-	}
-	if s.closeCalled == 0 {
-		t.Errorf("Stream.Close() not invoked before bounded wait")
-	}
-}

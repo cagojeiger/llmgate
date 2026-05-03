@@ -83,14 +83,18 @@ type anthropicEnd struct {
 	cacheReadTokens     int
 }
 
+// Recv pulls the next OpenAI-shaped chunk out of the Anthropic SSE
+// stream. It is structured as: (1) flush any deferred finish event
+// from the prior call, (2) scan the next data line and dispatch by
+// event.Type to a per-event handler, (3) run finalize when the
+// scanner runs dry. Each per-event handler is small and single-purpose
+// so the state-machine surface stays readable.
 func (s *stream) Recv() (*provider.Event, error) {
 	if s.closed.Load() {
 		return nil, io.EOF
 	}
 	if s.pendingFinish != nil && !s.pendingEmitted {
-		s.pendingEmitted = true
-		s.recordEmit()
-		return s.buildFinishEvent(s.pendingFinish), nil
+		return s.emitFinish(), nil
 	}
 	if s.pendingEmitted {
 		s.closed.Store(true)
@@ -106,88 +110,160 @@ func (s *stream) Recv() (*provider.Event, error) {
 			break
 		}
 
-		var event anthropicStreamEvent
-		if err := json.Unmarshal(payload, &event); err != nil {
-			return nil, &provider.Error{
-				Kind:     provider.KindUpstream,
-				Provider: s.providerName,
-				Message:  "decode stream event: " + err.Error(),
-				Cause:    err,
-				Raw:      httpx.FirstBytes(payload),
-			}
+		event, err := s.decodePayload(payload)
+		if err != nil {
+			return nil, err
 		}
 
-		switch event.Type {
-		case "message_start":
-			if event.Message != nil {
-				s.msgID = event.Message.ID
-				s.msgModel = event.Message.Model
-				s.inputTokens = event.Message.Usage.InputTokens
-			}
-			s.recordEmit()
-			return &provider.Event{
-				ID:     s.msgID,
-				Object: "chat.completion.chunk",
-				Model:  s.msgModel,
-				Choices: []provider.ChoiceDelta{{
-					Index: 0,
-					Delta: provider.Delta{Role: "assistant"},
-				}},
-			}, nil
-		case "content_block_delta":
-			var delta provider.Delta
-			switch event.Delta.Type {
-			case "text_delta":
-				delta.Content = event.Delta.Text
-			case "thinking_delta":
-				delta.ReasoningContent = event.Delta.Thinking
-				if delta.ReasoningContent == "" {
-					delta.ReasoningContent = event.Delta.Text
-				}
-			default:
-				continue
-			}
-			s.recordEmit()
-			return &provider.Event{
-				ID:     s.msgID,
-				Object: "chat.completion.chunk",
-				Model:  s.msgModel,
-				Choices: []provider.ChoiceDelta{{
-					Index: 0,
-					Delta: delta,
-				}},
-			}, nil
-		case "message_delta":
-			finishReason := ""
-			if event.Delta.StopReason != nil {
-				finishReason = mapStopReason(*event.Delta.StopReason)
-			}
-			s.pendingFinish = &anthropicEnd{
-				finishReason:        finishReason,
-				outputTokens:        event.Usage.OutputTokens,
-				cacheCreationTokens: event.Usage.CacheCreationInputTokens,
-				cacheReadTokens:     event.Usage.CacheReadInputTokens,
-			}
-			continue
-		case "message_stop":
-			if s.pendingFinish == nil {
-				s.pendingFinish = &anthropicEnd{finishReason: "stop"}
-			}
-			s.pendingEmitted = true
-			s.recordEmit()
-			return s.buildFinishEvent(s.pendingFinish), nil
-		case "ping", "content_block_start", "content_block_stop":
-			continue
-		case "error":
-			return nil, errorFromStreamEvent(payload, s.providerName)
-		default:
-			if perr := parseMaybeStreamError(payload, s.providerName); perr != nil {
-				return nil, perr
-			}
-			continue
+		emitted, evt, err := s.dispatch(event, payload)
+		if err != nil {
+			return nil, err
+		}
+		if emitted {
+			return evt, nil
 		}
 	}
 
+	return s.finalize()
+}
+
+// emitFinish flushes the buffered finish event exactly once, advancing
+// internal state so the next Recv returns io.EOF.
+func (s *stream) emitFinish() *provider.Event {
+	s.pendingEmitted = true
+	s.recordEmit()
+	return s.buildFinishEvent(s.pendingFinish)
+}
+
+// decodePayload parses a single SSE data payload into the wire-shape
+// anthropicStreamEvent. Failures wrap into a typed *provider.Error so
+// the loop can return immediately.
+func (s *stream) decodePayload(payload []byte) (*anthropicStreamEvent, error) {
+	var event anthropicStreamEvent
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return nil, &provider.Error{
+			Kind:     provider.KindUpstream,
+			Provider: s.providerName,
+			Message:  "decode stream event: " + err.Error(),
+			Cause:    err,
+			Raw:      httpx.FirstBytes(payload),
+		}
+	}
+	return &event, nil
+}
+
+// dispatch routes one decoded event by type to its handler. The
+// (emitted, evt, err) tuple distinguishes three outcomes:
+//   - emitted=true, evt!=nil, err=nil  → caller returns evt
+//   - emitted=false, err!=nil          → caller returns err (terminal)
+//   - emitted=false, err=nil           → caller continues scanning
+//
+// payload is passed through to the error-event handlers because they
+// re-parse the envelope shape that anthropicStreamEvent doesn't model.
+func (s *stream) dispatch(event *anthropicStreamEvent, payload []byte) (emitted bool, evt *provider.Event, err error) {
+	switch event.Type {
+	case "message_start":
+		return true, s.handleMessageStart(event), nil
+	case "content_block_delta":
+		return s.handleContentBlockDelta(event)
+	case "message_delta":
+		s.handleMessageDelta(event)
+		return false, nil, nil
+	case "message_stop":
+		return true, s.handleMessageStop(), nil
+	case "ping", "content_block_start", "content_block_stop":
+		return false, nil, nil
+	case "error":
+		return false, nil, errorFromStreamEvent(payload, s.providerName)
+	default:
+		if perr := parseMaybeStreamError(payload, s.providerName); perr != nil {
+			return false, nil, perr
+		}
+		return false, nil, nil
+	}
+}
+
+// handleMessageStart captures message metadata + input usage and emits
+// the assistant-role chunk that opens an OpenAI-shaped stream.
+func (s *stream) handleMessageStart(event *anthropicStreamEvent) *provider.Event {
+	if event.Message != nil {
+		s.msgID = event.Message.ID
+		s.msgModel = event.Message.Model
+		s.inputTokens = event.Message.Usage.InputTokens
+	}
+	s.recordEmit()
+	return &provider.Event{
+		ID:     s.msgID,
+		Object: "chat.completion.chunk",
+		Model:  s.msgModel,
+		Choices: []provider.ChoiceDelta{{
+			Index: 0,
+			Delta: provider.Delta{Role: "assistant"},
+		}},
+	}
+}
+
+// handleContentBlockDelta translates one Anthropic delta block to an
+// OpenAI delta chunk. text_delta becomes Content; thinking_delta
+// becomes ReasoningContent (with text fallback when Thinking is empty
+// — older API shape). Unknown delta types are silently skipped.
+func (s *stream) handleContentBlockDelta(event *anthropicStreamEvent) (bool, *provider.Event, error) {
+	var delta provider.Delta
+	switch event.Delta.Type {
+	case "text_delta":
+		delta.Content = event.Delta.Text
+	case "thinking_delta":
+		delta.ReasoningContent = event.Delta.Thinking
+		if delta.ReasoningContent == "" {
+			delta.ReasoningContent = event.Delta.Text
+		}
+	default:
+		return false, nil, nil
+	}
+	s.recordEmit()
+	return true, &provider.Event{
+		ID:     s.msgID,
+		Object: "chat.completion.chunk",
+		Model:  s.msgModel,
+		Choices: []provider.ChoiceDelta{{
+			Index: 0,
+			Delta: delta,
+		}},
+	}, nil
+}
+
+// handleMessageDelta buffers the finish reason and output usage so the
+// terminal message_stop (or post-loop fallback) can build the final
+// chunk. Does not emit on its own.
+func (s *stream) handleMessageDelta(event *anthropicStreamEvent) {
+	finishReason := ""
+	if event.Delta.StopReason != nil {
+		finishReason = mapStopReason(*event.Delta.StopReason)
+	}
+	s.pendingFinish = &anthropicEnd{
+		finishReason:        finishReason,
+		outputTokens:        event.Usage.OutputTokens,
+		cacheCreationTokens: event.Usage.CacheCreationInputTokens,
+		cacheReadTokens:     event.Usage.CacheReadInputTokens,
+	}
+}
+
+// handleMessageStop emits the terminal finish chunk. If message_delta
+// never arrived (server cut early after a content block), synthesize a
+// generic "stop" reason so callers still see a clean finish.
+func (s *stream) handleMessageStop() *provider.Event {
+	if s.pendingFinish == nil {
+		s.pendingFinish = &anthropicEnd{finishReason: "stop"}
+	}
+	s.pendingEmitted = true
+	s.recordEmit()
+	return s.buildFinishEvent(s.pendingFinish)
+}
+
+// finalize handles the post-loop state. Scanner errors win. If we
+// have a buffered finish but never saw message_stop, surface it as the
+// final chunk. Otherwise treat the abrupt end as an upstream fault.
+func (s *stream) finalize() (*provider.Event, error) {
 	if err := s.scanner.Err(); err != nil {
 		return nil, &provider.Error{
 			Kind:     provider.KindUpstream,
@@ -197,9 +273,7 @@ func (s *stream) Recv() (*provider.Event, error) {
 		}
 	}
 	if s.pendingFinish != nil && !s.pendingEmitted {
-		s.pendingEmitted = true
-		s.recordEmit()
-		return s.buildFinishEvent(s.pendingFinish), nil
+		return s.emitFinish(), nil
 	}
 	return nil, &provider.Error{
 		Kind:     provider.KindUpstream,

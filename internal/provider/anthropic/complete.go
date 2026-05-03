@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"llmgate/internal/provider"
+	"llmgate/internal/provider/httpx"
 )
 
 func (c *Client) Complete(ctx context.Context, req *provider.Request) (*provider.Response, error) {
@@ -48,7 +49,7 @@ func (c *Client) Complete(ctx context.Context, req *provider.Request) (*provider
 			Provider: c.cfg.Name,
 			Message:  "decode response: " + err.Error(),
 			Cause:    err,
-			Raw:      firstBytes(raw),
+			Raw:      httpx.FirstBytes(raw),
 		}
 	}
 	mapped, err := toOpenAIResponse(&out)
@@ -58,7 +59,7 @@ func (c *Client) Complete(ctx context.Context, req *provider.Request) (*provider
 			Provider: c.cfg.Name,
 			Message:  "translate response: " + err.Error(),
 			Cause:    err,
-			Raw:      firstBytes(raw),
+			Raw:      httpx.FirstBytes(raw),
 		}
 	}
 	return mapped, nil

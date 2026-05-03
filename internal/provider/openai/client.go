@@ -8,7 +8,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
+
+	"llmgate/internal/provider/httpx"
 )
 
 const defaultUserAgent = "llmgate/0.1"
@@ -49,37 +50,12 @@ func New(cfg Config) (*Client, error) {
 	if cfg.Name == "" {
 		cfg.Name = "openai"
 	}
-	cfg.ExtraHeaders = copyHeaders(cfg.ExtraHeaders)
+	cfg.ExtraHeaders = httpx.CopyHeaders(cfg.ExtraHeaders)
 	httpClient := cfg.HTTPClient
 	if httpClient == nil {
-		httpClient = defaultHTTPClient()
+		httpClient = httpx.DefaultClient()
 	}
 	return &Client{cfg: cfg, http: httpClient}, nil
-}
-
-func defaultHTTPClient() *http.Client {
-	return &http.Client{
-		// No client-level timeout: LLM first byte can take minutes;
-		// cancellation flows via the request context.
-		Transport: &http.Transport{
-			MaxIdleConns:          100,
-			MaxIdleConnsPerHost:   50,
-			IdleConnTimeout:       90 * time.Second,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ExpectContinueTimeout: 1 * time.Second,
-		},
-	}
-}
-
-func copyHeaders(in map[string]string) map[string]string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
 }
 
 func (c *Client) Name() string { return c.cfg.Name }

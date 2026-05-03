@@ -1,17 +1,13 @@
 package openai
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"net"
 	"net/http"
-	"strconv"
 	"strings"
-	"time"
 
 	"llmgate/internal/provider"
+	"llmgate/internal/provider/httpx"
 )
 
 // classify maps HTTP status + upstream error envelope into a typed
@@ -24,7 +20,7 @@ func (c *Client) classify(status int, body []byte, retryAfterHeader string) *pro
 	message, errorType, errorCode := envelopeMessage(body)
 	if message == "" {
 		if len(body) > 0 {
-			message = fmt.Sprintf("upstream returned status %d: %s", status, string(firstBytes(body)))
+			message = fmt.Sprintf("upstream returned status %d: %s", status, string(httpx.FirstBytes(body)))
 		} else {
 			message = fmt.Sprintf("upstream returned status %d", status)
 		}
@@ -61,8 +57,8 @@ func (c *Client) classify(status int, body []byte, retryAfterHeader string) *pro
 		Provider:   c.cfg.Name,
 		Message:    message,
 		StatusCode: status,
-		RetryAfter: parseRetryAfter(retryAfterHeader),
-		Raw:        firstBytes(body),
+		RetryAfter: httpx.ParseRetryAfter(retryAfterHeader),
+		Raw:        httpx.FirstBytes(body),
 	}
 }
 
@@ -92,58 +88,10 @@ func isContentFilter(errorType, errorCode string) bool {
 		strings.EqualFold(errorCode, "content_filter")
 }
 
-func parseRetryAfter(header string) time.Duration {
-	if header == "" {
-		return 0
-	}
-	if seconds, err := strconv.Atoi(header); err == nil {
-		return time.Duration(seconds) * time.Second
-	}
-	if at, err := http.ParseTime(header); err == nil {
-		d := time.Until(at)
-		if d > 0 {
-			return d
-		}
-	}
-	return 0
-}
-
-// lowLevelError wraps a transport-level error (DNS, TLS, conn refused,
-// timeout) into a *provider.Error with the right Kind so callers can
-// switch on it without sniffing strings.
 func (c *Client) lowLevelError(message string, cause error) *provider.Error {
-	kind := provider.KindNetwork
-	if errors.Is(cause, context.DeadlineExceeded) {
-		kind = provider.KindTimeout
-	} else {
-		var netErr net.Error
-		if errors.As(cause, &netErr) && netErr.Timeout() {
-			kind = provider.KindTimeout
-		}
-	}
-	return &provider.Error{
-		Kind:     kind,
-		Provider: c.cfg.Name,
-		Message:  message + ": " + cause.Error(),
-		Cause:    cause,
-	}
+	return httpx.LowLevelError(c.cfg.Name, message, cause)
 }
 
 func (c *Client) badRequest(message string, cause error, raw []byte) *provider.Error {
-	return &provider.Error{
-		Kind:     provider.KindBadRequest,
-		Provider: c.cfg.Name,
-		Message:  message + ": " + cause.Error(),
-		Cause:    cause,
-		Raw:      firstBytes(raw),
-	}
-}
-
-func firstBytes(b []byte) []byte {
-	if len(b) > 256 {
-		b = b[:256]
-	}
-	out := make([]byte, len(b))
-	copy(out, b)
-	return out
+	return httpx.BadRequest(c.cfg.Name, message, cause, raw)
 }

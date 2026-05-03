@@ -1,24 +1,20 @@
 package anthropic
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"net"
 	"net/http"
-	"strconv"
 	"strings"
-	"time"
 
 	"llmgate/internal/provider"
+	"llmgate/internal/provider/httpx"
 )
 
 func (c *Client) classify(status int, body []byte, retryAfterHeader string) *provider.Error {
 	message, errorType := envelopeMessage(body)
 	if message == "" {
 		if len(body) > 0 {
-			message = fmt.Sprintf("upstream returned status %d: %s", status, string(firstBytes(body)))
+			message = fmt.Sprintf("upstream returned status %d: %s", status, string(httpx.FirstBytes(body)))
 		} else {
 			message = fmt.Sprintf("upstream returned status %d", status)
 		}
@@ -53,8 +49,8 @@ func (c *Client) classify(status int, body []byte, retryAfterHeader string) *pro
 		Provider:   c.cfg.Name,
 		Message:    message,
 		StatusCode: status,
-		RetryAfter: parseRetryAfter(retryAfterHeader),
-		Raw:        firstBytes(body),
+		RetryAfter: httpx.ParseRetryAfter(retryAfterHeader),
+		Raw:        httpx.FirstBytes(body),
 	}
 }
 
@@ -92,7 +88,7 @@ func errorFromStreamEvent(payload []byte, providerName string) *provider.Error {
 		Kind:     kindFromAnthropicErrorType(errorType),
 		Provider: providerName,
 		Message:  message,
-		Raw:      firstBytes(payload),
+		Raw:      httpx.FirstBytes(payload),
 	}
 }
 
@@ -122,48 +118,12 @@ func envelopeMessage(body []byte) (string, string) {
 	return openAIEnv.Error.Message, openAIEnv.Error.Type
 }
 
-func parseRetryAfter(header string) time.Duration {
-	if header == "" {
-		return 0
-	}
-	if seconds, err := strconv.Atoi(header); err == nil {
-		return time.Duration(seconds) * time.Second
-	}
-	if at, err := http.ParseTime(header); err == nil {
-		d := time.Until(at)
-		if d > 0 {
-			return d
-		}
-	}
-	return 0
-}
-
 func (c *Client) lowLevelError(message string, cause error) *provider.Error {
-	kind := provider.KindNetwork
-	if errors.Is(cause, context.DeadlineExceeded) {
-		kind = provider.KindTimeout
-	} else {
-		var netErr net.Error
-		if errors.As(cause, &netErr) && netErr.Timeout() {
-			kind = provider.KindTimeout
-		}
-	}
-	return &provider.Error{
-		Kind:     kind,
-		Provider: c.cfg.Name,
-		Message:  message + ": " + cause.Error(),
-		Cause:    cause,
-	}
+	return httpx.LowLevelError(c.cfg.Name, message, cause)
 }
 
 func (c *Client) badRequest(message string, cause error, raw []byte) *provider.Error {
-	return &provider.Error{
-		Kind:     provider.KindBadRequest,
-		Provider: c.cfg.Name,
-		Message:  message + ": " + cause.Error(),
-		Cause:    cause,
-		Raw:      firstBytes(raw),
-	}
+	return httpx.BadRequest(c.cfg.Name, message, cause, raw)
 }
 
 func looksLikeContextLength(message string) bool {
@@ -171,13 +131,4 @@ func looksLikeContextLength(message string) bool {
 	return strings.Contains(lower, "context_length") ||
 		strings.Contains(lower, "context length") ||
 		strings.Contains(lower, "token limit")
-}
-
-func firstBytes(b []byte) []byte {
-	if len(b) > 256 {
-		b = b[:256]
-	}
-	out := make([]byte, len(b))
-	copy(out, b)
-	return out
 }

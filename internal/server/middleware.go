@@ -66,6 +66,12 @@ func accessLogMiddleware(log *slog.Logger) func(http.Handler) http.Handler {
 
 			next.ServeHTTP(cw, r)
 
+			// Pull client identity that the auth middleware (when wired
+			// for this route) set on ctx during the pre-handler phase.
+			// Empty string for routes without auth (e.g. /healthz) or
+			// when auth rejected the request.
+			client := ClientFromContext(r.Context())
+
 			log.LogAttrs(r.Context(), slog.LevelInfo, "request",
 				slog.String("method", r.Method),
 				slog.String("path", r.URL.Path),
@@ -73,6 +79,7 @@ func accessLogMiddleware(log *slog.Logger) func(http.Handler) http.Handler {
 				slog.Int64("duration_ms", time.Since(start).Milliseconds()),
 				slog.Int64("bytes_out", cw.bytes),
 				slog.String("request_id", RequestIDFromContext(r.Context())),
+				slog.String("client", client.Name),
 			)
 		})
 	}

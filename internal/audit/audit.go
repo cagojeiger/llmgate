@@ -16,6 +16,15 @@ type Record struct {
 	Method         string // "chat.completions" | "chat.completions.stream"
 	ModelRequested string
 
+	// ClientName identifies the registered caller (matched yaml `name` in
+	// clients/) for this request. Empty when the request was rejected at
+	// the auth boundary; the record is still emitted in that case so
+	// brute-force / mis-configured-key activity is observable. ClientKeyID
+	// is the first 8 hex chars of the matched hash (sha256), useful for
+	// detecting which key in a rotating set was actually used.
+	ClientName  string
+	ClientKeyID string
+
 	Vendor    string
 	ModelUsed string
 

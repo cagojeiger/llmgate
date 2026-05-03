@@ -184,6 +184,13 @@ func validateHash(h string) error {
 	return nil
 }
 
+// Len returns the number of registered clients (one entry per yaml
+// file). Useful for boot-time logging and tests; no auth path consults
+// it.
+func (s *Store) Len() int {
+	return len(s.byName)
+}
+
 // Lookup hashes the raw bearer token and returns the matched client name
 // and a short key id (first 8 hex chars of the matched hash) suitable for
 // audit. The raw key never appears in the returned values.

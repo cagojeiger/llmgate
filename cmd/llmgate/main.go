@@ -14,6 +14,7 @@ import (
 
 	"llmgate/internal/audit"
 	"llmgate/internal/catalog"
+	"llmgate/internal/clients"
 	"llmgate/internal/config"
 	"llmgate/internal/provider"
 	"llmgate/internal/provider/anthropic"
@@ -52,6 +53,12 @@ func run() error {
 		slog.Int("aliases", len(cat.Aliases)),
 	)
 
+	clientStore, err := clients.Load()
+	if err != nil {
+		return fmt.Errorf("load clients: %w", err)
+	}
+	logger.Info("clients loaded", slog.Int("clients", clientStore.Len()))
+
 	factories := map[string]router.AdapterFactory{
 		"openai":    openaiFactory,
 		"anthropic": anthropicFactory,
@@ -81,7 +88,7 @@ func run() error {
 		RequestTimeout:    cfg.RequestTimeout,
 		StreamIdleTimeout: cfg.StreamIdleTimeout,
 	})
-	srv := server.New(cfg, logger, handler)
+	srv := server.New(cfg, logger, handler, clientStore)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

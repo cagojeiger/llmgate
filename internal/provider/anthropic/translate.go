@@ -146,16 +146,35 @@ func toOpenAIResponse(in *anthropicResponse) (*provider.Response, error) {
 	}, nil
 }
 
+// mapStopReason translates Anthropic's stop_reason vocabulary into the
+// OpenAI finish_reason enum so SDK clients that strictly enum-validate
+// the field don't break when Anthropic ships a new value. Unknown
+// values fall back to "stop" — losing the original label is preferable
+// to leaking a non-enum string. Update this whitelist when Anthropic
+// adds values; an empty input is preserved as empty so callers can
+// distinguish "not set yet" from "stopped".
 func mapStopReason(s string) string {
 	switch s {
+	case "":
+		return ""
 	case "end_turn", "stop_sequence":
 		return "stop"
 	case "max_tokens":
 		return "length"
 	case "tool_use":
 		return "tool_calls"
+	case "refusal":
+		// Anthropic "refusal" is the model declining per its own policy;
+		// OpenAI "content_filter" is the closest semantic in the OpenAI
+		// enum (a content-policy-driven stop).
+		return "content_filter"
+	case "pause_turn":
+		// pause_turn signals that more turns are coming (e.g. extended
+		// thinking continues across a follow-up request). No exact OpenAI
+		// equivalent — clients see "stop" and the next request continues.
+		return "stop"
 	default:
-		return s
+		return "stop"
 	}
 }
 

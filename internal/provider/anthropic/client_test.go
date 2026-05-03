@@ -202,7 +202,9 @@ func TestComplete_StopReasonMapping(t *testing.T) {
 		{"stop_sequence", "stop"},
 		{"max_tokens", "length"},
 		{"tool_use", "tool_calls"},
-		{"other", "other"},
+		{"refusal", "content_filter"},
+		{"pause_turn", "stop"},
+		{"future_unknown_2030", "stop"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.stopReason, func(t *testing.T) {

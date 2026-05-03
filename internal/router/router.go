@@ -383,6 +383,15 @@ type streamRecvResult struct {
 	err   error
 }
 
+// streamCloseGrace bounds how long the router waits for a goroutine
+// running Stream.Recv to exit after Close has been called. The Stream
+// contract requires Close to unblock Recv promptly; this grace is a
+// defensive safety net so a misbehaving adapter cannot stall the
+// caller indefinitely. The buffered channel keeps the goroutine itself
+// from leaking the channel — the goroutine is abandoned but can still
+// complete in the background.
+var streamCloseGrace = 5 * time.Second
+
 func recvFirstEvent(ctx context.Context, stream provider.Stream) (*provider.Event, error) {
 	ch := make(chan streamRecvResult, 1)
 	go func() {
@@ -395,7 +404,10 @@ func recvFirstEvent(ctx context.Context, stream provider.Stream) (*provider.Even
 		return got.event, got.err
 	case <-ctx.Done():
 		_ = stream.Close()
-		<-ch
+		select {
+		case <-ch:
+		case <-time.After(streamCloseGrace):
+		}
 		return nil, contextError(ctx.Err())
 	}
 }

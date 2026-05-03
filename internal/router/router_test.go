@@ -762,3 +762,59 @@ func (s *fakeStream) doneChan() chan struct{} {
 	}
 	return s.done
 }
+
+// stubbornStream simulates a misbehaving adapter that violates the
+// Stream contract: Recv blocks forever and Close does nothing to
+// unblock it. Used to verify the goroutine-leak safety net in
+// recvFirstEvent — the helper must return within streamCloseGrace
+// even when the goroutine cannot be reclaimed.
+type stubbornStream struct {
+	closeCalled int32
+	block       chan struct{}
+}
+
+func newStubbornStream() *stubbornStream {
+	return &stubbornStream{block: make(chan struct{})}
+}
+
+func (s *stubbornStream) Recv() (*provider.Event, error) {
+	<-s.block
+	return nil, io.EOF
+}
+
+func (s *stubbornStream) Close() error {
+	s.closeCalled++
+	return nil
+}
+
+func (s *stubbornStream) Summary() *provider.Summary { return &provider.Summary{} }
+
+// release lets any blocked Recv call return so the goroutine can exit
+// after the test finishes asserting recvFirstEvent's behavior.
+func (s *stubbornStream) release() { close(s.block) }
+
+func TestRecvFirstEvent_BoundedDrainOnContractViolation(t *testing.T) {
+	prev := streamCloseGrace
+	streamCloseGrace = 50 * time.Millisecond
+	defer func() { streamCloseGrace = prev }()
+
+	s := newStubbornStream()
+	defer s.release()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	start := time.Now()
+	_, err := recvFirstEvent(ctx, s)
+	elapsed := time.Since(start)
+
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("recvFirstEvent returned in %v, want < 500ms (grace=50ms) — leak guard not engaged", elapsed)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+	if s.closeCalled == 0 {
+		t.Errorf("Stream.Close() not invoked before bounded wait")
+	}
+}

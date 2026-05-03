@@ -752,3 +752,80 @@ func (c *captureRecorder) last(t *testing.T) *audit.Record {
 	}
 	return c.records[len(c.records)-1]
 }
+
+// stubbornStream simulates a misbehaving adapter whose Close does not
+// unblock a pending Recv. Used to verify recvWithIdleTimeout's bounded
+// wait safety net.
+type stubbornStream struct {
+	closeCalled int32
+	block       chan struct{}
+}
+
+func newStubbornStream() *stubbornStream {
+	return &stubbornStream{block: make(chan struct{})}
+}
+
+func (s *stubbornStream) Recv() (*provider.Event, error) {
+	<-s.block
+	return nil, io.EOF
+}
+
+func (s *stubbornStream) Close() error {
+	s.closeCalled++
+	return nil
+}
+
+func (s *stubbornStream) Summary() *provider.Summary { return &provider.Summary{} }
+
+func (s *stubbornStream) release() { close(s.block) }
+
+func TestRecvWithIdleTimeout_BoundedDrainOnContextCancel(t *testing.T) {
+	prev := streamCloseGrace
+	streamCloseGrace = 50 * time.Millisecond
+	defer func() { streamCloseGrace = prev }()
+
+	s := newStubbornStream()
+	defer s.release()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	start := time.Now()
+	_, err := recvWithIdleTimeout(ctx, s, 0)
+	elapsed := time.Since(start)
+
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("recvWithIdleTimeout returned in %v, want < 500ms (grace=50ms)", elapsed)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+	if s.closeCalled == 0 {
+		t.Errorf("Stream.Close() not invoked")
+	}
+}
+
+func TestRecvWithIdleTimeout_BoundedDrainOnIdleTimeout(t *testing.T) {
+	prev := streamCloseGrace
+	streamCloseGrace = 50 * time.Millisecond
+	defer func() { streamCloseGrace = prev }()
+
+	s := newStubbornStream()
+	defer s.release()
+
+	start := time.Now()
+	_, err := recvWithIdleTimeout(context.Background(), s, 20*time.Millisecond)
+	elapsed := time.Since(start)
+
+	// Idle timer fires (~20ms) → Close → 50ms grace → return. Total ~70ms.
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("recvWithIdleTimeout returned in %v, want < 500ms", elapsed)
+	}
+	var perr *provider.Error
+	if !errors.As(err, &perr) || perr.Kind != provider.KindTimeout {
+		t.Errorf("err = %v, want KindTimeout provider.Error", err)
+	}
+	if s.closeCalled == 0 {
+		t.Errorf("Stream.Close() not invoked on idle timeout")
+	}
+}

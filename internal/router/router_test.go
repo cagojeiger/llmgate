@@ -708,9 +708,9 @@ func (s *stubbornStream) Summary() *provider.Summary { return &provider.Summary{
 func (s *stubbornStream) release() { close(s.block) }
 
 func TestRecvFirstEvent_BoundedDrainOnContractViolation(t *testing.T) {
-	prev := streamCloseGrace
-	streamCloseGrace = 50 * time.Millisecond
-	defer func() { streamCloseGrace = prev }()
+	prev := provider.CloseGrace
+	provider.CloseGrace = 50 * time.Millisecond
+	defer func() { provider.CloseGrace = prev }()
 
 	s := newStubbornStream()
 	defer s.release()

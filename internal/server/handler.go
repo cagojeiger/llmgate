@@ -278,13 +278,6 @@ type recvResult struct {
 	err   error
 }
 
-// streamCloseGrace bounds how long recvWithIdleTimeout waits for the
-// Recv goroutine to exit after Close has been called. See router.go for
-// the rationale; the buffered channel prevents the channel itself from
-// leaking, but the goroutine is abandoned if the adapter violates the
-// Stream contract by not unblocking Recv on Close.
-var streamCloseGrace = 5 * time.Second
-
 func recvWithIdleTimeout(ctx context.Context, stream provider.Stream, timeout time.Duration) (*provider.Event, error) {
 	ch := make(chan recvResult, 1)
 	go func() {
@@ -305,21 +298,14 @@ func recvWithIdleTimeout(ctx context.Context, stream provider.Stream, timeout ti
 		return got.event, got.err
 	case <-timeoutC:
 		_ = stream.Close()
-		drainOrAbandon(ch, streamCloseGrace)
+		provider.DrainOrAbandon(ch, provider.CloseGrace)
 		return nil, &provider.Error{Kind: provider.KindTimeout, Message: "stream idle timeout"}
 	case <-ctx.Done():
 		_ = stream.Close()
-		drainOrAbandon(ch, streamCloseGrace)
+		provider.DrainOrAbandon(ch, provider.CloseGrace)
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return nil, &provider.Error{Kind: provider.KindTimeout, Message: ctx.Err().Error(), Cause: ctx.Err()}
 		}
 		return nil, ctx.Err()
-	}
-}
-
-func drainOrAbandon(ch <-chan recvResult, grace time.Duration) {
-	select {
-	case <-ch:
-	case <-time.After(grace):
 	}
 }

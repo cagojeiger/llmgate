@@ -780,9 +780,9 @@ func (s *stubbornStream) Summary() *provider.Summary { return &provider.Summary{
 func (s *stubbornStream) release() { close(s.block) }
 
 func TestRecvWithIdleTimeout_BoundedDrainOnContextCancel(t *testing.T) {
-	prev := streamCloseGrace
-	streamCloseGrace = 50 * time.Millisecond
-	defer func() { streamCloseGrace = prev }()
+	prev := provider.CloseGrace
+	provider.CloseGrace = 50 * time.Millisecond
+	defer func() { provider.CloseGrace = prev }()
 
 	s := newStubbornStream()
 	defer s.release()
@@ -806,9 +806,9 @@ func TestRecvWithIdleTimeout_BoundedDrainOnContextCancel(t *testing.T) {
 }
 
 func TestRecvWithIdleTimeout_BoundedDrainOnIdleTimeout(t *testing.T) {
-	prev := streamCloseGrace
-	streamCloseGrace = 50 * time.Millisecond
-	defer func() { streamCloseGrace = prev }()
+	prev := provider.CloseGrace
+	provider.CloseGrace = 50 * time.Millisecond
+	defer func() { provider.CloseGrace = prev }()
 
 	s := newStubbornStream()
 	defer s.release()

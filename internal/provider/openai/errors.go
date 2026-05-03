@@ -16,9 +16,12 @@ import (
 
 // classify maps HTTP status + upstream error envelope into a typed
 // *provider.Error. Order: explicit envelope message > status-code mapping
-// > generic fallback.
+// > generic fallback. The envelope's `type` and `code` fields can refine
+// the kind when the status alone is ambiguous (most importantly,
+// `content_filter` — OpenAI gateways encode policy blocks via the
+// envelope, not via a dedicated status code).
 func (c *Client) classify(status int, body []byte, retryAfterHeader string) *provider.Error {
-	message := envelopeMessage(body)
+	message, errorType, errorCode := envelopeMessage(body)
 	if message == "" {
 		if len(body) > 0 {
 			message = fmt.Sprintf("upstream returned status %d: %s", status, string(firstBytes(body)))
@@ -33,7 +36,11 @@ func (c *Client) classify(status int, body []byte, retryAfterHeader string) *pro
 		kind = provider.KindAuth
 	case status == http.StatusNotFound:
 		kind = provider.KindBadRequest
-	case status == http.StatusBadRequest, status == http.StatusUnprocessableEntity:
+	case status == http.StatusRequestTimeout:
+		kind = provider.KindTimeout
+	case status == http.StatusBadRequest,
+		status == http.StatusUnprocessableEntity,
+		status == http.StatusRequestEntityTooLarge:
 		kind = provider.KindBadRequest
 		lower := strings.ToLower(message)
 		if strings.Contains(lower, "token limit") || strings.Contains(lower, "context length") {
@@ -43,6 +50,10 @@ func (c *Client) classify(status int, body []byte, retryAfterHeader string) *pro
 		kind = provider.KindRateLimit
 	case status == 529, status >= 500 && status <= 599:
 		kind = provider.KindUpstream
+	}
+
+	if isContentFilter(errorType, errorCode) {
+		kind = provider.KindContentFilter
 	}
 
 	return &provider.Error{
@@ -55,17 +66,30 @@ func (c *Client) classify(status int, body []byte, retryAfterHeader string) *pro
 	}
 }
 
-func envelopeMessage(body []byte) string {
+// envelopeMessage returns the OpenAI-style error envelope's message,
+// type, and code (best-effort). `code` is decoded from RawMessage so a
+// non-string value (some gateways send int / null) doesn't fail the
+// whole unmarshal.
+func envelopeMessage(body []byte) (message, errorType, errorCode string) {
 	var env struct {
 		Error struct {
-			Message string `json:"message"`
-			Type    string `json:"type"`
+			Message string          `json:"message"`
+			Type    string          `json:"type"`
+			Code    json.RawMessage `json:"code"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(body, &env); err != nil {
-		return ""
+		return "", "", ""
 	}
-	return env.Error.Message
+	if len(env.Error.Code) > 0 {
+		_ = json.Unmarshal(env.Error.Code, &errorCode)
+	}
+	return env.Error.Message, env.Error.Type, errorCode
+}
+
+func isContentFilter(errorType, errorCode string) bool {
+	return strings.EqualFold(errorType, "content_filter") ||
+		strings.EqualFold(errorCode, "content_filter")
 }
 
 func parseRetryAfter(header string) time.Duration {

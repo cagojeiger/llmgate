@@ -180,6 +180,47 @@ func TestComplete_ValidationErrors(t *testing.T) {
 	}
 }
 
+// TestClassify_StatusAndEnvelope drives the classify helper directly so we
+// can pin every HTTP-status / envelope-shape mapping in one place. New
+// cases should land here before being touched in other tests.
+func TestClassify_StatusAndEnvelope(t *testing.T) {
+	c := mustNew(t, Config{BaseURL: "http://example.invalid", APIKey: "k", Name: "opencode"})
+	cases := []struct {
+		name   string
+		status int
+		body   string
+		want   provider.Kind
+	}{
+		{"401 auth", 401, `{"error":{"message":"bad key","type":"authentication_error"}}`, provider.KindAuth},
+		{"403 auth", 403, `{"error":{"message":"forbidden"}}`, provider.KindAuth},
+		{"404 maps to bad_request", 404, `{"error":{"message":"no such model"}}`, provider.KindBadRequest},
+		{"408 request timeout", 408, `{"error":{"message":"server timeout"}}`, provider.KindTimeout},
+		{"413 request too large", 413, `{"error":{"message":"payload too large","type":"request_too_large"}}`, provider.KindBadRequest},
+		{"413 with token-limit hint becomes context_length", 413, `{"error":{"message":"prompt exceeded token limit"}}`, provider.KindContextLength},
+		{"422 unprocessable", 422, `{"error":{"message":"bad fields"}}`, provider.KindBadRequest},
+		{"400 with context_length hint", 400, `{"error":{"message":"context length 8000 exceeded"}}`, provider.KindContextLength},
+		{"400 content_filter via type", 400, `{"error":{"message":"blocked","type":"content_filter"}}`, provider.KindContentFilter},
+		{"400 content_filter via code", 400, `{"error":{"message":"blocked","type":"invalid_request_error","code":"content_filter"}}`, provider.KindContentFilter},
+		{"429 rate limit", 429, `{"error":{"message":"slow down"}}`, provider.KindRateLimit},
+		{"500 upstream", 500, `{"error":{"message":"internal"}}`, provider.KindUpstream},
+		{"529 overload (Anthropic-style status some gateways forward)", 529, `{"error":{"message":"overloaded"}}`, provider.KindUpstream},
+		{"non-string code does not break parsing", 400, `{"error":{"message":"bad","code":123}}`, provider.KindBadRequest},
+		{"unparseable body falls to status mapping", 502, `<html>oops</html>`, provider.KindUpstream},
+		{"unmapped 4xx remains unknown", 451, `{"error":{"message":"legal hold"}}`, provider.KindUnknown},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			perr := c.classify(tc.status, []byte(tc.body), "")
+			if perr.Kind != tc.want {
+				t.Errorf("Kind = %q, want %q (body=%s)", perr.Kind, tc.want, tc.body)
+			}
+			if perr.StatusCode != tc.status {
+				t.Errorf("StatusCode = %d, want %d (preserved verbatim)", perr.StatusCode, tc.status)
+			}
+		})
+	}
+}
+
 func TestCompleteStream_Success(t *testing.T) {
 	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Accept"); got != "text/event-stream" {

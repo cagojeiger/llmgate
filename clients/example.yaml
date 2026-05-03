@@ -1,0 +1,10 @@
+# 테스트 / 예시용 호출자 등록.
+# 운영에는 절대 그대로 사용하지 말 것 — raw 키가 아래 코멘트에 노출돼 있다.
+# 진짜 호출자는 별도 키 발급 → sha256 → key_hashes 에 추가.
+#
+# raw key #1: example-key-001
+# raw key #2: example-key-002 (회전용 두 번째 키 시뮬레이션)
+name: example
+key_hashes:
+  - sha256:467d813a164205cb1d0de0d9bcb080c2bd653c9faed94a24fb6f753ed69ff2d4
+  - sha256:278bb4c27aa3a7bff4dac942ad551034f182c1230f70fb114c82858d0fc8a5ca

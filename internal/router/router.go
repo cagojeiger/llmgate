@@ -20,14 +20,14 @@ type AdapterFactory func(*catalog.Model) (provider.Provider, error)
 
 // FallbackPolicy is env-driven router tuning. CircuitFailures or
 // CircuitOpen <= 0 disables the breaker; CircuitJitter is symmetric
-// (0.2 means ±20%).
+// (0.2 means ±20%). The total request budget lives in the caller's
+// ctx (handler middleware) — router only owns per-attempt budgets.
 type FallbackPolicy struct {
 	OnKinds            []string
 	CircuitFailures    int
 	CircuitOpen        time.Duration
 	CircuitMaxOpen     time.Duration
 	CircuitJitter      float64
-	RequestTimeout     time.Duration
 	CompleteTimeout    time.Duration
 	StreamStartTimeout time.Duration
 }
@@ -52,7 +52,6 @@ type Router struct {
 
 type fallbackPolicy struct {
 	onKinds            map[provider.Kind]struct{}
-	requestTimeout     time.Duration
 	completeTimeout    time.Duration
 	streamStartTimeout time.Duration
 }
@@ -94,7 +93,6 @@ func NewRouter(cat *catalog.Catalog, factories map[string]AdapterFactory, policy
 
 	internalPolicy := fallbackPolicy{
 		onKinds:            make(map[provider.Kind]struct{}, len(policy.OnKinds)),
-		requestTimeout:     policy.RequestTimeout,
 		completeTimeout:    policy.CompleteTimeout,
 		streamStartTimeout: policy.StreamStartTimeout,
 	}
@@ -116,12 +114,6 @@ func (r *Router) Complete(ctx context.Context, req *provider.Request) (*RouteRes
 	if req == nil {
 		return result, &provider.Error{Kind: provider.KindBadRequest, Message: "request is nil"}
 	}
-	routeCtx := ctx
-	if r.policy.requestTimeout > 0 {
-		var cancel context.CancelFunc
-		routeCtx, cancel = context.WithTimeout(ctx, r.policy.requestTimeout)
-		defer cancel()
-	}
 
 	candidates, err := r.candidates(req.Model)
 	if err != nil {
@@ -131,14 +123,14 @@ func (r *Router) Complete(ctx context.Context, req *provider.Request) (*RouteRes
 	var lastErr error
 
 	for _, candidate := range candidates {
-		if err := routeCtx.Err(); err != nil {
+		if err := ctx.Err(); err != nil {
 			return result, contextError(err)
 		}
 		attemptReq := requestForCandidate(req, candidate)
-		attemptCtx := routeCtx
+		attemptCtx := ctx
 		cancelAttempt := func() {}
 		if r.policy.completeTimeout > 0 {
-			attemptCtx, cancelAttempt = context.WithTimeout(routeCtx, r.policy.completeTimeout)
+			attemptCtx, cancelAttempt = context.WithTimeout(ctx, r.policy.completeTimeout)
 		}
 
 		start := time.Now()
@@ -180,7 +172,7 @@ func (r *Router) Complete(ctx context.Context, req *provider.Request) (*RouteRes
 			return result, err
 		}
 		r.breakers.recordFailure(candidate.model)
-		if err := routeCtx.Err(); err != nil {
+		if err := ctx.Err(); err != nil {
 			return result, contextError(err)
 		}
 		r.log.Info("fallback triggered",
@@ -197,19 +189,6 @@ func (r *Router) CompleteStream(ctx context.Context, req *provider.Request) (*Ro
 	if req == nil {
 		return result, &provider.Error{Kind: provider.KindBadRequest, Message: "request is nil"}
 	}
-	routeCtx := ctx
-	cancelRoute := context.CancelFunc(func() {})
-	if r.policy.requestTimeout > 0 {
-		routeCtx, cancelRoute = context.WithTimeout(ctx, r.policy.requestTimeout)
-	}
-	// routeCtx is canceled by this defer unless ownership is transferred
-	// to the returned stream on the success path below.
-	routeOwned := true
-	defer func() {
-		if routeOwned {
-			cancelRoute()
-		}
-	}()
 
 	candidates, err := r.candidates(req.Model)
 	if err != nil {
@@ -218,11 +197,11 @@ func (r *Router) CompleteStream(ctx context.Context, req *provider.Request) (*Ro
 
 	var lastErr error
 	for _, candidate := range candidates {
-		if err := routeCtx.Err(); err != nil {
+		if err := ctx.Err(); err != nil {
 			return result, contextError(err)
 		}
 		attemptReq := requestForCandidate(req, candidate)
-		startCtx, cancelStart, stopStart, startTimedOut := streamStartContext(routeCtx, r.policy.streamStartTimeout)
+		startCtx, cancelStart, stopStart, startTimedOut := streamStartContext(ctx, r.policy.streamStartTimeout)
 
 		att := provider.Attempt{
 			Vendor:    candidate.provider.Name(),
@@ -233,28 +212,23 @@ func (r *Router) CompleteStream(ctx context.Context, req *provider.Request) (*Ro
 		if err != nil {
 			stopStart()
 			cancelStart()
-			err = startTimeoutErr(err, startCtx, routeCtx, startTimedOut)
+			err = startTimeoutErr(err, startCtx, ctx, startTimedOut)
 			lastErr = err
-			if bail := r.finalizeStreamFailure(result, candidate, &att, err, routeCtx); bail != nil {
+			if bail := r.finalizeStreamFailure(result, candidate, &att, err, ctx); bail != nil {
 				return result, bail
 			}
 			continue
 		}
 		// Adapter's ValidateFirstEvent already proved the stream alive.
 		// Stop the start-timer (without canceling startCtx) so the
-		// established stream's underlying ctx survives.
+		// established stream's underlying ctx survives until Close.
 		stopStart()
 
 		result.Attempts = append(result.Attempts, att)
-		streamCancel := cancelStart
-		if r.policy.requestTimeout > 0 {
-			streamCancel = func() { cancelStart(); cancelRoute() }
-		}
-		result.Stream = &cancelOnCloseStream{Stream: stream, cancel: streamCancel}
+		result.Stream = &cancelOnCloseStream{Stream: stream, cancel: cancelStart}
 		result.Vendor = candidate.provider.Name()
 		result.ModelUsed = candidate.model
 		r.breakers.recordSuccess(candidate.model)
-		routeOwned = false
 		return result, nil
 	}
 	return result, lastErr

@@ -23,7 +23,6 @@ var testPolicy = FallbackPolicy{
 	CircuitOpen:        30 * time.Second,
 	CircuitMaxOpen:     5 * time.Minute,
 	CircuitJitter:      0.2,
-	RequestTimeout:     5 * time.Minute,
 	CompleteTimeout:    time.Minute,
 	StreamStartTimeout: 30 * time.Second,
 }
@@ -459,11 +458,14 @@ func TestRouter_RequestTimeoutStopsChain(t *testing.T) {
 		},
 	}
 	policy := testPolicy
-	policy.RequestTimeout = time.Millisecond
 	policy.CompleteTimeout = time.Minute
 	router := mustRouterWithPolicy(t, fallbackCatalog(t), openAI, nil, policy)
 
-	result, err := router.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
+	// Request-level deadline lives on the caller's ctx (handler does this in
+	// production); router itself no longer adds a routeCtx wrap.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+	defer cancel()
+	result, err := router.Complete(ctx, &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
 	if err == nil {
 		t.Fatal("Complete: want request timeout error")
 	}

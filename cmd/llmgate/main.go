@@ -63,7 +63,6 @@ func run() error {
 		CircuitOpen:        cfg.CircuitOpen,
 		CircuitMaxOpen:     cfg.CircuitMaxOpen,
 		CircuitJitter:      cfg.CircuitJitter,
-		RequestTimeout:     cfg.RequestTimeout,
 		CompleteTimeout:    cfg.CompleteTimeout,
 		StreamStartTimeout: cfg.StreamStartTimeout,
 	}

@@ -7,16 +7,12 @@ import (
 	"time"
 )
 
-func newTestBreakerStore(cfg breakerConfig) *breakerStore {
-	return newBreakerStore(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+func newTestBreakerStore(failureTrip int, base, max time.Duration, jitter float64) *breakerStore {
+	return newBreakerStore(failureTrip, base, max, jitter, slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
 func TestBreakerStore_BackoffIncreasesAndCaps(t *testing.T) {
-	s := newTestBreakerStore(breakerConfig{
-		failureTrip: 1,
-		base:        30 * time.Second,
-		max:         2 * time.Minute,
-	})
+	s := newTestBreakerStore(1, 30*time.Second, 2*time.Minute, 0)
 
 	before := time.Now()
 	s.recordFailure("deepseek-v4-pro")
@@ -41,12 +37,7 @@ func TestBreakerStore_BackoffIncreasesAndCaps(t *testing.T) {
 }
 
 func TestBreakerStore_JitterStaysInRange(t *testing.T) {
-	s := newTestBreakerStore(breakerConfig{
-		failureTrip: 1,
-		base:        100 * time.Second,
-		max:         5 * time.Minute,
-		jitter:      0.2,
-	})
+	s := newTestBreakerStore(1, 100*time.Second, 5*time.Minute, 0.2)
 
 	before := time.Now()
 	s.recordFailure("deepseek-v4-pro")
@@ -57,11 +48,7 @@ func TestBreakerStore_JitterStaysInRange(t *testing.T) {
 }
 
 func TestBreakerStore_OpenExpiryKeepsOpenCountUntilSuccess(t *testing.T) {
-	s := newTestBreakerStore(breakerConfig{
-		failureTrip: 1,
-		base:        30 * time.Second,
-		max:         5 * time.Minute,
-	})
+	s := newTestBreakerStore(1, 30*time.Second, 5*time.Minute, 0)
 	// Pre-populate as if a prior failure window expired in the past.
 	s.states["deepseek-v4-pro"] = &breakerState{
 		failures:  1,
@@ -87,7 +74,7 @@ func TestBreakerStore_OpenExpiryKeepsOpenCountUntilSuccess(t *testing.T) {
 }
 
 func TestBreakerStore_DisabledByZeroConfig(t *testing.T) {
-	s := newTestBreakerStore(breakerConfig{failureTrip: 0, base: 0})
+	s := newTestBreakerStore(0, 0, 0, 0)
 	for i := 0; i < 5; i++ {
 		s.recordFailure("any-model")
 	}

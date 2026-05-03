@@ -7,57 +7,41 @@ import (
 	"time"
 )
 
-// breakerState is per-model failure tracking. failures resets on a
-// success or on cooldown expiry; opens counts how many times the
-// breaker has tripped without an intervening success, and is what
-// drives the exponential cooldown growth. A single success resets
-// opens to 0 (along with failures and openUntil) — chronic upstreams
-// only climb the backoff ladder while they fail repeatedly.
+// breakerState tracks one model's consecutive failures. opens persists
+// across cooldown expiry so chronic outages keep climbing the backoff
+// ladder; only a clean success resets it.
 type breakerState struct {
 	failures  int
 	openUntil time.Time
 	opens     int
 }
 
-// breakerStore is a per-process, in-memory circuit breaker shared
-// across goroutines via Router. The policy is "trip after N
-// consecutive failures, cool down for an exponentially growing
-// window, fully reset state on a clean success." There is
-// intentionally no half-open / single-probe phase — once the
-// cooldown expires, all callers proceed as if the breaker were
-// closed. A real half-open belongs in a redis-backed implementation
-// that can coordinate decisions across processes.
+// breakerStore is per-process, in-memory. No half-open phase — once
+// cooldown expires, all callers proceed as if closed. Cross-process
+// coordination belongs in a redis-backed alternative.
 type breakerStore struct {
-	mu     sync.Mutex
-	states map[string]*breakerState
-	cfg    breakerConfig
-	log    *slog.Logger
-}
-
-// breakerConfig is the env-driven tuning the store applies. failureTrip
-// or base <= 0 disables the breaker (every isOpen returns false). max
-// caps the exponential backoff; jitter is symmetric (0.2 = ±20%).
-type breakerConfig struct {
+	mu          sync.Mutex
+	states      map[string]*breakerState
 	failureTrip int
 	base        time.Duration
 	max         time.Duration
 	jitter      float64
+	log         *slog.Logger
 }
 
-func newBreakerStore(cfg breakerConfig, log *slog.Logger) *breakerStore {
+func newBreakerStore(failureTrip int, base, max time.Duration, jitter float64, log *slog.Logger) *breakerStore {
 	return &breakerStore{
-		states: map[string]*breakerState{},
-		cfg:    cfg,
-		log:    log,
+		states:      map[string]*breakerState{},
+		failureTrip: failureTrip,
+		base:        base,
+		max:         max,
+		jitter:      jitter,
+		log:         log,
 	}
 }
 
-// isOpen reports whether modelID is currently in its cooldown window.
-// On cooldown expiry the failure counter is reset (so the next attempt
-// starts fresh) but `opens` is preserved so chronic upstreams continue
-// to climb the exponential ladder.
 func (s *breakerStore) isOpen(modelID string) bool {
-	if s.cfg.base <= 0 || s.cfg.failureTrip <= 0 {
+	if s.base <= 0 || s.failureTrip <= 0 {
 		return false
 	}
 	s.mu.Lock()
@@ -69,8 +53,8 @@ func (s *breakerStore) isOpen(modelID string) bool {
 	if !b.openUntil.IsZero() && time.Now().Before(b.openUntil) {
 		return true
 	}
-	// On expiry, close the circuit but keep opens until a success so
-	// repeated outages continue exponential backoff.
+	// Expired: reset failures so next attempt starts fresh; keep opens
+	// so chronic outages keep climbing the backoff ladder.
 	if !b.openUntil.IsZero() {
 		b.openUntil = time.Time{}
 		b.failures = 0
@@ -79,7 +63,7 @@ func (s *breakerStore) isOpen(modelID string) bool {
 }
 
 func (s *breakerStore) recordFailure(modelID string) {
-	if s.cfg.failureTrip <= 0 || s.cfg.base <= 0 {
+	if s.failureTrip <= 0 || s.base <= 0 {
 		return
 	}
 	s.mu.Lock()
@@ -90,7 +74,7 @@ func (s *breakerStore) recordFailure(modelID string) {
 		s.states[modelID] = b
 	}
 	b.failures++
-	if b.failures >= s.cfg.failureTrip {
+	if b.failures >= s.failureTrip {
 		b.opens++
 		cooldown := s.nextOpenDurationLocked(b.opens)
 		b.openUntil = time.Now().Add(cooldown)
@@ -103,7 +87,7 @@ func (s *breakerStore) recordFailure(modelID string) {
 }
 
 func (s *breakerStore) recordSuccess(modelID string) {
-	if s.cfg.failureTrip <= 0 {
+	if s.failureTrip <= 0 {
 		return
 	}
 	s.mu.Lock()
@@ -115,15 +99,14 @@ func (s *breakerStore) recordSuccess(modelID string) {
 	}
 }
 
-// nextOpenDurationLocked computes the current cooldown given the
-// per-model `opens` count: the base duration doubled (opens-1) times,
-// capped at max, then symmetrically jittered. Caller must hold s.mu.
+// nextOpenDurationLocked: base * 2^(opens-1), capped at max, then
+// symmetrically jittered. Caller holds s.mu.
 func (s *breakerStore) nextOpenDurationLocked(opens int) time.Duration {
-	base := s.cfg.base
+	base := s.base
 	if base <= 0 {
 		return 0
 	}
-	maxOpen := s.cfg.max
+	maxOpen := s.max
 	if maxOpen <= 0 || maxOpen < base {
 		maxOpen = base
 	}
@@ -141,7 +124,7 @@ func (s *breakerStore) nextOpenDurationLocked(opens int) time.Duration {
 		}
 	}
 
-	jitter := s.cfg.jitter
+	jitter := s.jitter
 	if jitter <= 0 {
 		return cooldown
 	}

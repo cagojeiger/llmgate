@@ -1,5 +1,5 @@
-// Package router resolves model aliases, applies fallback policy, and tracks
-// per-process circuit-breaker state.
+// Package router resolves model aliases, applies fallback policy, and
+// tracks per-process circuit-breaker state.
 package router
 
 import (
@@ -16,12 +16,11 @@ import (
 	"llmgate/internal/provider"
 )
 
-// AdapterFactory builds one Provider for one catalog Model.
 type AdapterFactory func(*catalog.Model) (provider.Provider, error)
 
-// FallbackPolicy is env-driven router tuning. OnKinds controls which
-// provider errors can advance the chain. CircuitFailures or CircuitOpen <= 0
-// disables the breaker. CircuitJitter is symmetric, so 0.2 means +/-20%.
+// FallbackPolicy is env-driven router tuning. CircuitFailures or
+// CircuitOpen <= 0 disables the breaker; CircuitJitter is symmetric
+// (0.2 means ±20%).
 type FallbackPolicy struct {
 	OnKinds            []string
 	CircuitFailures    int
@@ -33,8 +32,6 @@ type FallbackPolicy struct {
 	StreamStartTimeout time.Duration
 }
 
-// RouteResult carries the chosen response or stream plus the attempts made
-// before success or final failure.
 type RouteResult struct {
 	Response   *provider.Response
 	Stream     provider.Stream
@@ -44,8 +41,8 @@ type RouteResult struct {
 	Attempts   []provider.Attempt
 }
 
-// Router dispatches requests to Providers and maintains breaker state.
-// Streaming fallback only applies before the first event reaches the client.
+// Router dispatches requests to Providers. Streaming fallback applies
+// only before the first event reaches the client.
 type Router struct {
 	byModel  map[string]provider.Provider
 	aliases  map[string][]string
@@ -106,23 +103,15 @@ func NewRouter(cat *catalog.Catalog, factories map[string]AdapterFactory, policy
 		internalPolicy.onKinds[provider.Kind(strings.ToLower(k))] = struct{}{}
 	}
 
-	breakers := newBreakerStore(breakerConfig{
-		failureTrip: policy.CircuitFailures,
-		base:        policy.CircuitOpen,
-		max:         policy.CircuitMaxOpen,
-		jitter:      policy.CircuitJitter,
-	}, log)
-
 	return &Router{
 		byModel:  byModel,
 		aliases:  aliases,
 		policy:   internalPolicy,
 		log:      log,
-		breakers: breakers,
+		breakers: newBreakerStore(policy.CircuitFailures, policy.CircuitOpen, policy.CircuitMaxOpen, policy.CircuitJitter, log),
 	}, nil
 }
 
-// Complete walks the fallback chain for a non-stream request.
 func (r *Router) Complete(ctx context.Context, req *provider.Request) (*RouteResult, error) {
 	result := &RouteResult{}
 	if req == nil {
@@ -204,8 +193,6 @@ func (r *Router) Complete(ctx context.Context, req *provider.Request) (*RouteRes
 	return result, lastErr
 }
 
-// CompleteStream walks the fallback chain until the first stream event is
-// received. After that, mid-stream errors are returned to the caller.
 func (r *Router) CompleteStream(ctx context.Context, req *provider.Request) (*RouteResult, error) {
 	result := &RouteResult{}
 	if req == nil {
@@ -230,7 +217,7 @@ func (r *Router) CompleteStream(ctx context.Context, req *provider.Request) (*Ro
 			return result, contextError(err)
 		}
 		attemptReq := requestForCandidate(req, candidate)
-		startCtx, cancelStart, stopStart, streamStartTimedOut := streamStartContext(routeCtx, r.policy.streamStartTimeout)
+		startCtx, cancelStart, stopStart, startTimedOut := streamStartContext(routeCtx, r.policy.streamStartTimeout)
 
 		att := provider.Attempt{
 			Vendor:    candidate.provider.Name(),
@@ -241,30 +228,11 @@ func (r *Router) CompleteStream(ctx context.Context, req *provider.Request) (*Ro
 		if err != nil {
 			stopStart()
 			cancelStart()
-			adoptAttemptError(&att, err)
-			if ctxErr := streamStartError(startCtx, routeCtx, streamStartTimedOut); ctxErr != nil {
-				adoptAttemptError(&att, ctxErr)
-				err = ctxErr
-			}
-			att.DurationMS = time.Since(att.StartedAt).Milliseconds()
-			result.Attempts = append(result.Attempts, att)
-			result.Vendor = candidate.provider.Name()
-			result.ModelUsed = candidate.model
+			err = startTimeoutErr(err, startCtx, routeCtx, startTimedOut)
 			lastErr = err
-
-			if !r.fallbackEligible(att.ErrorKind) {
-				cancelRoute()
-				return result, err
+			if bail := r.finalizeStreamFailure(result, candidate, &att, err, routeCtx, cancelRoute); bail != nil {
+				return result, bail
 			}
-			r.breakers.recordFailure(candidate.model)
-			if err := routeCtx.Err(); err != nil {
-				cancelRoute()
-				return result, contextError(err)
-			}
-			r.log.Info("stream fallback triggered",
-				slog.String("model", candidate.model),
-				slog.String("error_kind", string(att.ErrorKind)),
-			)
 			continue
 		}
 
@@ -273,60 +241,33 @@ func (r *Router) CompleteStream(ctx context.Context, req *provider.Request) (*Ro
 			_ = stream.Close()
 			stopStart()
 			cancelStart()
-			adoptAttemptError(&att, err)
-			if ctxErr := streamStartError(startCtx, routeCtx, streamStartTimedOut); ctxErr != nil {
-				adoptAttemptError(&att, ctxErr)
-				err = ctxErr
-			}
-			att.DurationMS = time.Since(att.StartedAt).Milliseconds()
-			result.Attempts = append(result.Attempts, att)
-			result.Vendor = candidate.provider.Name()
-			result.ModelUsed = candidate.model
+			err = startTimeoutErr(err, startCtx, routeCtx, startTimedOut)
 			lastErr = err
-
-			if !r.fallbackEligible(att.ErrorKind) {
-				cancelRoute()
-				return result, err
+			if bail := r.finalizeStreamFailure(result, candidate, &att, err, routeCtx, cancelRoute); bail != nil {
+				return result, bail
 			}
-			r.breakers.recordFailure(candidate.model)
-			if err := routeCtx.Err(); err != nil {
-				cancelRoute()
-				return result, contextError(err)
-			}
-			r.log.Info("stream fallback triggered",
-				slog.String("model", candidate.model),
-				slog.String("error_kind", string(att.ErrorKind)),
-			)
 			continue
 		}
-		if !stopStart() && streamStartTimedOut() {
+		// First event arrived, but the start timer fired anyway — the
+		// stream's underlying ctx is dead, treat as failure.
+		if !stopStart() && startTimedOut() {
 			_ = stream.Close()
 			cancelStart()
-			err := streamStartError(startCtx, routeCtx, streamStartTimedOut)
+			err = streamStartError(startCtx, routeCtx, startTimedOut)
 			if err == nil {
 				err = contextError(startCtx.Err())
 			}
-			adoptAttemptError(&att, err)
-			att.DurationMS = time.Since(att.StartedAt).Milliseconds()
-			result.Attempts = append(result.Attempts, att)
-			result.Vendor = candidate.provider.Name()
-			result.ModelUsed = candidate.model
 			lastErr = err
-			if !r.fallbackEligible(att.ErrorKind) {
-				cancelRoute()
-				return result, err
+			if bail := r.finalizeStreamFailure(result, candidate, &att, err, routeCtx, cancelRoute); bail != nil {
+				return result, bail
 			}
-			r.breakers.recordFailure(candidate.model)
 			continue
 		}
 
 		result.Attempts = append(result.Attempts, att)
 		streamCancel := cancelStart
 		if r.policy.requestTimeout > 0 {
-			streamCancel = func() {
-				cancelStart()
-				cancelRoute()
-			}
+			streamCancel = func() { cancelStart(); cancelRoute() }
 		}
 		result.Stream = &cancelOnCloseStream{Stream: stream, cancel: streamCancel}
 		result.FirstEvent = firstEvent
@@ -339,10 +280,45 @@ func (r *Router) CompleteStream(ctx context.Context, req *provider.Request) (*Ro
 	return result, lastErr
 }
 
-type streamStartStopper func() bool
-type streamStartTimedOut func() bool
+// finalizeStreamFailure stamps a failed stream attempt and decides
+// whether to fall back. Returns the error to surface (caller returns)
+// or nil (caller continues to next candidate).
+func (r *Router) finalizeStreamFailure(result *RouteResult, candidate routeCandidate, att *provider.Attempt, err error, routeCtx context.Context, cancelRoute context.CancelFunc) error {
+	adoptAttemptError(att, err)
+	att.DurationMS = time.Since(att.StartedAt).Milliseconds()
+	result.Attempts = append(result.Attempts, *att)
+	result.Vendor = candidate.provider.Name()
+	result.ModelUsed = candidate.model
 
-func streamStartContext(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc, streamStartStopper, streamStartTimedOut) {
+	if !r.fallbackEligible(att.ErrorKind) {
+		cancelRoute()
+		return err
+	}
+	r.breakers.recordFailure(candidate.model)
+	if rcErr := routeCtx.Err(); rcErr != nil {
+		cancelRoute()
+		return contextError(rcErr)
+	}
+	r.log.Info("stream fallback triggered",
+		slog.String("model", candidate.model),
+		slog.String("error_kind", string(att.ErrorKind)),
+	)
+	return nil
+}
+
+// startTimeoutErr returns the disambiguated start-phase error, or the
+// original adapter error when neither route ctx nor start timer fired.
+func startTimeoutErr(orig error, startCtx, routeCtx context.Context, timedOut func() bool) error {
+	if ctxErr := streamStartError(startCtx, routeCtx, timedOut); ctxErr != nil {
+		return ctxErr
+	}
+	return orig
+}
+
+// streamStartContext bounds CompleteStream + first-event read with one
+// timer. After both succeed the caller stops the timer (without
+// cancelling ctx) so the returned stream's underlying ctx survives.
+func streamStartContext(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc, func() bool, func() bool) {
 	ctx, cancel := context.WithCancel(parent)
 	if timeout <= 0 {
 		return ctx, cancel, func() bool { return true }, func() bool { return false }
@@ -355,7 +331,9 @@ func streamStartContext(parent context.Context, timeout time.Duration) (context.
 	return ctx, cancel, timer.Stop, timedOut.Load
 }
 
-func streamStartError(startCtx, routeCtx context.Context, timedOut streamStartTimedOut) error {
+// streamStartError disambiguates a pre-first-event failure: route-level
+// cancellation > start-timeout > nil (caller falls back to original err).
+func streamStartError(startCtx, routeCtx context.Context, timedOut func() bool) error {
 	if routeErr := routeCtx.Err(); routeErr != nil {
 		return contextError(routeErr)
 	}
@@ -390,6 +368,8 @@ func recvFirstEvent(ctx context.Context, stream provider.Stream) (*provider.Even
 	}
 }
 
+// cancelOnCloseStream defers cancellation of the route-level ctx until
+// the caller closes the stream.
 type cancelOnCloseStream struct {
 	provider.Stream
 	cancel context.CancelFunc

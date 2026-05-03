@@ -445,6 +445,9 @@ func toOpenAIResponse(in *anthropicResponse) (*provider.Response, error) {
 			} else {
 				reasoning.WriteString(block.Text)
 			}
+		case "tool_use":
+			// handled separately via extractToolCalls; do not feed
+			// the tool_use block's empty Text into the text builder.
 		default:
 			text.WriteString(block.Text)
 		}
@@ -456,21 +459,68 @@ func toOpenAIResponse(in *anthropicResponse) (*provider.Response, error) {
 	}
 	usage := anthropicUsageToOpenAI(in.Usage)
 
+	msg := provider.Message{
+		Role:             "assistant",
+		Content:          text.String(),
+		ReasoningContent: reasoning.String(),
+	}
+	toolCalls, err := extractToolCalls(in.Content)
+	if err != nil {
+		return nil, err
+	}
+	if len(toolCalls) > 0 {
+		raw, err := json.Marshal(toolCalls)
+		if err != nil {
+			return nil, err
+		}
+		msg.Extra = map[string]json.RawMessage{"tool_calls": raw}
+	}
+
 	return &provider.Response{
 		ID:     in.ID,
 		Object: "chat.completion",
 		Model:  in.Model,
 		Choices: []provider.Choice{{
-			Index: 0,
-			Message: provider.Message{
-				Role:             "assistant",
-				Content:          text.String(),
-				ReasoningContent: reasoning.String(),
-			},
+			Index:        0,
+			Message:      msg,
 			FinishReason: finishReason,
 		}},
 		Usage: usage,
 	}, nil
+}
+
+// extractToolCalls maps Anthropic tool_use content blocks to the OpenAI
+// tool_calls wire shape. Each call's Arguments is re-serialized to a
+// canonical JSON string (OpenAI requires arguments as a string, not an
+// object). Empty / missing input collapses to "{}" so downstream parsers
+// always see a valid object literal.
+func extractToolCalls(blocks []anthropicContent) ([]map[string]any, error) {
+	var out []map[string]any
+	for _, b := range blocks {
+		if b.Type != "tool_use" || b.Name == "" {
+			continue
+		}
+		arguments := "{}"
+		if len(b.Input) > 0 {
+			var parsed any
+			if err := json.Unmarshal(b.Input, &parsed); err == nil {
+				if canonical, err := json.Marshal(parsed); err == nil {
+					arguments = string(canonical)
+				}
+			} else if trimmed := strings.TrimSpace(string(b.Input)); trimmed != "" {
+				arguments = trimmed
+			}
+		}
+		out = append(out, map[string]any{
+			"id":   b.ID,
+			"type": "function",
+			"function": map[string]any{
+				"name":      b.Name,
+				"arguments": arguments,
+			},
+		})
+	}
+	return out, nil
 }
 
 // mapStopReason translates Anthropic's stop_reason vocabulary into the

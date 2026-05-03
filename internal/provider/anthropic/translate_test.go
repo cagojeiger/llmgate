@@ -282,6 +282,71 @@ func TestToAnthropicRequest_AssistantToolCallsWithEmptyArgs(t *testing.T) {
 	}
 }
 
+func TestToAnthropicRequest_ToolCallArgs_TrailingContentRejected(t *testing.T) {
+	// Two flavors of trailing content: a second valid JSON value (caught
+	// by the explicit "exactly one JSON object" guard) and unparseable
+	// garbage (caught by the second Decode bubbling up the parse error).
+	// Either way, silent truncation must not happen.
+	cases := map[string]struct {
+		args    string
+		wantSub string
+	}{
+		"second-object": {`{}{}`, "exactly one JSON object"},
+		"garbage":       {`{}garbage`, "invalid character"},
+	}
+	for label, tc := range cases {
+		t.Run(label, func(t *testing.T) {
+			_, err := toAnthropicRequest(&provider.Request{
+				Model: "claude-x",
+				Messages: []provider.Message{
+					{Role: "user", Content: "go"},
+					{
+						Role: "assistant",
+						Extra: map[string]json.RawMessage{
+							"tool_calls": json.RawMessage(`[{"id":"c","type":"function","function":{"name":"f","arguments":` + jsonString(tc.args) + `}}]`),
+						},
+					},
+				},
+			}, 32, false)
+			if err == nil || !strings.Contains(err.Error(), tc.wantSub) {
+				t.Fatalf("error = %v, want substring %q", err, tc.wantSub)
+			}
+		})
+	}
+}
+
+// jsonString escapes a Go string into a JSON string literal so test
+// fixtures can embed payloads containing braces without manual escaping.
+func jsonString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
+func TestToAnthropicRequest_ToolCallArgs_LargeIntegerPreserved(t *testing.T) {
+	// 1234567890123456789 exceeds float64 precision; default
+	// json.Unmarshal would round-trip it through float64 and emit
+	// 1.234567890123457e+18 on re-marshal. UseNumber must keep the
+	// literal intact on the Anthropic-wire body.
+	body, err := toAnthropicRequest(&provider.Request{
+		Model: "claude-x",
+		Messages: []provider.Message{
+			{Role: "user", Content: "go"},
+			{
+				Role: "assistant",
+				Extra: map[string]json.RawMessage{
+					"tool_calls": json.RawMessage(`[{"id":"c","type":"function","function":{"name":"f","arguments":"{\"id\":1234567890123456789}"}}]`),
+				},
+			},
+		},
+	}, 32, false)
+	if err != nil {
+		t.Fatalf("toAnthropicRequest: %v", err)
+	}
+	if !strings.Contains(string(body), "1234567890123456789") {
+		t.Fatalf("wire body lost integer precision: %s", body)
+	}
+}
+
 func TestToAnthropicRequest_ToolMessage(t *testing.T) {
 	got := decodeRequestBody(t, &provider.Request{
 		Model: "claude-x",

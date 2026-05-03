@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"llmgate/internal/provider"
@@ -283,13 +284,31 @@ func extractStringField(extra map[string]json.RawMessage, key string) (string, e
 // serialized) back into a Go value Anthropic can re-marshal into the
 // tool_use input field. Empty / whitespace-only arguments collapse to an
 // empty object so the tool_use block is well-formed.
+//
+// Two protections beyond plain json.Unmarshal:
+//
+//   - UseNumber preserves large integers (e.g. unix-ms timestamps,
+//     counters) which would otherwise round-trip through float64 and
+//     silently lose precision when re-marshaled to Anthropic.
+//   - Trailing content after the first JSON value is rejected — caller
+//     sent something like `{"k":1}garbage`, almost always a serializer
+//     bug on their side; failing loudly beats silently dropping the
+//     trailing bytes (which is what json.Unmarshal would do).
 func parseToolCallArguments(args string) (any, error) {
 	trimmed := strings.TrimSpace(args)
 	if trimmed == "" {
 		return map[string]any{}, nil
 	}
+	decoder := json.NewDecoder(strings.NewReader(trimmed))
+	decoder.UseNumber()
 	var parsed any
-	if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
+	if err := decoder.Decode(&parsed); err != nil {
+		return nil, err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err == nil {
+		return nil, errors.New("tool arguments must contain exactly one JSON object")
+	} else if !errors.Is(err, io.EOF) {
 		return nil, err
 	}
 	if _, ok := parsed.(map[string]any); !ok {

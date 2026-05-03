@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"llmgate/internal/provider"
-	"llmgate/internal/provider/httpx"
+	"llmgate/internal/httpx"
 )
 
 // classify maps HTTP status + upstream error envelope into a typed

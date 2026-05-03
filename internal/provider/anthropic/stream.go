@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"llmgate/internal/provider"
-	"llmgate/internal/provider/httpx"
+	"llmgate/internal/httpx"
 )
 
 func (c *Client) CompleteStream(ctx context.Context, req *provider.Request) (provider.Stream, error) {

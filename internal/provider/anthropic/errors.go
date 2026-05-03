@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"llmgate/internal/provider"
-	"llmgate/internal/provider/httpx"
+	"llmgate/internal/httpx"
 )
 
 func (c *Client) classify(status int, body []byte, retryAfterHeader string) *provider.Error {

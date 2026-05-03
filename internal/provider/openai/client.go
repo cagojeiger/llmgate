@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	"llmgate/internal/provider/httpx"
+	"llmgate/internal/httpx"
 )
 
 const defaultUserAgent = "llmgate/0.1"

@@ -6,7 +6,7 @@ import (
 	"io"
 
 	"llmgate/internal/provider"
-	"llmgate/internal/provider/httpx"
+	"llmgate/internal/httpx"
 )
 
 func (c *Client) Complete(ctx context.Context, req *provider.Request) (*provider.Response, error) {

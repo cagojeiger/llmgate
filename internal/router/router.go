@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math/rand"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -48,30 +47,18 @@ type RouteResult struct {
 // Router dispatches requests to Providers and maintains breaker state.
 // Streaming fallback only applies before the first event reaches the client.
 type Router struct {
-	byModel map[string]provider.Provider
-	aliases map[string][]string
-	policy  fallbackPolicy
-	log     *slog.Logger
-
-	bMu      sync.Mutex
-	breakers map[string]*breakerState
+	byModel  map[string]provider.Provider
+	aliases  map[string][]string
+	policy   fallbackPolicy
+	log      *slog.Logger
+	breakers *breakerStore
 }
 
 type fallbackPolicy struct {
 	onKinds            map[provider.Kind]struct{}
-	circuitFailures    int
-	circuitOpen        time.Duration
-	circuitMaxOpen     time.Duration
-	circuitJitter      float64
 	requestTimeout     time.Duration
 	completeTimeout    time.Duration
 	streamStartTimeout time.Duration
-}
-
-type breakerState struct {
-	failures  int
-	openUntil time.Time
-	opens     int
 }
 
 type routeCandidate struct {
@@ -111,10 +98,6 @@ func NewRouter(cat *catalog.Catalog, factories map[string]AdapterFactory, policy
 
 	internalPolicy := fallbackPolicy{
 		onKinds:            make(map[provider.Kind]struct{}, len(policy.OnKinds)),
-		circuitFailures:    policy.CircuitFailures,
-		circuitOpen:        policy.CircuitOpen,
-		circuitMaxOpen:     policy.CircuitMaxOpen,
-		circuitJitter:      policy.CircuitJitter,
 		requestTimeout:     policy.RequestTimeout,
 		completeTimeout:    policy.CompleteTimeout,
 		streamStartTimeout: policy.StreamStartTimeout,
@@ -123,12 +106,19 @@ func NewRouter(cat *catalog.Catalog, factories map[string]AdapterFactory, policy
 		internalPolicy.onKinds[provider.Kind(strings.ToLower(k))] = struct{}{}
 	}
 
+	breakers := newBreakerStore(breakerConfig{
+		failureTrip: policy.CircuitFailures,
+		base:        policy.CircuitOpen,
+		max:         policy.CircuitMaxOpen,
+		jitter:      policy.CircuitJitter,
+	}, log)
+
 	return &Router{
 		byModel:  byModel,
 		aliases:  aliases,
 		policy:   internalPolicy,
 		log:      log,
-		breakers: make(map[string]*breakerState),
+		breakers: breakers,
 	}, nil
 }
 
@@ -188,7 +178,7 @@ func (r *Router) Complete(ctx context.Context, req *provider.Request) (*RouteRes
 			result.Response = resp
 			result.Vendor = candidate.provider.Name()
 			result.ModelUsed = candidate.model
-			r.recordSuccess(candidate.model)
+			r.breakers.recordSuccess(candidate.model)
 			return result, nil
 		}
 
@@ -201,7 +191,7 @@ func (r *Router) Complete(ctx context.Context, req *provider.Request) (*RouteRes
 		if !r.fallbackEligible(att.ErrorKind) {
 			return result, err
 		}
-		r.recordFailure(candidate.model)
+		r.breakers.recordFailure(candidate.model)
 		if err := routeCtx.Err(); err != nil {
 			return result, contextError(err)
 		}
@@ -266,7 +256,7 @@ func (r *Router) CompleteStream(ctx context.Context, req *provider.Request) (*Ro
 				cancelRoute()
 				return result, err
 			}
-			r.recordFailure(candidate.model)
+			r.breakers.recordFailure(candidate.model)
 			if err := routeCtx.Err(); err != nil {
 				cancelRoute()
 				return result, contextError(err)
@@ -298,7 +288,7 @@ func (r *Router) CompleteStream(ctx context.Context, req *provider.Request) (*Ro
 				cancelRoute()
 				return result, err
 			}
-			r.recordFailure(candidate.model)
+			r.breakers.recordFailure(candidate.model)
 			if err := routeCtx.Err(); err != nil {
 				cancelRoute()
 				return result, contextError(err)
@@ -326,7 +316,7 @@ func (r *Router) CompleteStream(ctx context.Context, req *provider.Request) (*Ro
 				cancelRoute()
 				return result, err
 			}
-			r.recordFailure(candidate.model)
+			r.breakers.recordFailure(candidate.model)
 			continue
 		}
 
@@ -342,7 +332,7 @@ func (r *Router) CompleteStream(ctx context.Context, req *provider.Request) (*Ro
 		result.FirstEvent = firstEvent
 		result.Vendor = candidate.provider.Name()
 		result.ModelUsed = candidate.model
-		r.recordSuccess(candidate.model)
+		r.breakers.recordSuccess(candidate.model)
 		return result, nil
 	}
 	cancelRoute()
@@ -462,7 +452,7 @@ func (r *Router) candidates(model string) ([]routeCandidate, error) {
 		if !ok {
 			continue
 		}
-		if r.isCircuitOpen(modelID) {
+		if r.breakers.isOpen(modelID) {
 			r.log.Debug("skip model: circuit open", slog.String("model", modelID))
 			continue
 		}
@@ -495,104 +485,4 @@ func (r *Router) fallbackEligible(k provider.Kind) bool {
 	}
 	_, ok := r.policy.onKinds[k]
 	return ok
-}
-
-func (r *Router) isCircuitOpen(modelID string) bool {
-	if r.policy.circuitOpen <= 0 || r.policy.circuitFailures <= 0 {
-		return false
-	}
-	r.bMu.Lock()
-	defer r.bMu.Unlock()
-	b, ok := r.breakers[modelID]
-	if !ok {
-		return false
-	}
-	if !b.openUntil.IsZero() && time.Now().Before(b.openUntil) {
-		return true
-	}
-	// On expiry, close the circuit but keep opens until a success so repeated
-	// outages continue exponential backoff.
-	if !b.openUntil.IsZero() {
-		b.openUntil = time.Time{}
-		b.failures = 0
-	}
-	return false
-}
-
-func (r *Router) recordFailure(modelID string) {
-	if r.policy.circuitFailures <= 0 || r.policy.circuitOpen <= 0 {
-		return
-	}
-	r.bMu.Lock()
-	defer r.bMu.Unlock()
-	b, ok := r.breakers[modelID]
-	if !ok {
-		b = &breakerState{}
-		r.breakers[modelID] = b
-	}
-	b.failures++
-	if b.failures >= r.policy.circuitFailures {
-		b.opens++
-		cooldown := r.nextOpenDurationLocked(b.opens)
-		b.openUntil = time.Now().Add(cooldown)
-		r.log.Warn("circuit opened",
-			slog.String("model", modelID),
-			slog.Int("opens", b.opens),
-			slog.Duration("cooldown", cooldown),
-		)
-	}
-}
-
-func (r *Router) recordSuccess(modelID string) {
-	if r.policy.circuitFailures <= 0 {
-		return
-	}
-	r.bMu.Lock()
-	defer r.bMu.Unlock()
-	if b, ok := r.breakers[modelID]; ok {
-		b.failures = 0
-		b.openUntil = time.Time{}
-		b.opens = 0
-	}
-}
-
-func (r *Router) nextOpenDurationLocked(opens int) time.Duration {
-	base := r.policy.circuitOpen
-	if base <= 0 {
-		return 0
-	}
-	maxOpen := r.policy.circuitMaxOpen
-	if maxOpen <= 0 || maxOpen < base {
-		maxOpen = base
-	}
-
-	cooldown := base
-	for i := 1; i < opens; i++ {
-		if cooldown >= maxOpen/2 {
-			cooldown = maxOpen
-			break
-		}
-		cooldown *= 2
-		if cooldown > maxOpen {
-			cooldown = maxOpen
-			break
-		}
-	}
-
-	jitter := r.policy.circuitJitter
-	if jitter <= 0 {
-		return cooldown
-	}
-	if jitter > 1 {
-		jitter = 1
-	}
-	scale := 1 - jitter + rand.Float64()*(2*jitter)
-	jittered := time.Duration(float64(cooldown) * scale)
-	if jittered > maxOpen {
-		return maxOpen
-	}
-	if jittered < 0 {
-		return 0
-	}
-	return jittered
 }

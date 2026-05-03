@@ -321,7 +321,13 @@ func TestCompleteStream_StreamErrorMidFlight(t *testing.T) {
 	}
 }
 
-func TestCompleteStream_Truncated(t *testing.T) {
+// TestCompleteStream_NaturalEOFWithoutDone exercises the lenient
+// terminator policy: an upstream that delivers events but ends the
+// stream without the OpenAI `[DONE]` sentinel produces a clean io.EOF
+// rather than a synthesized "missing [DONE]" error. This keeps the
+// SSE reader interoperable with vendors (Anthropic) that don't emit
+// `[DONE]` at all.
+func TestCompleteStream_NaturalEOFWithoutDone(t *testing.T) {
 	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		writeSSEChunk(t, w, `{"choices":[{"index":0,"delta":{"content":"a"}}]}`)
@@ -341,13 +347,8 @@ func TestCompleteStream_Truncated(t *testing.T) {
 	if _, err := stream.Recv(); err != nil {
 		t.Fatalf("first Recv() error = %v", err)
 	}
-	_, err = stream.Recv()
-	perr := requireProviderError(t, err)
-	if perr.Kind != provider.KindUpstream {
-		t.Fatalf("Kind = %q, want %q", perr.Kind, provider.KindUpstream)
-	}
-	if !strings.Contains(perr.Message, "stream ended without [DONE]") {
-		t.Fatalf("Message = %q, want truncated stream message", perr.Message)
+	if _, err := stream.Recv(); !errors.Is(err, io.EOF) {
+		t.Fatalf("second Recv() error = %v, want io.EOF (lenient natural EOF)", err)
 	}
 }
 

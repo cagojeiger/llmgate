@@ -42,14 +42,14 @@ func (c *Client) CompleteStream(ctx context.Context, req *provider.Request) (pro
 
 	return &stream{
 		body:         resp.Body,
-		reader:       provider.NewSSEReader(resp.Body),
+		reader:       upstream.NewSSEReader(resp.Body),
 		providerName: c.cfg.Name,
 	}, nil
 }
 
 type stream struct {
 	body         io.Closer
-	reader       *provider.SSEReader
+	reader       *upstream.SSEReader
 	providerName string
 	closeOnce    sync.Once
 	closeErr     error

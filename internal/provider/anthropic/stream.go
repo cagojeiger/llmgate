@@ -1,11 +1,10 @@
 package anthropic
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -42,18 +41,16 @@ func (c *Client) CompleteStream(ctx context.Context, req *provider.Request) (pro
 		return nil, c.classify(resp.StatusCode, raw, resp.Header.Get("Retry-After"))
 	}
 
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 	return &stream{
 		body:         resp.Body,
-		scanner:      scanner,
+		reader:       upstream.NewSSEReader(resp.Body),
 		providerName: c.cfg.Name,
 	}, nil
 }
 
 type stream struct {
 	body           io.ReadCloser
-	scanner        *bufio.Scanner
+	reader         *upstream.SSEReader
 	closed         atomic.Bool
 	closeOnce      sync.Once
 	closeErr       error
@@ -101,13 +98,16 @@ func (s *stream) Recv() (*provider.Event, error) {
 		return nil, io.EOF
 	}
 
-	for s.scanner.Scan() {
-		payload := dataPayload(s.scanner.Text())
+	for {
+		payload, err := s.reader.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
 		if len(payload) == 0 {
 			continue
-		}
-		if string(payload) == "[DONE]" {
-			break
 		}
 
 		event, err := s.decodePayload(payload)
@@ -260,18 +260,12 @@ func (s *stream) handleMessageStop() *provider.Event {
 	return s.buildFinishEvent(s.pendingFinish)
 }
 
-// finalize handles the post-loop state. Scanner errors win. If we
-// have a buffered finish but never saw message_stop, surface it as the
-// final chunk. Otherwise treat the abrupt end as an upstream fault.
+// finalize handles the post-loop state. Transport errors are already
+// bubbled up by the SSE reader during the loop. If we have a buffered
+// finish but never saw message_stop, surface it as the final chunk —
+// otherwise treat the abrupt clean-EOF as an upstream fault (Anthropic
+// must terminate with message_stop).
 func (s *stream) finalize() (*provider.Event, error) {
-	if err := s.scanner.Err(); err != nil {
-		return nil, &provider.Error{
-			Kind:     provider.KindUpstream,
-			Provider: s.providerName,
-			Message:  err.Error(),
-			Cause:    err,
-		}
-	}
 	if s.pendingFinish != nil && !s.pendingEmitted {
 		return s.emitFinish(), nil
 	}
@@ -354,16 +348,6 @@ type anthropicStreamEvent struct {
 	Usage anthropicUsage `json:"usage"`
 }
 
-func dataPayload(line string) []byte {
-	if !strings.HasPrefix(line, "data:") {
-		return nil
-	}
-	payload := strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " ")
-	if payload == "" {
-		return nil
-	}
-	return []byte(payload)
-}
 
 func parseMaybeStreamError(payload []byte, providerName string) *provider.Error {
 	message, _ := envelopeMessage(payload)

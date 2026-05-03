@@ -40,8 +40,14 @@ func newBreakerStore(failureTrip int, base, max time.Duration, jitter float64, l
 	}
 }
 
+// disabled reports whether breaker logic is turned off by config. Used as
+// a single source of truth so the three public methods stay in lockstep.
+func (s *breakerStore) disabled() bool {
+	return s.base <= 0 || s.failureTrip <= 0
+}
+
 func (s *breakerStore) isOpen(modelID string) bool {
-	if s.base <= 0 || s.failureTrip <= 0 {
+	if s.disabled() {
 		return false
 	}
 	s.mu.Lock()
@@ -63,7 +69,7 @@ func (s *breakerStore) isOpen(modelID string) bool {
 }
 
 func (s *breakerStore) recordFailure(modelID string) {
-	if s.failureTrip <= 0 || s.base <= 0 {
+	if s.disabled() {
 		return
 	}
 	s.mu.Lock()
@@ -87,7 +93,9 @@ func (s *breakerStore) recordFailure(modelID string) {
 }
 
 func (s *breakerStore) recordSuccess(modelID string) {
-	if s.failureTrip <= 0 {
+	// base<=0 is also covered here, though states would already be empty
+	// (only recordFailure populates s.states, and it bails on disabled()).
+	if s.disabled() {
 		return
 	}
 	s.mu.Lock()

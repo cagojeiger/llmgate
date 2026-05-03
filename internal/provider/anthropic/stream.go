@@ -339,11 +339,10 @@ type anthropicStreamEvent struct {
 	Type    string             `json:"type"`
 	Message *anthropicResponse `json:"message,omitempty"`
 	Delta   struct {
-		Type         string  `json:"type"`
-		Text         string  `json:"text,omitempty"`
-		Thinking     string  `json:"thinking,omitempty"`
-		StopReason   *string `json:"stop_reason"`
-		StopSequence *string `json:"stop_sequence"`
+		Type       string  `json:"type"`
+		Text       string  `json:"text,omitempty"`
+		Thinking   string  `json:"thinking,omitempty"`
+		StopReason *string `json:"stop_reason"`
 	} `json:"delta"`
 	Usage anthropicUsage `json:"usage"`
 }

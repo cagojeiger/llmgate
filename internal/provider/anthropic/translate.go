@@ -25,14 +25,13 @@ type anthropicMessage struct {
 }
 
 type anthropicResponse struct {
-	ID           string             `json:"id"`
-	Type         string             `json:"type"`
-	Role         string             `json:"role"`
-	Model        string             `json:"model"`
-	Content      []anthropicContent `json:"content"`
-	StopReason   *string            `json:"stop_reason"`
-	StopSequence *string            `json:"stop_sequence"`
-	Usage        anthropicUsage     `json:"usage"`
+	ID         string             `json:"id"`
+	Type       string             `json:"type"`
+	Role       string             `json:"role"`
+	Model      string             `json:"model"`
+	Content    []anthropicContent `json:"content"`
+	StopReason *string            `json:"stop_reason"`
+	Usage      anthropicUsage     `json:"usage"`
 }
 
 type anthropicContent struct {

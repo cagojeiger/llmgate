@@ -32,13 +32,13 @@ func (c *Client) CompleteStream(ctx context.Context, req *provider.Request) (pro
 		return nil, c.classify(statusErr.Status, statusErr.Body, statusErr.RetryAfter)
 	}
 
-	return &stream{
+	return provider.ValidateFirstEvent(ctx, &stream{
 		StreamBase: provider.StreamBase{
 			Body:         resp.Body,
 			ProviderName: c.cfg.Name,
 		},
 		reader: upstream.NewSSEReader(resp.Body),
-	}, nil
+	})
 }
 
 type stream struct {

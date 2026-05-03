@@ -253,17 +253,8 @@ func requestForCandidate(req *provider.Request, candidate routeCandidate) provid
 }
 
 func adoptAttemptError(att *provider.Attempt, err error) {
-	var perr *provider.Error
-	if errors.As(err, &perr) {
-		att.ErrorKind = perr.Kind
-		att.StatusCode = perr.StatusCode
-		return
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		att.ErrorKind = provider.KindTimeout
-		return
-	}
-	att.ErrorKind = provider.KindUnknown
+	att.ErrorKind = provider.KindOf(err)
+	att.StatusCode = provider.StatusCodeOf(err)
 }
 
 func contextError(err error) error {

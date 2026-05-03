@@ -321,6 +321,32 @@ func TestCompleteStream_StreamErrorMidFlight(t *testing.T) {
 	}
 }
 
+func TestParseStreamError_UsesOpenAIKindClassifier(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want provider.Kind
+	}{
+		{"auth type", `{"error":{"message":"bad key","type":"authentication_error"}}`, provider.KindAuth},
+		{"rate type", `{"error":{"message":"slow","type":"rate_limit_error"}}`, provider.KindRateLimit},
+		{"context code", `{"error":{"message":"too long","type":"invalid_request_error","code":"context_length_exceeded"}}`, provider.KindContextLength},
+		{"content filter code", `{"error":{"message":"blocked","type":"invalid_request_error","code":"content_filter"}}`, provider.KindContentFilter},
+		{"invalid type", `{"error":{"message":"bad field","type":"invalid_request_error"}}`, provider.KindBadRequest},
+		{"unknown stream envelope", `{"error":{"message":"boom","type":"future_unknown"}}`, provider.KindUpstream},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			perr := parseStreamError([]byte(tc.body), "opencode")
+			if perr == nil {
+				t.Fatal("parseStreamError returned nil")
+			}
+			if perr.Kind != tc.want {
+				t.Fatalf("Kind = %q, want %q", perr.Kind, tc.want)
+			}
+		})
+	}
+}
+
 // TestCompleteStream_NaturalEOFWithoutDone exercises the lenient
 // terminator policy: an upstream that delivers events but ends the
 // stream without the OpenAI `[DONE]` sentinel produces a clean io.EOF

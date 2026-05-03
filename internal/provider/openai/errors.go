@@ -17,7 +17,8 @@ import (
 // `content_filter` — OpenAI gateways encode policy blocks via the
 // envelope, not via a dedicated status code).
 func (c *Client) classify(status int, body []byte, retryAfterHeader string) *provider.Error {
-	message, errorType, errorCode := envelopeMessage(body)
+	env := parseErrorEnvelope(body)
+	message := env.Message
 	if message == "" {
 		if len(body) > 0 {
 			message = fmt.Sprintf("upstream returned status %d: %s", status, string(upstream.FirstBytes(body)))
@@ -26,34 +27,10 @@ func (c *Client) classify(status int, body []byte, retryAfterHeader string) *pro
 		}
 	}
 
-	kind := provider.KindUnknown
-	switch {
-	case status == http.StatusUnauthorized, status == http.StatusForbidden:
-		kind = provider.KindAuth
-	case status == http.StatusNotFound:
-		kind = provider.KindBadRequest
-	case status == http.StatusRequestTimeout:
-		kind = provider.KindTimeout
-	case status == http.StatusBadRequest,
-		status == http.StatusUnprocessableEntity,
-		status == http.StatusRequestEntityTooLarge:
-		kind = provider.KindBadRequest
-		lower := strings.ToLower(message)
-		if strings.Contains(lower, "token limit") || strings.Contains(lower, "context length") {
-			kind = provider.KindContextLength
-		}
-	case status == http.StatusTooManyRequests:
-		kind = provider.KindRateLimit
-	case status == 529, status >= 500 && status <= 599:
-		kind = provider.KindUpstream
-	}
-
-	if isContentFilter(errorType, errorCode) {
-		kind = provider.KindContentFilter
-	}
+	env.Message = message
 
 	return &provider.Error{
-		Kind:       kind,
+		Kind:       kindFromOpenAIError(status, env),
 		Provider:   c.cfg.Name,
 		Message:    message,
 		StatusCode: status,
@@ -62,11 +39,16 @@ func (c *Client) classify(status int, body []byte, retryAfterHeader string) *pro
 	}
 }
 
-// envelopeMessage returns the OpenAI-style error envelope's message,
-// type, and code (best-effort). `code` is decoded from RawMessage so a
-// non-string value (some gateways send int / null) doesn't fail the
-// whole unmarshal.
-func envelopeMessage(body []byte) (message, errorType, errorCode string) {
+type errorEnvelope struct {
+	Message string
+	Type    string
+	Code    string
+}
+
+// parseErrorEnvelope returns the OpenAI-style error envelope's message,
+// type, and code (best-effort). Code is decoded from RawMessage so a
+// non-string value (some gateways send int/null) does not fail parsing.
+func parseErrorEnvelope(body []byte) errorEnvelope {
 	var env struct {
 		Error struct {
 			Message string          `json:"message"`
@@ -75,17 +57,56 @@ func envelopeMessage(body []byte) (message, errorType, errorCode string) {
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(body, &env); err != nil {
-		return "", "", ""
+		return errorEnvelope{}
+	}
+	out := errorEnvelope{
+		Message: env.Error.Message,
+		Type:    env.Error.Type,
 	}
 	if len(env.Error.Code) > 0 {
-		_ = json.Unmarshal(env.Error.Code, &errorCode)
+		_ = json.Unmarshal(env.Error.Code, &out.Code)
 	}
-	return env.Error.Message, env.Error.Type, errorCode
+	return out
 }
 
-func isContentFilter(errorType, errorCode string) bool {
-	return strings.EqualFold(errorType, "content_filter") ||
-		strings.EqualFold(errorCode, "content_filter")
+func kindFromOpenAIError(status int, env errorEnvelope) provider.Kind {
+	t := strings.ToLower(env.Type)
+	c := strings.ToLower(env.Code)
+	m := strings.ToLower(env.Message)
+
+	switch {
+	case strings.EqualFold(env.Type, "content_filter") || strings.EqualFold(env.Code, "content_filter"):
+		return provider.KindContentFilter
+	case strings.Contains(t, "auth"):
+		return provider.KindAuth
+	case strings.Contains(t, "rate"):
+		return provider.KindRateLimit
+	case strings.Contains(t, "context") || strings.Contains(c, "context") || strings.Contains(m, "token limit") || strings.Contains(m, "context length"):
+		return provider.KindContextLength
+	case strings.Contains(t, "invalid"):
+		return provider.KindBadRequest
+	}
+
+	switch {
+	case status == 0:
+		return provider.KindUpstream
+	case status == http.StatusUnauthorized, status == http.StatusForbidden:
+		return provider.KindAuth
+	case status == http.StatusNotFound:
+		return provider.KindBadRequest
+	case status == http.StatusRequestTimeout:
+		return provider.KindTimeout
+	case status == http.StatusBadRequest,
+		status == http.StatusUnprocessableEntity,
+		status == http.StatusRequestEntityTooLarge:
+		return provider.KindBadRequest
+	case status == http.StatusTooManyRequests:
+		return provider.KindRateLimit
+	case status == 529, status >= 500 && status <= 599:
+		return provider.KindUpstream
+	default:
+		return provider.KindUnknown
+	}
 }
 
 func (c *Client) lowLevelError(message string, cause error) *provider.Error {

@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -109,10 +108,7 @@ func adoptRoute(rec *audit.Record, result *router.RouteResult) {
 
 // adoptError populates rec.ErrorKind and rec.StatusCode from err.
 func adoptError(rec *audit.Record, err error) {
-	var perr *provider.Error
-	if errors.As(err, &perr) {
-		rec.ErrorKind = perr.Kind
-	}
+	rec.ErrorKind = provider.KindOf(err)
 	rec.StatusCode = errStatus(err)
 }
 

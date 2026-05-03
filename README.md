@@ -18,7 +18,7 @@ internal/provider/            Provider interface + OpenAI-shaped types
 internal/provider/openai/     OpenAI-protocol adapter
 internal/provider/anthropic/  Anthropic-protocol adapter (response normalized to OpenAI wire)
 internal/router/              alias→chain dispatch + fallback + circuit breaker
-internal/server/              chi handler, sseWriter, error envelope, middleware
+internal/server/              chi handler, streamResponder, sseWriter, error envelope, middleware
 internal/audit/               per-request audit Record + slog recorder
 docs/adr/                     accepted decisions
 ```
@@ -62,9 +62,10 @@ an external directory instead. The directory must contain `models/` (one
 yaml per model) and may contain `aliases/`. Yaml is parsed strictly —
 unknown fields (typos, stale `type:` / `specs:` / `notes:` blocks) fail
 boot. Use `models/example.yaml.example` and `aliases/example.yaml.example`
-as templates. Router policy (`LLMGATE_FALLBACK_ON`,
-`LLMGATE_CIRCUIT_FAILURES`, `LLMGATE_CIRCUIT_OPEN_DURATION`) lives in env,
-not yaml. Hot-reload is not supported — change the catalog and restart.
+as templates. Router/server policy (`LLMGATE_FALLBACK_ON`, circuit breaker
+settings, `LLMGATE_REQUEST_TIMEOUT`, `LLMGATE_COMPLETE_TIMEOUT`,
+`LLMGATE_STREAM_IDLE_TIMEOUT`) lives in env, not yaml. Hot-reload is not
+supported — change the catalog and restart.
 
 ## Run in a container
 

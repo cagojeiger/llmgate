@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -53,6 +54,54 @@ func (e *Error) Is(target error) bool {
 		return false
 	}
 	return e.Kind == t.Kind
+}
+
+// KindOf extracts the gateway error kind from err. It is the common
+// read-side helper for router policy, server presentation, and audit
+// stamping so each layer does not repeat provider.Error unwrapping.
+func KindOf(err error) Kind {
+	if err == nil {
+		return ""
+	}
+	var perr *Error
+	if errors.As(err, &perr) && perr.Kind != "" {
+		return perr.Kind
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return KindTimeout
+	}
+	return KindUnknown
+}
+
+// StatusCodeOf returns the upstream status preserved on a provider.Error,
+// or 0 when err is not provider-shaped or the upstream did not provide one.
+func StatusCodeOf(err error) int {
+	var perr *Error
+	if errors.As(err, &perr) {
+		return perr.StatusCode
+	}
+	return 0
+}
+
+// RetryAfterOf returns the retry hint preserved on a provider.Error.
+func RetryAfterOf(err error) time.Duration {
+	var perr *Error
+	if errors.As(err, &perr) {
+		return perr.RetryAfter
+	}
+	return 0
+}
+
+// MessageOf returns the provider-facing message, falling back to err.Error.
+func MessageOf(err error) string {
+	var perr *Error
+	if errors.As(err, &perr) {
+		return perr.Message
+	}
+	if err != nil {
+		return err.Error()
+	}
+	return ""
 }
 
 // StampProvider attaches name to err's *Error.Provider when missing,

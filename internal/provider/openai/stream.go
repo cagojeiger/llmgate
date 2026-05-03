@@ -3,7 +3,6 @@ package openai
 import (
 	"context"
 	"encoding/json"
-	"strings"
 
 	"llmgate/internal/provider"
 	"llmgate/internal/upstream"
@@ -115,34 +114,14 @@ func requestBodyWithStream(req *provider.Request) ([]byte, error) {
 // Heuristic kind detection: error.type or message string match — best
 // effort, default KindUpstream when no token wins.
 func parseStreamError(data []byte, providerName string) *provider.Error {
-	var env struct {
-		Error struct {
-			Message string `json:"message"`
-			Type    string `json:"type"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(data, &env); err != nil || env.Error.Message == "" {
+	env := parseErrorEnvelope(data)
+	if env.Message == "" {
 		return nil
 	}
-	t := strings.ToLower(env.Error.Type)
-	m := strings.ToLower(env.Error.Message)
-	kind := provider.KindUpstream
-	switch {
-	case strings.Contains(t, "auth"):
-		kind = provider.KindAuth
-	case strings.Contains(t, "rate"):
-		kind = provider.KindRateLimit
-	case strings.Contains(t, "context") || strings.Contains(m, "token limit") || strings.Contains(m, "context length"):
-		kind = provider.KindContextLength
-	case strings.Contains(t, "content_filter"):
-		kind = provider.KindContentFilter
-	case strings.Contains(t, "invalid"):
-		kind = provider.KindBadRequest
-	}
 	return &provider.Error{
-		Kind:     kind,
+		Kind:     kindFromOpenAIError(0, env),
 		Provider: providerName,
-		Message:  env.Error.Message,
+		Message:  env.Message,
 		Raw:      upstream.FirstBytes(data),
 	}
 }

@@ -61,10 +61,7 @@ func (s *streamResponder) Run(ctx context.Context, w http.ResponseWriter, stream
 				s.recordClientClosed(ctx, rec, err)
 				return
 			}
-			var perr *provider.Error
-			if errors.As(err, &perr) {
-				rec.ErrorKind = perr.Kind
-			}
+			rec.ErrorKind = provider.KindOf(err)
 			s.log.LogAttrs(ctx, slog.LevelWarn, "stream receive failed",
 				slog.String("vendor", rec.Vendor),
 				slog.String("err", err.Error()),

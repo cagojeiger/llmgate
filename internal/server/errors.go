@@ -2,7 +2,6 @@ package server
 
 import (
 	"encoding/json"
-	"errors"
 	"math"
 	"net/http"
 	"strconv"
@@ -31,17 +30,19 @@ func errStatus(err error) int {
 // so handler call sites never have to special-case nil or wrapped errors.
 func errorPayload(err error) (int, time.Duration, []byte) {
 	status := http.StatusInternalServerError
-	kind := provider.KindUnknown
-	message := "unknown error"
+	kind := provider.KindOf(err)
+	if kind == "" {
+		kind = provider.KindUnknown
+	}
+	message := provider.MessageOf(err)
+	if message == "" {
+		message = "unknown error"
+	}
 	var code any
-	var retryAfter time.Duration
+	retryAfter := provider.RetryAfterOf(err)
 
-	var perr *provider.Error
-	if errors.As(err, &perr) {
-		kind = perr.Kind
-		retryAfter = perr.RetryAfter
-		message = perr.Message
-		switch perr.Kind {
+	if err != nil {
+		switch kind {
 		case provider.KindAuth:
 			status = http.StatusUnauthorized
 		case provider.KindRateLimit:
@@ -57,14 +58,9 @@ func errorPayload(err error) (int, time.Duration, []byte) {
 		case provider.KindClientClosed:
 			status = 499
 		}
-		if kind == "" {
-			kind = provider.KindUnknown
-		}
-		if message == "" {
+		if provider.MessageOf(err) == "" {
 			message = http.StatusText(status)
 		}
-	} else if err != nil {
-		message = err.Error()
 	}
 
 	out, marshalErr := json.Marshal(map[string]any{

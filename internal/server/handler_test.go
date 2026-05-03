@@ -132,11 +132,11 @@ func TestAdoptError_ProviderErrorMapsKindAndStatus(t *testing.T) {
 	}
 }
 
-func TestAdoptError_NonProviderError_Falls500(t *testing.T) {
+func TestAdoptError_NonProviderError_Falls500Unknown(t *testing.T) {
 	rec := &audit.Record{}
 	adoptError(rec, io.ErrUnexpectedEOF)
-	if rec.ErrorKind != "" {
-		t.Errorf("ErrorKind = %q, want empty (non-provider err shouldn't set kind)", rec.ErrorKind)
+	if rec.ErrorKind != provider.KindUnknown {
+		t.Errorf("ErrorKind = %q, want unknown", rec.ErrorKind)
 	}
 	if rec.StatusCode != http.StatusInternalServerError {
 		t.Errorf("StatusCode = %d, want 500", rec.StatusCode)

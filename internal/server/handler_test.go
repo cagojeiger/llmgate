@@ -35,7 +35,7 @@ func TestHandler_SingleAttempt_RecordPopulated(t *testing.T) {
 			}
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder)
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -79,7 +79,7 @@ func TestHandler_FallbackChain_AttemptsRecorded(t *testing.T) {
 			}
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder)
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
 
 	body := `{"model":"coder","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -222,7 +222,7 @@ func TestHandler_Stream_NormalEOF(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder)
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -285,7 +285,7 @@ func TestHandler_Stream_RecvError_PropagatesErrorKind(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder)
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -335,7 +335,7 @@ func TestHandler_Stream_IdleTimeoutSendsError(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewHandlerWithConfig(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{
 		StreamIdleTimeout: time.Millisecond,
 	})
 
@@ -385,7 +385,7 @@ func TestHandler_Stream_RequestTimeoutSendsError(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewHandlerWithConfig(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{
 		RequestTimeout: time.Millisecond,
 	})
 
@@ -440,7 +440,7 @@ func TestHandler_Stream_ClientDisconnect_MidStream(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder)
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -485,7 +485,7 @@ func TestHandler_Stream_ClientDisconnect_OnDone(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder)
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -523,7 +523,7 @@ func TestHandler_Stream_ClientDisconnect_OnFirstEvent(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder)
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -559,7 +559,7 @@ func TestHandler_NonStream_ClientDisconnect(t *testing.T) {
 			}
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder)
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -616,7 +616,7 @@ func TestHandler_Stream_PreStreamRouterError(t *testing.T) {
 			}, &provider.Error{Kind: provider.KindAuth, Message: "no key"}
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder)
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))

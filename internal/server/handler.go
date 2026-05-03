@@ -35,11 +35,7 @@ type HandlerConfig struct {
 	StreamIdleTimeout time.Duration
 }
 
-func NewHandler(router ChatRouter, log *slog.Logger, recorder audit.Recorder) *Handler {
-	return NewHandlerWithConfig(router, log, recorder, HandlerConfig{})
-}
-
-func NewHandlerWithConfig(router ChatRouter, log *slog.Logger, recorder audit.Recorder, cfg HandlerConfig) *Handler {
+func NewHandler(router ChatRouter, log *slog.Logger, recorder audit.Recorder, cfg HandlerConfig) *Handler {
 	if log == nil {
 		log = slog.Default()
 	}

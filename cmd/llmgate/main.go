@@ -79,7 +79,7 @@ func run() error {
 		}
 	}()
 
-	handler := server.NewHandlerWithConfig(rtr, logger, recorder, server.HandlerConfig{
+	handler := server.NewHandler(rtr, logger, recorder, server.HandlerConfig{
 		RequestTimeout:    cfg.RequestTimeout,
 		StreamIdleTimeout: cfg.StreamIdleTimeout,
 	})

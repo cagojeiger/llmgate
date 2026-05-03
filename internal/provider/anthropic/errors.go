@@ -7,14 +7,14 @@ import (
 	"strings"
 
 	"llmgate/internal/provider"
-	"llmgate/internal/httpx"
+	"llmgate/internal/upstream"
 )
 
 func (c *Client) classify(status int, body []byte, retryAfterHeader string) *provider.Error {
 	message, errorType := envelopeMessage(body)
 	if message == "" {
 		if len(body) > 0 {
-			message = fmt.Sprintf("upstream returned status %d: %s", status, string(httpx.FirstBytes(body)))
+			message = fmt.Sprintf("upstream returned status %d: %s", status, string(upstream.FirstBytes(body)))
 		} else {
 			message = fmt.Sprintf("upstream returned status %d", status)
 		}
@@ -49,8 +49,8 @@ func (c *Client) classify(status int, body []byte, retryAfterHeader string) *pro
 		Provider:   c.cfg.Name,
 		Message:    message,
 		StatusCode: status,
-		RetryAfter: httpx.ParseRetryAfter(retryAfterHeader),
-		Raw:        httpx.FirstBytes(body),
+		RetryAfter: upstream.ParseRetryAfter(retryAfterHeader),
+		Raw:        upstream.FirstBytes(body),
 	}
 }
 
@@ -88,7 +88,7 @@ func errorFromStreamEvent(payload []byte, providerName string) *provider.Error {
 		Kind:     kindFromAnthropicErrorType(errorType),
 		Provider: providerName,
 		Message:  message,
-		Raw:      httpx.FirstBytes(payload),
+		Raw:      upstream.FirstBytes(payload),
 	}
 }
 
@@ -119,11 +119,11 @@ func envelopeMessage(body []byte) (string, string) {
 }
 
 func (c *Client) lowLevelError(message string, cause error) *provider.Error {
-	return httpx.LowLevelError(c.cfg.Name, message, cause)
+	return upstream.LowLevelError(c.cfg.Name, message, cause)
 }
 
 func (c *Client) badRequest(message string, cause error, raw []byte) *provider.Error {
-	return httpx.BadRequest(c.cfg.Name, message, cause, raw)
+	return upstream.BadRequest(c.cfg.Name, message, cause, raw)
 }
 
 func looksLikeContextLength(message string) bool {

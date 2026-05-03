@@ -1,11 +1,12 @@
-// Package httpx holds the HTTP-level boilerplate that every Provider
-// adapter (openai, anthropic, future Gemini/Bedrock/...) needs in the
-// same shape: a hardened *http.Client default, defensive header copy,
-// uniform low-level / bad-request error wrapping, Retry-After parsing,
-// and a body-trimming helper for audit Raw bytes. Vendor-specific
-// classification (status → Kind, envelope shape) stays in the adapter
-// package — this layer only handles wire-protocol mechanics.
-package httpx
+// Package upstream holds the transport-level boilerplate every LLM
+// provider adapter (openai, anthropic, future Gemini/Bedrock/...) needs
+// when calling its upstream vendor: a hardened *http.Client default,
+// defensive header copy, uniform low-level / bad-request error
+// wrapping, Retry-After parsing, and a body-trimming helper for audit
+// Raw bytes. Vendor-specific classification (status → Kind, envelope
+// shape) stays in the adapter package — this layer only handles
+// wire-protocol mechanics shared across vendors.
+package upstream
 
 import (
 	"context"

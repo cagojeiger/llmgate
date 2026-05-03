@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	"llmgate/internal/httpx"
+	"llmgate/internal/upstream"
 )
 
 const defaultUserAgent = "llmgate/0.1"
@@ -50,10 +50,10 @@ func New(cfg Config) (*Client, error) {
 	if cfg.Name == "" {
 		cfg.Name = "openai"
 	}
-	cfg.ExtraHeaders = httpx.CopyHeaders(cfg.ExtraHeaders)
+	cfg.ExtraHeaders = upstream.CopyHeaders(cfg.ExtraHeaders)
 	httpClient := cfg.HTTPClient
 	if httpClient == nil {
-		httpClient = httpx.DefaultClient()
+		httpClient = upstream.DefaultClient()
 	}
 	return &Client{cfg: cfg, http: httpClient}, nil
 }

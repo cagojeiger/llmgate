@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"llmgate/internal/provider"
-	"llmgate/internal/httpx"
+	"llmgate/internal/upstream"
 )
 
 func (c *Client) CompleteStream(ctx context.Context, req *provider.Request) (provider.Stream, error) {
@@ -146,7 +146,7 @@ func (s *stream) decodePayload(payload []byte) (*anthropicStreamEvent, error) {
 			Provider: s.providerName,
 			Message:  "decode stream event: " + err.Error(),
 			Cause:    err,
-			Raw:      httpx.FirstBytes(payload),
+			Raw:      upstream.FirstBytes(payload),
 		}
 	}
 	return &event, nil

@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	"llmgate/internal/httpx"
+	"llmgate/internal/upstream"
 )
 
 const defaultUserAgent = "llmgate/0.1"
@@ -59,13 +59,13 @@ func New(cfg Config) (*Client, error) {
 	}
 	httpClient := cfg.HTTPClient
 	if httpClient == nil {
-		httpClient = httpx.DefaultClient()
+		httpClient = upstream.DefaultClient()
 	}
 
 	cfg.BaseURL = baseURL
 	cfg.AuthScheme = authScheme
 	cfg.UserAgent = userAgent
-	cfg.ExtraHeaders = httpx.CopyHeaders(cfg.ExtraHeaders)
+	cfg.ExtraHeaders = upstream.CopyHeaders(cfg.ExtraHeaders)
 	cfg.Name = name
 	cfg.DefaultMaxTokens = defaultMaxTokens
 

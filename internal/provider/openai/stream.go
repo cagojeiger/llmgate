@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"llmgate/internal/provider"
-	"llmgate/internal/httpx"
+	"llmgate/internal/upstream"
 )
 
 func (c *Client) CompleteStream(ctx context.Context, req *provider.Request) (provider.Stream, error) {
@@ -79,7 +79,7 @@ func (s *stream) Recv() (*provider.Event, error) {
 			Provider: s.providerName,
 			Message:  "decode stream event: " + err.Error(),
 			Cause:    err,
-			Raw:      httpx.FirstBytes(data),
+			Raw:      upstream.FirstBytes(data),
 		}
 	}
 
@@ -163,6 +163,6 @@ func parseStreamError(data []byte, providerName string) *provider.Error {
 		Kind:     kind,
 		Provider: providerName,
 		Message:  env.Error.Message,
-		Raw:      httpx.FirstBytes(data),
+		Raw:      upstream.FirstBytes(data),
 	}
 }

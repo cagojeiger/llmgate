@@ -23,11 +23,11 @@ type ChatRouter interface {
 }
 
 type Handler struct {
-	router            ChatRouter
-	log               *slog.Logger
-	recorder          audit.Recorder
-	requestTimeout    time.Duration
-	streamIdleTimeout time.Duration
+	router         ChatRouter
+	log            *slog.Logger
+	recorder       audit.Recorder
+	requestTimeout time.Duration
+	stream         *streamResponder
 }
 
 type HandlerConfig struct {
@@ -43,11 +43,11 @@ func NewHandler(router ChatRouter, log *slog.Logger, recorder audit.Recorder, cf
 		recorder = audit.Nop{}
 	}
 	return &Handler{
-		router:            router,
-		log:               log,
-		recorder:          recorder,
-		requestTimeout:    cfg.RequestTimeout,
-		streamIdleTimeout: cfg.StreamIdleTimeout,
+		router:         router,
+		log:            log,
+		recorder:       recorder,
+		requestTimeout: cfg.RequestTimeout,
+		stream:         newStreamResponder(log, cfg.StreamIdleTimeout),
 	}
 }
 
@@ -193,104 +193,5 @@ func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *provi
 	defer stream.Close()
 	defer func() { adoptStreamSummary(rec, stream.Summary(), time.Now()) }()
 
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		perr := &provider.Error{Kind: provider.KindUnknown, Message: "streaming unsupported"}
-		adoptError(rec, perr)
-		writeError(w, perr)
-		return
-	}
-
-	sink := newSSEWriter(w, flusher)
-	defer func() { rec.ResponseBytes = sink.Bytes() }()
-	sink.WriteHeaders()
-	rec.StatusCode = http.StatusOK
-
-	for {
-		event, err := recvWithIdleTimeout(r.Context(), stream, h.streamIdleTimeout)
-		if errors.Is(err, io.EOF) {
-			if werr := sink.SendDone(); werr != nil {
-				h.recordClientClosed(r.Context(), rec, werr)
-			}
-			return
-		}
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				h.recordClientClosed(r.Context(), rec, err)
-				return
-			}
-			var perr *provider.Error
-			if errors.As(err, &perr) {
-				rec.ErrorKind = perr.Kind
-			}
-			h.log.LogAttrs(r.Context(), slog.LevelWarn, "stream receive failed",
-				slog.String("vendor", rec.Vendor),
-				slog.String("err", err.Error()),
-			)
-			_ = sink.SendError(err)
-			_ = sink.SendDone()
-			return
-		}
-
-		payload, err := json.Marshal(event)
-		if err != nil {
-			perr := &provider.Error{Kind: provider.KindUnknown, Message: "encode stream event: " + err.Error(), Cause: err}
-			rec.ErrorKind = perr.Kind
-			_ = sink.SendError(perr)
-			_ = sink.SendDone()
-			return
-		}
-		if werr := sink.Send(payload); werr != nil {
-			h.recordClientClosed(r.Context(), rec, werr)
-			return
-		}
-	}
-}
-
-// recordClientClosed marks the audit record terminal state as a client
-// disconnect. Caller must return immediately afterwards — further writes
-// would just fail the same way and SendDone would too.
-func (h *Handler) recordClientClosed(ctx context.Context, rec *audit.Record, werr error) {
-	rec.ErrorKind = provider.KindClientClosed
-	h.log.LogAttrs(ctx, slog.LevelInfo, "client disconnected mid-stream",
-		slog.String("vendor", rec.Vendor),
-		slog.String("err", werr.Error()),
-	)
-}
-
-type recvResult struct {
-	event *provider.Event
-	err   error
-}
-
-func recvWithIdleTimeout(ctx context.Context, stream provider.Stream, timeout time.Duration) (*provider.Event, error) {
-	ch := make(chan recvResult, 1)
-	go func() {
-		event, err := stream.Recv()
-		ch <- recvResult{event: event, err: err}
-	}()
-
-	var timeoutC <-chan time.Time
-	var timer *time.Timer
-	if timeout > 0 {
-		timer = time.NewTimer(timeout)
-		defer timer.Stop()
-		timeoutC = timer.C
-	}
-
-	select {
-	case got := <-ch:
-		return got.event, got.err
-	case <-timeoutC:
-		_ = stream.Close()
-		provider.DrainOrAbandon(ch, provider.CloseGrace)
-		return nil, &provider.Error{Kind: provider.KindTimeout, Message: "stream idle timeout"}
-	case <-ctx.Done():
-		_ = stream.Close()
-		provider.DrainOrAbandon(ch, provider.CloseGrace)
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, &provider.Error{Kind: provider.KindTimeout, Message: ctx.Err().Error(), Cause: ctx.Err()}
-		}
-		return nil, ctx.Err()
-	}
+	h.stream.Run(r.Context(), w, stream, rec)
 }

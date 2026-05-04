@@ -1,8 +1,10 @@
-# llmgate (dev-v2)
+# llmgate
 
 OpenAI-wire-compatible LLM gateway. Logical model names resolve through a
 catalog to ordered fallback chains; per-process circuit breakers suppress
-dead upstreams.
+dead upstreams. Every request to `/v1/chat/completions` carries a bearer
+key registered in `clients/`, and produces one audit record (success or
+not).
 
 ## Layout
 
@@ -77,10 +79,11 @@ in yaml comments — `description` is not a data field. See
 ## Caller (client) registration
 
 Every request to `/v1/chat/completions` must carry
-`Authorization: Bearer <raw-key>`. `/healthz` stays public so liveness
-probes work without a key. Raw keys never live on disk — only their
-sha256 hashes do — so a caught `clients/` directory leak does not
-expose the keys themselves.
+`Authorization: Bearer <raw-key>`. The probe routes (`/healthz`,
+`/healthz/live`, `/healthz/ready`) stay public so orchestrator probes
+work without a key. Raw keys never live on disk — only their sha256
+hashes do — so a caught `clients/` directory leak does not expose the
+keys themselves.
 
 Register a new caller:
 
@@ -114,16 +117,46 @@ settings, `LLMGATE_REQUEST_TIMEOUT`, `LLMGATE_COMPLETE_TIMEOUT`,
 `LLMGATE_STREAM_IDLE_TIMEOUT`) lives in env, not yaml. Hot-reload is not
 supported — change the catalog and restart.
 
+## Probes & graceful shutdown
+
+Three HTTP probes, all unauthenticated:
+
+| Path | Use as | During SIGTERM |
+|---|---|---|
+| `/healthz/live` | k8s `livenessProbe` | stays 200 (process is responding) |
+| `/healthz/ready` | k8s `readinessProbe` | flips to 503 immediately, dropping the pod from the service before drain |
+| `/healthz` | legacy alias | mirrors `/healthz/ready` |
+
+On SIGTERM the gateway flips readiness, then waits up to
+`LLMGATE_SHUTDOWN_DRAIN_TIMEOUT` (default `5m`) for in-flight requests —
+including LLM streams — to finish naturally. After the timeout the
+remaining connections are force-closed. Pair this with a slightly larger
+orchestrator grace period (k8s `terminationGracePeriodSeconds`, compose
+`stop_grace_period`) so the app-side close fires before SIGKILL:
+
+```yaml
+spec:
+  terminationGracePeriodSeconds: 330   # drain 5m + endpoint propagation slack
+  containers:
+    - lifecycle:
+        preStop:
+          exec: { command: ["/bin/sleep", "10"] }
+      readinessProbe:
+        httpGet: { path: /healthz/ready, port: 8080 }
+      livenessProbe:
+        httpGet: { path: /healthz/live, port: 8080 }
+```
+
 ## Run in a container
 
-`compose.yaml` bind-mounts `./catalog` read-only into the container and
-reads `LLMGATE_OPENCODE_API_KEY` from `.env`, so editing yaml on the
-host flows through without rebuilding the image:
+`compose.yaml` bind-mounts `./catalog` and `./clients` read-only into the
+container and reads `LLMGATE_OPENCODE_API_KEY` from `.env`, so editing
+yaml on the host flows through without rebuilding the image:
 
 ```bash
 docker compose up --build
 # (in another shell)
-curl http://localhost:8080/healthz
+curl http://localhost:8080/healthz/ready
 docker compose down
 ```
 

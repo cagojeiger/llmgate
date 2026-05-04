@@ -69,14 +69,15 @@ graph LR
 
 | 컴포넌트 | 역할 |
 |---|---|
-| HTTP Server | chi 라우터 + request_id / clientContext / access log / recoverer / read/request timeout. `/v1/chat/completions` (auth 보호), `/healthz` (공개) 노출 |
+| HTTP Server | chi 라우터 + request_id / clientContext / access log / recoverer / read/request timeout. `/v1/chat/completions` (auth 보호), `/healthz/live` · `/healthz/ready` · `/healthz` (공개) 노출 |
 | auth middleware | `Authorization: Bearer` 추출 → sha256 → clients Store lookup → ctx 에 ClientInfo 기록. 실패해도 short-circuit 하지 않고 handler 가 audit-always emit (ADR 008) |
 | Handler | 요청 디코드, stream / non-stream 분기, ctx 의 ClientInfo 로 audit Record 채움 + auth 실패 시 401 emit. 요청 총 wall-clock 한도의 권위자 (ADR 005) |
 | streamResponder | Stream 이 열린 뒤 SSE wire transcript 담당. 이벤트 전송, idle timeout, client_closed, mid-stream error, `[DONE]` 처리 (ADR 006). 스트림 idle 한도의 권위자 (ADR 005) |
 | Router | 별명 → chain 해석, 폴백 적격 판정, 회로 차단 (ADR 004). non-stream 시도당 한도의 권위자 (ADR 005) |
 | OpenAI Adapter | OpenAI 와이어로 upstream 호출. status 분류 + 스트리밍의 첫 이벤트 검증까지 (ADR 006) |
-| Anthropic Adapter | Anthropic 와이어로 변환 후 호출, OpenAI 와이어로 응답 정규화. tools / tool_choice / tool_calls / tool_use 양방향 변환 (PR 1~3). status 분류 + 스트리밍의 첫 이벤트 검증까지 (ADR 006) |
+| Anthropic Adapter | Anthropic 와이어로 변환 후 호출, OpenAI 와이어로 응답 정규화. tools / tool_choice / tool_calls / tool_use 양방향 변환. status 분류 + 스트리밍의 첫 이벤트 검증까지 (ADR 006) |
 | clients Store | 부팅 시 `clients/` yaml 들을 sha256 → client 매핑 맵으로 빌드. 인증 lookup 의 read-only source. 0 개 / 부재 시 부팅 fail (닫힘 default — ADR 008) |
+| ProbeState | 프로세스 단일 인스턴스. SIGTERM 수신 시 `MarkShuttingDown()` 으로 readiness 만 503 flip — liveness 와 in-flight 요청은 영향 없음 |
 | Audit Recorder | 요청당 1 개 fact record 발행 (stdout / 향후 이벤트 파이프라인 등). client_name / client_key_id 포함 — *누가 호출했나* 의 사실 |
 
 각 컴포넌트의 단일 책임 / *권위자가 한 명* 결정 근거는 ADR 007.
@@ -129,6 +130,7 @@ clients/
 | `LLMGATE_STREAM_IDLE_TIMEOUT` | `1m` | 스트림 중간 idle (이벤트 사이) 한도 |
 | `LLMGATE_CATALOG` | `./catalog` | vendor 카탈로그 디렉토리 위치. 부재 / 비어있음 → 부팅 fail (ADR 002) |
 | `LLMGATE_CLIENTS` | `./clients` | 호출자 카탈로그 디렉토리 위치. 부재 / 비어있음 → 부팅 fail (닫힘 default — ADR 008) |
+| `LLMGATE_SHUTDOWN_DRAIN_TIMEOUT` | `5m` | SIGTERM 후 in-flight 요청 (스트림 포함) 을 기다리는 앱 단의 최대 wall-clock. 이 값이 지나면 force close 로 잔여 커넥션을 닫는다 |
 
 ### 부팅 순서
 
@@ -138,6 +140,24 @@ clients/
 4. Router 조립 (model → adapter 매핑, 별명 chain, 회로 상태 초기화, 정책 주입)
 5. `clients/` 또는 `LLMGATE_CLIENTS=<dir>` 의 yaml 파싱 → sha256 → client 매핑 빌드 (0 개면 부팅 fail)
 6. Audit Recorder 구성 → Handler 조립 → HTTP Server 미들웨어 체인 wire (request_id / clientContext / accessLog / recoverer + auth Group) → 기동
+
+## 프로브와 셧다운
+
+오케스트레이터 (k8s · compose) 가 게이트웨이의 상태를 읽고 트래픽을 끊는 두 표면.
+
+| 경로 | 의미 | 동작 |
+|---|---|---|
+| `/healthz/live` | liveness | 프로세스 응답 자체가 신호. shutdown 중에도 200 — 데드락 / hang 만 재시작 트리거가 되도록 flap 시키지 않는다 |
+| `/healthz/ready` | readiness | 평소 200, SIGTERM 수신 직후 503. endpoint controller / LB 가 이걸 보고 새 요청을 끊음 |
+| `/healthz` | 별칭 | `/healthz/ready` 와 동일. 기존 매니페스트 호환용 |
+
+SIGTERM 흐름:
+
+1. 시그널 수신 → `ProbeState.MarkShuttingDown()` → `/healthz/ready` 즉시 503
+2. `srv.Shutdown(ctx)` 가 in-flight 요청 (LLM 스트림 포함) 을 자연 종료할 때까지 대기. 5 초마다 진행 로그 emit
+3. `LLMGATE_SHUTDOWN_DRAIN_TIMEOUT` (디폴트 5m) 이 지나면 `srv.Close()` 로 잔여 커넥션을 강제 종료
+
+오케스트레이터 권고: `terminationGracePeriodSeconds` (k8s) / `stop_grace_period` (compose) 를 `LLMGATE_SHUTDOWN_DRAIN_TIMEOUT` 보다 살짝 크게 잡아 SIGKILL 이전에 앱 단의 force close 가 먼저 발화하도록 한다. preStop `sleep` 으로 endpoint propagation lag 만큼 더 깔아주면 readiness flip 과 신규 트래픽 차단 사이의 race 가 줄어든다.
 
 ## 요청 생애주기
 

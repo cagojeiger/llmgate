@@ -16,7 +16,6 @@ func resetEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
 		"LLMGATE_ADDR",
-		"LLMGATE_SHUTDOWN_HEADER_TIMEOUT",
 		"LLMGATE_SHUTDOWN_DRAIN_TIMEOUT",
 		"LLMGATE_LOG_LEVEL",
 		"LLMGATE_FALLBACK_ON",
@@ -42,11 +41,8 @@ func TestLoadServer_Defaults(t *testing.T) {
 	if cfg.Addr != ":8080" {
 		t.Errorf("Addr = %q, want :8080", cfg.Addr)
 	}
-	if cfg.ShutdownHeaderTimeout != 3*time.Second {
-		t.Errorf("ShutdownHeaderTimeout = %v, want 3s", cfg.ShutdownHeaderTimeout)
-	}
-	if cfg.ShutdownDrainTimeout != 7*time.Second {
-		t.Errorf("ShutdownDrainTimeout = %v, want 7s", cfg.ShutdownDrainTimeout)
+	if cfg.ShutdownDrainTimeout != 5*time.Minute {
+		t.Errorf("ShutdownDrainTimeout = %v, want 5m", cfg.ShutdownDrainTimeout)
 	}
 	if cfg.LogLevel != slog.LevelInfo {
 		t.Errorf("LogLevel = %v, want info", cfg.LogLevel)
@@ -189,7 +185,6 @@ func TestLoadServer_RejectsInvalidCircuitJitter(t *testing.T) {
 func TestLoadServer_OverrideFromEnv(t *testing.T) {
 	resetEnv(t)
 	t.Setenv("LLMGATE_ADDR", "0.0.0.0:9090")
-	t.Setenv("LLMGATE_SHUTDOWN_HEADER_TIMEOUT", "5s")
 	t.Setenv("LLMGATE_SHUTDOWN_DRAIN_TIMEOUT", "12s")
 	t.Setenv("LLMGATE_LOG_LEVEL", "debug")
 
@@ -199,9 +194,6 @@ func TestLoadServer_OverrideFromEnv(t *testing.T) {
 	}
 	if cfg.Addr != "0.0.0.0:9090" {
 		t.Errorf("Addr = %q, want override", cfg.Addr)
-	}
-	if cfg.ShutdownHeaderTimeout != 5*time.Second {
-		t.Errorf("ShutdownHeaderTimeout = %v, want 5s", cfg.ShutdownHeaderTimeout)
 	}
 	if cfg.ShutdownDrainTimeout != 12*time.Second {
 		t.Errorf("ShutdownDrainTimeout = %v, want 12s", cfg.ShutdownDrainTimeout)
@@ -213,13 +205,13 @@ func TestLoadServer_OverrideFromEnv(t *testing.T) {
 
 func TestLoadServer_RejectsMalformedDuration(t *testing.T) {
 	resetEnv(t)
-	t.Setenv("LLMGATE_SHUTDOWN_HEADER_TIMEOUT", "not-a-duration")
+	t.Setenv("LLMGATE_SHUTDOWN_DRAIN_TIMEOUT", "not-a-duration")
 
 	_, err := LoadServer()
 	if err == nil {
 		t.Fatal("LoadServer: want error for malformed duration")
 	}
-	if !strings.Contains(err.Error(), "LLMGATE_SHUTDOWN_HEADER_TIMEOUT") {
+	if !strings.Contains(err.Error(), "LLMGATE_SHUTDOWN_DRAIN_TIMEOUT") {
 		t.Errorf("err = %v, want mention of the failing key", err)
 	}
 }

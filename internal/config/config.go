@@ -10,10 +10,15 @@ import (
 )
 
 type Server struct {
-	Addr                  string
-	ShutdownHeaderTimeout time.Duration
-	ShutdownDrainTimeout  time.Duration
-	LogLevel              slog.Level
+	Addr string
+	// ShutdownDrainTimeout caps how long graceful shutdown waits for
+	// in-flight requests to finish before force-closing any survivors.
+	// Default 5m comfortably covers typical LLM streams; the
+	// orchestrator's terminationGracePeriodSeconds (k8s) /
+	// stop_grace_period (compose) should be set slightly larger so the
+	// app-side force close fires before SIGKILL.
+	ShutdownDrainTimeout time.Duration
+	LogLevel             slog.Level
 
 	// Router fallback, breaker, and timeout settings.
 	FallbackOn        []string
@@ -27,11 +32,7 @@ type Server struct {
 }
 
 func LoadServer() (*Server, error) {
-	headerTimeout, err := positiveDuration("LLMGATE_SHUTDOWN_HEADER_TIMEOUT", "3s")
-	if err != nil {
-		return nil, err
-	}
-	drainTimeout, err := positiveDuration("LLMGATE_SHUTDOWN_DRAIN_TIMEOUT", "7s")
+	drainTimeout, err := positiveDuration("LLMGATE_SHUTDOWN_DRAIN_TIMEOUT", "5m")
 	if err != nil {
 		return nil, err
 	}
@@ -69,10 +70,9 @@ func LoadServer() (*Server, error) {
 	}
 
 	return &Server{
-		Addr:                  orDefault("LLMGATE_ADDR", ":8080"),
-		ShutdownHeaderTimeout: headerTimeout,
-		ShutdownDrainTimeout:  drainTimeout,
-		LogLevel:              logLevel,
+		Addr:                 orDefault("LLMGATE_ADDR", ":8080"),
+		ShutdownDrainTimeout: drainTimeout,
+		LogLevel:             logLevel,
 		FallbackOn:            parseCSV("LLMGATE_FALLBACK_ON", "rate_limit,upstream,timeout,network"),
 		CircuitFailures:       circuitFailures,
 		CircuitOpen:           circuitOpen,

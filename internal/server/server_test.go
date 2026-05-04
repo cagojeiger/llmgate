@@ -13,7 +13,7 @@ func TestNew_ReadTimeoutFollowsRequestTimeout(t *testing.T) {
 		RequestTimeout: 2 * time.Second,
 	}
 
-	srv := New(cfg, nil, &Handler{}, nil)
+	srv := New(cfg, nil, &Handler{}, nil, nil)
 
 	if srv.ReadTimeout != cfg.RequestTimeout {
 		t.Fatalf("ReadTimeout = %v, want %v", srv.ReadTimeout, cfg.RequestTimeout)

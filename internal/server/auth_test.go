@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -201,7 +200,7 @@ func TestServer_AuthIntegration(t *testing.T) {
 		ModelUsed: "claude-x",
 	}}
 	handler := NewHandler(stub, logger, rec, HandlerConfig{})
-	srv := New(&config.Server{Addr: ":0"}, logger, handler, store)
+	srv := New(&config.Server{Addr: ":0"}, logger, handler, store, NewProbeState())
 	ts := httptest.NewServer(srv.Handler)
 	defer ts.Close()
 
@@ -262,9 +261,11 @@ func TestServer_AuthIntegration(t *testing.T) {
 }
 
 func TestServer_HealthzPublic(t *testing.T) {
+	// Smoke-only: probes are unauthenticated even when clients are
+	// registered. Detailed probe-state coverage lives in probe_test.go.
 	store := writeStoreYAML(t, "alpha", "good-key")
 	handler := NewHandler(&stubRouter{}, slog.Default(), &recordingRecorder{}, HandlerConfig{})
-	srv := New(&config.Server{Addr: ":0"}, slog.Default(), handler, store)
+	srv := New(&config.Server{Addr: ":0"}, slog.Default(), handler, store, NewProbeState())
 	ts := httptest.NewServer(srv.Handler)
 	defer ts.Close()
 
@@ -275,13 +276,5 @@ func TestServer_HealthzPublic(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("/healthz status = %d, want 200 (public)", resp.StatusCode)
-	}
-	body, _ := io.ReadAll(resp.Body)
-	var got map[string]any
-	if err := json.Unmarshal(body, &got); err != nil {
-		t.Fatalf("decode body: %v", err)
-	}
-	if got["status"] != "ok" {
-		t.Errorf("status field = %v, want ok", got["status"])
 	}
 }

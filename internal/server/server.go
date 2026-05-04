@@ -12,7 +12,7 @@ import (
 	"llmgate/internal/config"
 )
 
-func New(cfg *config.Server, log *slog.Logger, h *Handler, store *clients.Store) *http.Server {
+func New(cfg *config.Server, log *slog.Logger, h *Handler, store *clients.Store, probe *ProbeState) *http.Server {
 	r := chi.NewRouter()
 	r.Use(requestIDMiddleware)
 	// clientContextMiddleware must run before accessLogMiddleware so the
@@ -22,16 +22,20 @@ func New(cfg *config.Server, log *slog.Logger, h *Handler, store *clients.Store)
 	r.Use(accessLogMiddleware(log))
 	r.Use(chimiddleware.Recoverer)
 
-	// Liveness only; intentionally unauthenticated so probes from
-	// orchestrators (k8s, load balancers) work without a registered
-	// client. This does not verify upstream availability.
-	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("{\"status\":\"ok\"}"))
-	})
-	// Auth scope: only the chat endpoint sits behind auth, so /healthz
-	// stays public. Add new auth-required routes inside this Group.
+	// Probe endpoints: intentionally unauthenticated so orchestrators
+	// (k8s probes, load balancers) work without a registered client.
+	// Two semantics:
+	//   /healthz/live  — always 200 (process alive)
+	//   /healthz/ready — 503 once SIGTERM has been received so endpoint
+	//                    controllers can drop this pod before drain
+	// /healthz stays as a backward-compatible alias of /healthz/ready
+	// so existing manifests get the better shutdown behavior for free.
+	readyHandler := readiness(probe)
+	r.Get("/healthz", readyHandler)
+	r.Get("/healthz/live", liveness)
+	r.Get("/healthz/ready", readyHandler)
+	// Auth scope: only the chat endpoint sits behind auth, so probes
+	// stay public. Add new auth-required routes inside this Group.
 	r.Group(func(r chi.Router) {
 		r.Use(authMiddleware(store))
 		r.Post("/v1/chat/completions", h.ServeHTTP)

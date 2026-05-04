@@ -483,11 +483,7 @@ func toOpenAIResponse(in *anthropicResponse) (*provider.Response, error) {
 		Content:          text.String(),
 		ReasoningContent: reasoning.String(),
 	}
-	toolCalls, err := extractToolCalls(in.Content)
-	if err != nil {
-		return nil, err
-	}
-	if len(toolCalls) > 0 {
+	if toolCalls := extractToolCalls(in.Content); len(toolCalls) > 0 {
 		raw, err := json.Marshal(toolCalls)
 		if err != nil {
 			return nil, err
@@ -511,9 +507,11 @@ func toOpenAIResponse(in *anthropicResponse) (*provider.Response, error) {
 // extractToolCalls maps Anthropic tool_use content blocks to the OpenAI
 // tool_calls wire shape. Each call's Arguments is re-serialized to a
 // canonical JSON string (OpenAI requires arguments as a string, not an
-// object). Empty / missing input collapses to "{}" so downstream parsers
-// always see a valid object literal.
-func extractToolCalls(blocks []anthropicContent) ([]map[string]any, error) {
+// object); malformed JSON falls back to the trimmed raw bytes, and
+// empty / missing input collapses to "{}" so downstream parsers always
+// see a valid object literal. No path can fail — this is a structural
+// reshape of already-decoded data.
+func extractToolCalls(blocks []anthropicContent) []map[string]any {
 	var out []map[string]any
 	for _, b := range blocks {
 		if b.Type != "tool_use" || b.Name == "" {
@@ -539,7 +537,7 @@ func extractToolCalls(blocks []anthropicContent) ([]map[string]any, error) {
 			},
 		})
 	}
-	return out, nil
+	return out
 }
 
 // mapStopReason translates Anthropic's stop_reason vocabulary into the

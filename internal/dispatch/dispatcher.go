@@ -1,6 +1,6 @@
-// Package router resolves model aliases, applies fallback policy, and
+// Package dispatch resolves model aliases, applies fallback policy, and
 // tracks per-process circuit-breaker state.
-package router
+package dispatch
 
 import (
 	"context"
@@ -14,12 +14,12 @@ import (
 	"llmgate/internal/provider"
 )
 
-type AdapterFactory func(*catalog.Model) (provider.Provider, error)
+type ProviderFactory func(*catalog.Model) (provider.Provider, error)
 
-// FallbackPolicy is env-driven router tuning. CircuitFailures or
+// FallbackPolicy is env-driven dispatcher tuning. CircuitFailures or
 // CircuitOpen <= 0 disables the breaker; CircuitJitter is symmetric
 // (0.2 means ±20%). The total request budget lives in the caller's
-// ctx (handler middleware); router owns the per-attempt non-stream
+// ctx (handler middleware); dispatcher owns the per-attempt non-stream
 // budget. Streaming uses the caller's ctx end-to-end — first-event
 // validation lives in the adapter via provider.ValidateFirstEvent.
 type FallbackPolicy struct {
@@ -31,7 +31,7 @@ type FallbackPolicy struct {
 	CompleteTimeout time.Duration
 }
 
-type RouteResult struct {
+type Result struct {
 	Response  *provider.Response
 	Stream    provider.Stream
 	Vendor    string
@@ -39,9 +39,9 @@ type RouteResult struct {
 	Attempts  []provider.Attempt
 }
 
-// Router dispatches requests to Providers. Streaming fallback applies
+// Dispatcher dispatches requests to Providers. Streaming fallback applies
 // only before the first event reaches the client.
-type Router struct {
+type Dispatcher struct {
 	byModel  map[string]provider.Provider
 	aliases  map[string][]string
 	policy   fallbackPolicy
@@ -54,12 +54,12 @@ type fallbackPolicy struct {
 	completeTimeout time.Duration
 }
 
-type routeCandidate struct {
+type candidate struct {
 	model    string
 	provider provider.Provider
 }
 
-func NewRouter(cat *catalog.Catalog, factories map[string]AdapterFactory, policy FallbackPolicy, log *slog.Logger) (*Router, error) {
+func NewDispatcher(cat *catalog.Catalog, factories map[string]ProviderFactory, policy FallbackPolicy, log *slog.Logger) (*Dispatcher, error) {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -68,16 +68,16 @@ func NewRouter(cat *catalog.Catalog, factories map[string]AdapterFactory, policy
 	for modelID, m := range cat.Models {
 		factory, ok := factories[m.Protocol]
 		if !ok {
-			return nil, fmt.Errorf("router: no adapter for protocol %q (model %q)", m.Protocol, m.ID)
+			return nil, fmt.Errorf("dispatch: no adapter for protocol %q (model %q)", m.Protocol, m.ID)
 		}
 		p, err := factory(m)
 		if err != nil {
-			return nil, fmt.Errorf("router: build adapter for model %q protocol %q: %w", m.ID, m.Protocol, err)
+			return nil, fmt.Errorf("dispatch: build adapter for model %q protocol %q: %w", m.ID, m.Protocol, err)
 		}
 		byModel[strings.ToLower(modelID)] = p
 	}
 	if len(byModel) == 0 {
-		return nil, errors.New("router: no models registered (check protocol factories)")
+		return nil, errors.New("dispatch: no models registered (check protocol factories)")
 	}
 
 	aliases := make(map[string][]string, len(cat.Aliases))
@@ -97,7 +97,7 @@ func NewRouter(cat *catalog.Catalog, factories map[string]AdapterFactory, policy
 		internalPolicy.onKinds[provider.Kind(strings.ToLower(k))] = struct{}{}
 	}
 
-	return &Router{
+	return &Dispatcher{
 		byModel:  byModel,
 		aliases:  aliases,
 		policy:   internalPolicy,
@@ -106,8 +106,8 @@ func NewRouter(cat *catalog.Catalog, factories map[string]AdapterFactory, policy
 	}, nil
 }
 
-func (r *Router) Complete(ctx context.Context, req *provider.Request) (*RouteResult, error) {
-	result := &RouteResult{}
+func (r *Dispatcher) Complete(ctx context.Context, req *provider.Request) (*Result, error) {
+	result := &Result{}
 	if req == nil {
 		return result, &provider.Error{Kind: provider.KindBadRequest, Message: "request is nil"}
 	}
@@ -181,8 +181,8 @@ func (r *Router) Complete(ctx context.Context, req *provider.Request) (*RouteRes
 	return result, lastErr
 }
 
-func (r *Router) CompleteStream(ctx context.Context, req *provider.Request) (*RouteResult, error) {
-	result := &RouteResult{}
+func (r *Dispatcher) CompleteStream(ctx context.Context, req *provider.Request) (*Result, error) {
+	result := &Result{}
 	if req == nil {
 		return result, &provider.Error{Kind: provider.KindBadRequest, Message: "request is nil"}
 	}
@@ -225,7 +225,7 @@ func (r *Router) CompleteStream(ctx context.Context, req *provider.Request) (*Ro
 // finalizeStreamFailure stamps a failed stream attempt and decides
 // whether to fall back. Returns the error to surface (caller returns)
 // or nil (caller continues to next candidate).
-func (r *Router) finalizeStreamFailure(result *RouteResult, candidate routeCandidate, att *provider.Attempt, err error, routeCtx context.Context) error {
+func (r *Dispatcher) finalizeStreamFailure(result *Result, candidate candidate, att *provider.Attempt, err error, routeCtx context.Context) error {
 	adoptAttemptError(att, err)
 	att.DurationMS = time.Since(att.StartedAt).Milliseconds()
 	result.Attempts = append(result.Attempts, *att)
@@ -246,7 +246,7 @@ func (r *Router) finalizeStreamFailure(result *RouteResult, candidate routeCandi
 	return nil
 }
 
-func requestForCandidate(req *provider.Request, candidate routeCandidate) provider.Request {
+func requestForCandidate(req *provider.Request, candidate candidate) provider.Request {
 	attemptReq := *req
 	attemptReq.Model = candidate.model
 	return attemptReq
@@ -264,12 +264,12 @@ func contextError(err error) error {
 	return err
 }
 
-func (r *Router) candidates(model string) ([]routeCandidate, error) {
+func (r *Dispatcher) candidates(model string) ([]candidate, error) {
 	chain, err := r.resolveChain(model)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]routeCandidate, 0, len(chain))
+	out := make([]candidate, 0, len(chain))
 	for _, modelID := range chain {
 		p, ok := r.byModel[modelID]
 		if !ok {
@@ -279,7 +279,7 @@ func (r *Router) candidates(model string) ([]routeCandidate, error) {
 			r.log.Debug("skip model: circuit open", slog.String("model", modelID))
 			continue
 		}
-		out = append(out, routeCandidate{
+		out = append(out, candidate{
 			model:    modelID,
 			provider: p,
 		})
@@ -291,7 +291,7 @@ func (r *Router) candidates(model string) ([]routeCandidate, error) {
 }
 
 // resolveChain expands aliases; raw model ids become a one-item chain.
-func (r *Router) resolveChain(model string) ([]string, error) {
+func (r *Dispatcher) resolveChain(model string) ([]string, error) {
 	key := strings.ToLower(model)
 	if chain, ok := r.aliases[key]; ok {
 		return chain, nil
@@ -302,7 +302,7 @@ func (r *Router) resolveChain(model string) ([]string, error) {
 	return nil, &provider.Error{Kind: provider.KindBadRequest, Message: "unknown model: " + model}
 }
 
-func (r *Router) fallbackEligible(k provider.Kind) bool {
+func (r *Dispatcher) fallbackEligible(k provider.Kind) bool {
 	if k == "" {
 		return false
 	}

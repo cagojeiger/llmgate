@@ -14,15 +14,15 @@ import (
 
 	"llmgate/internal/audit"
 	"llmgate/internal/provider"
-	"llmgate/internal/router"
+	"llmgate/internal/dispatch"
 )
 
 func TestHandler_SingleAttempt_RecordPopulated(t *testing.T) {
 	rec, recorder := newCaptureRecorder()
-	r := &fakeRouter{
+	r := &fakeDispatcher{
 		vendor: "opencode",
-		buildResult: func(req *provider.Request) *router.RouteResult {
-			return &router.RouteResult{
+		buildResult: func(req *provider.Request) *dispatch.Result {
+			return &dispatch.Result{
 				Response: &provider.Response{
 					Model:   req.Model,
 					Choices: []provider.Choice{{Index: 0, Message: provider.Message{Role: "assistant", Content: "ok"}}},
@@ -62,10 +62,10 @@ func TestHandler_SingleAttempt_RecordPopulated(t *testing.T) {
 
 func TestHandler_FallbackChain_AttemptsRecorded(t *testing.T) {
 	rec, recorder := newCaptureRecorder()
-	r := &fakeRouter{
+	r := &fakeDispatcher{
 		vendor: "opencode",
-		buildResult: func(req *provider.Request) *router.RouteResult {
-			return &router.RouteResult{
+		buildResult: func(req *provider.Request) *dispatch.Result {
+			return &dispatch.Result{
 				Response: &provider.Response{
 					Model:   "deepseek-v4-flash",
 					Choices: []provider.Choice{{Index: 0, Message: provider.Message{Role: "assistant", Content: "ok"}}},
@@ -210,9 +210,9 @@ func TestHandler_Stream_NormalEOF(t *testing.T) {
 			Usage: &provider.Usage{PromptTokens: 3, CompletionTokens: 2, TotalTokens: 5},
 		},
 	}
-	r := &fakeRouter{
-		buildStreamResult: func(req *provider.Request) (*router.RouteResult, error) {
-			return &router.RouteResult{
+	r := &fakeDispatcher{
+		buildStreamResult: func(req *provider.Request) (*dispatch.Result, error) {
+			return &dispatch.Result{
 				Stream:    streamObj,
 				Vendor:    "opencode",
 				ModelUsed: req.Model,
@@ -275,9 +275,9 @@ func TestHandler_Stream_RecvError_PropagatesErrorKind(t *testing.T) {
 		recvErr: &provider.Error{Kind: provider.KindUpstream, Message: "boom mid-stream"},
 		summary: &provider.Summary{},
 	}
-	r := &fakeRouter{
-		buildStreamResult: func(req *provider.Request) (*router.RouteResult, error) {
-			return &router.RouteResult{
+	r := &fakeDispatcher{
+		buildStreamResult: func(req *provider.Request) (*dispatch.Result, error) {
+			return &dispatch.Result{
 				Stream:    streamObj,
 				Vendor:    "opencode",
 				ModelUsed: req.Model,
@@ -325,9 +325,9 @@ func TestHandler_Stream_IdleTimeoutSendsError(t *testing.T) {
 		recvDelay: 50 * time.Millisecond,
 		summary:   &provider.Summary{},
 	}
-	r := &fakeRouter{
-		buildStreamResult: func(req *provider.Request) (*router.RouteResult, error) {
-			return &router.RouteResult{
+	r := &fakeDispatcher{
+		buildStreamResult: func(req *provider.Request) (*dispatch.Result, error) {
+			return &dispatch.Result{
 				Stream:    streamObj,
 				Vendor:    "opencode",
 				ModelUsed: req.Model,
@@ -375,9 +375,9 @@ func TestHandler_Stream_RequestTimeoutSendsError(t *testing.T) {
 		recvDelay: 50 * time.Millisecond,
 		summary:   &provider.Summary{},
 	}
-	r := &fakeRouter{
-		buildStreamResult: func(req *provider.Request) (*router.RouteResult, error) {
-			return &router.RouteResult{
+	r := &fakeDispatcher{
+		buildStreamResult: func(req *provider.Request) (*dispatch.Result, error) {
+			return &dispatch.Result{
 				Stream:    streamObj,
 				Vendor:    "opencode",
 				ModelUsed: req.Model,
@@ -422,9 +422,9 @@ func TestHandler_Stream_ContextCanceledRecordsClientClosed(t *testing.T) {
 		recvDelay: 50 * time.Millisecond,
 		summary:   &provider.Summary{},
 	}
-	r := &fakeRouter{
-		buildStreamResult: func(req *provider.Request) (*router.RouteResult, error) {
-			return &router.RouteResult{
+	r := &fakeDispatcher{
+		buildStreamResult: func(req *provider.Request) (*dispatch.Result, error) {
+			return &dispatch.Result{
 				Stream:    streamObj,
 				Vendor:    "opencode",
 				ModelUsed: req.Model,
@@ -468,9 +468,9 @@ func TestHandler_Stream_ClientDisconnect_MidStream(t *testing.T) {
 		},
 		summary: &provider.Summary{},
 	}
-	r := &fakeRouter{
-		buildStreamResult: func(req *provider.Request) (*router.RouteResult, error) {
-			return &router.RouteResult{
+	r := &fakeDispatcher{
+		buildStreamResult: func(req *provider.Request) (*dispatch.Result, error) {
+			return &dispatch.Result{
 				Stream:    streamObj,
 				Vendor:    "opencode",
 				ModelUsed: req.Model,
@@ -514,9 +514,9 @@ func TestHandler_Stream_ClientDisconnect_OnDone(t *testing.T) {
 		},
 		summary: &provider.Summary{},
 	}
-	r := &fakeRouter{
-		buildStreamResult: func(req *provider.Request) (*router.RouteResult, error) {
-			return &router.RouteResult{
+	r := &fakeDispatcher{
+		buildStreamResult: func(req *provider.Request) (*dispatch.Result, error) {
+			return &dispatch.Result{
 				Stream:    streamObj,
 				Vendor:    "opencode",
 				ModelUsed: req.Model,
@@ -552,9 +552,9 @@ func TestHandler_Stream_ClientDisconnect_OnFirstEvent(t *testing.T) {
 		},
 		summary: &provider.Summary{},
 	}
-	r := &fakeRouter{
-		buildStreamResult: func(req *provider.Request) (*router.RouteResult, error) {
-			return &router.RouteResult{
+	r := &fakeDispatcher{
+		buildStreamResult: func(req *provider.Request) (*dispatch.Result, error) {
+			return &dispatch.Result{
 				Stream:    streamObj,
 				Vendor:    "opencode",
 				ModelUsed: req.Model,
@@ -585,9 +585,9 @@ func TestHandler_Stream_ClientDisconnect_OnFirstEvent(t *testing.T) {
 // (already on the wire), but ErrorKind reveals the terminal state.
 func TestHandler_NonStream_ClientDisconnect(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
-	r := &fakeRouter{
-		buildResult: func(req *provider.Request) *router.RouteResult {
-			return &router.RouteResult{
+	r := &fakeDispatcher{
+		buildResult: func(req *provider.Request) *dispatch.Result {
+			return &dispatch.Result{
 				Response: &provider.Response{
 					Model:   req.Model,
 					Choices: []provider.Choice{{Index: 0, Message: provider.Message{Role: "assistant", Content: "ok"}}},
@@ -644,11 +644,11 @@ func (d *disconnectAfterNWriter) WriteHeader(statusCode int) { d.rec.WriteHeader
 
 func (d *disconnectAfterNWriter) Flush() {}
 
-func TestHandler_Stream_PreStreamRouterError(t *testing.T) {
+func TestHandler_Stream_PreStreamDispatcherError(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
-	r := &fakeRouter{
-		buildStreamResult: func(req *provider.Request) (*router.RouteResult, error) {
-			return &router.RouteResult{
+	r := &fakeDispatcher{
+		buildStreamResult: func(req *provider.Request) (*dispatch.Result, error) {
+			return &dispatch.Result{
 				Vendor:    "opencode",
 				ModelUsed: req.Model,
 				Attempts: []provider.Attempt{
@@ -686,25 +686,25 @@ func TestHandler_Stream_PreStreamRouterError(t *testing.T) {
 	}
 }
 
-// fakeRouter implements ChatRouter for handler tests. buildResult /
-// buildStreamResult let each test case shape the RouteResult —
+// fakeDispatcher implements ChatDispatcher for handler tests. buildResult /
+// buildStreamResult let each test case shape the Result —
 // including pre-populated Attempts — so we exercise the audit-copy
-// path without spinning up a real Router.
-type fakeRouter struct {
+// path without spinning up a real Dispatcher.
+type fakeDispatcher struct {
 	vendor            string
-	buildResult       func(req *provider.Request) *router.RouteResult
-	buildStreamResult func(req *provider.Request) (*router.RouteResult, error)
+	buildResult       func(req *provider.Request) *dispatch.Result
+	buildStreamResult func(req *provider.Request) (*dispatch.Result, error)
 }
 
-func (f *fakeRouter) Complete(_ context.Context, req *provider.Request) (*router.RouteResult, error) {
+func (f *fakeDispatcher) Complete(_ context.Context, req *provider.Request) (*dispatch.Result, error) {
 	return f.buildResult(req), nil
 }
 
-func (f *fakeRouter) CompleteStream(_ context.Context, req *provider.Request) (*router.RouteResult, error) {
+func (f *fakeDispatcher) CompleteStream(_ context.Context, req *provider.Request) (*dispatch.Result, error) {
 	if f.buildStreamResult != nil {
 		return f.buildStreamResult(req)
 	}
-	return &router.RouteResult{}, &provider.Error{Kind: provider.KindUpstream, Message: "stream not implemented in this fake"}
+	return &dispatch.Result{}, &provider.Error{Kind: provider.KindUpstream, Message: "stream not implemented in this fake"}
 }
 
 // fakeStream returns events in order, then optionally yields recvErr

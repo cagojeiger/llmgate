@@ -18,7 +18,7 @@ import (
 	"llmgate/internal/clients"
 	"llmgate/internal/config"
 	"llmgate/internal/provider"
-	"llmgate/internal/router"
+	"llmgate/internal/dispatch"
 )
 
 // recordingRecorder captures every emitted audit Record so tests can
@@ -32,19 +32,19 @@ func (r *recordingRecorder) Record(_ context.Context, rec *audit.Record) {
 }
 func (r *recordingRecorder) Close() error { return nil }
 
-// stubRouter implements ChatRouter without doing any real work — the
+// stubDispatcher implements ChatDispatcher without doing any real work — the
 // handler tests in this file exercise auth, not routing, so a stub
 // keeps test isolation tight. Complete is what serveComplete calls;
 // stream is unused in these tests.
-type stubRouter struct {
-	resp *router.RouteResult
+type stubDispatcher struct {
+	resp *dispatch.Result
 	err  error
 }
 
-func (s *stubRouter) Complete(context.Context, *provider.Request) (*router.RouteResult, error) {
+func (s *stubDispatcher) Complete(context.Context, *provider.Request) (*dispatch.Result, error) {
 	return s.resp, s.err
 }
-func (s *stubRouter) CompleteStream(context.Context, *provider.Request) (*router.RouteResult, error) {
+func (s *stubDispatcher) CompleteStream(context.Context, *provider.Request) (*dispatch.Result, error) {
 	return s.resp, s.err
 }
 
@@ -188,7 +188,7 @@ func TestServer_AuthIntegration(t *testing.T) {
 	logBuf := &bytes.Buffer{}
 	logger := slog.New(slog.NewJSONHandler(logBuf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	stub := &stubRouter{resp: &router.RouteResult{
+	stub := &stubDispatcher{resp: &dispatch.Result{
 		Response: &provider.Response{
 			ID:      "resp-1",
 			Object:  "chat.completion",
@@ -276,7 +276,7 @@ func TestServer_HealthzPublic(t *testing.T) {
 	// Smoke-only: probes are unauthenticated even when clients are
 	// registered. Detailed probe-state coverage lives in probe_test.go.
 	store := writeStoreYAML(t, "alpha", "good-key")
-	handler := NewHandler(&stubRouter{}, slog.Default(), &recordingRecorder{}, HandlerConfig{})
+	handler := NewHandler(&stubDispatcher{}, slog.Default(), &recordingRecorder{}, HandlerConfig{})
 	srv := New(&config.Server{Addr: ":0"}, slog.Default(), handler, store, NewProbeState())
 	ts := httptest.NewServer(srv.Handler)
 	defer ts.Close()

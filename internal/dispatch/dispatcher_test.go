@@ -1,4 +1,4 @@
-package router
+package dispatch
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 	"llmgate/internal/provider"
 )
 
-// testPolicy mirrors the production defaults so the router behaves the
+// testPolicy mirrors the production defaults so the dispatcher behaves the
 // same in tests as it does at runtime — fallback on transient classes,
 // circuit trips after 3 strikes, 30s cooldown.
 var testPolicy = FallbackPolicy{
@@ -26,22 +26,22 @@ var testPolicy = FallbackPolicy{
 	CompleteTimeout: time.Minute,
 }
 
-func TestRouter_MissingProtocolFactoryFailsFast(t *testing.T) {
-	_, err := NewRouter(stubCatalog(t), map[string]AdapterFactory{
+func TestDispatcher_MissingProtocolFactoryFailsFast(t *testing.T) {
+	_, err := NewDispatcher(stubCatalog(t), map[string]ProviderFactory{
 		"openai": func(*catalog.Model) (provider.Provider, error) {
 			return &fakeProvider{name: "openai"}, nil
 		},
 	}, testPolicy, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err == nil {
-		t.Fatal("NewRouter() error = nil, want missing protocol factory error")
+		t.Fatal("NewDispatcher() error = nil, want missing protocol factory error")
 	}
 	if !strings.Contains(err.Error(), `no adapter for protocol "anthropic"`) {
-		t.Fatalf("NewRouter() error = %q, want missing anthropic protocol factory", err.Error())
+		t.Fatalf("NewDispatcher() error = %q, want missing anthropic protocol factory", err.Error())
 	}
 }
 
-func TestRouter_Both(t *testing.T) {
-	router, err := NewRouter(stubCatalog(t), map[string]AdapterFactory{
+func TestDispatcher_Both(t *testing.T) {
+	dispatcher, err := NewDispatcher(stubCatalog(t), map[string]ProviderFactory{
 		"openai": func(*catalog.Model) (provider.Provider, error) {
 			return &fakeProvider{name: "openai"}, nil
 		},
@@ -50,15 +50,15 @@ func TestRouter_Both(t *testing.T) {
 		},
 	}, testPolicy, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
-		t.Fatalf("NewRouter() error = %v", err)
+		t.Fatalf("NewDispatcher() error = %v", err)
 	}
-	if got := len(router.byModel); got != 14 {
+	if got := len(dispatcher.byModel); got != 14 {
 		t.Fatalf("len(byModel) = %d, want 14", got)
 	}
 }
 
-func TestRouter_UnknownModel(t *testing.T) {
-	router, err := NewRouter(stubCatalog(t), map[string]AdapterFactory{
+func TestDispatcher_UnknownModel(t *testing.T) {
+	dispatcher, err := NewDispatcher(stubCatalog(t), map[string]ProviderFactory{
 		"openai": func(*catalog.Model) (provider.Provider, error) {
 			return &fakeProvider{name: "openai"}, nil
 		},
@@ -67,10 +67,10 @@ func TestRouter_UnknownModel(t *testing.T) {
 		},
 	}, testPolicy, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
-		t.Fatalf("NewRouter() error = %v", err)
+		t.Fatalf("NewDispatcher() error = %v", err)
 	}
 
-	_, err = router.Complete(context.Background(), &provider.Request{
+	_, err = dispatcher.Complete(context.Background(), &provider.Request{
 		Model:    "nonexistent-model-123",
 		Messages: []provider.Message{{Role: "user", Content: "hi"}},
 	})
@@ -86,10 +86,10 @@ func TestRouter_UnknownModel(t *testing.T) {
 	}
 }
 
-func TestRouter_Dispatch(t *testing.T) {
+func TestDispatcher_Dispatch(t *testing.T) {
 	openAI := &fakeProvider{name: "openai"}
 	anthropic := &fakeProvider{name: "anthropic"}
-	router, err := NewRouter(stubCatalog(t), map[string]AdapterFactory{
+	dispatcher, err := NewDispatcher(stubCatalog(t), map[string]ProviderFactory{
 		"openai": func(*catalog.Model) (provider.Provider, error) {
 			return openAI, nil
 		},
@@ -98,11 +98,11 @@ func TestRouter_Dispatch(t *testing.T) {
 		},
 	}, testPolicy, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
-		t.Fatalf("NewRouter() error = %v", err)
+		t.Fatalf("NewDispatcher() error = %v", err)
 	}
 
 	req := &provider.Request{Model: "kimi-k2.6", Messages: []provider.Message{{Role: "user", Content: "hi"}}}
-	if _, err := router.Complete(context.Background(), req); err != nil {
+	if _, err := dispatcher.Complete(context.Background(), req); err != nil {
 		t.Fatalf("Complete() error = %v", err)
 	}
 	if openAI.completeCalls != 1 || openAI.lastCompleteReq.Model != "kimi-k2.6" {
@@ -113,7 +113,7 @@ func TestRouter_Dispatch(t *testing.T) {
 	}
 
 	streamReq := &provider.Request{Model: "minimax-m2.5", Messages: []provider.Message{{Role: "user", Content: "hi"}}}
-	streamRes, err := router.CompleteStream(context.Background(), streamReq)
+	streamRes, err := dispatcher.CompleteStream(context.Background(), streamReq)
 	if err != nil {
 		t.Fatalf("CompleteStream() error = %v", err)
 	}
@@ -128,11 +128,11 @@ func TestRouter_Dispatch(t *testing.T) {
 	}
 }
 
-func TestRouter_AliasFallback_PrimarySucceeds(t *testing.T) {
+func TestDispatcher_AliasFallback_PrimarySucceeds(t *testing.T) {
 	openAI := &fakeProvider{name: "openai"}
-	router := mustRouter(t, fallbackCatalog(t), openAI, nil)
+	dispatcher := mustDispatcher(t, fallbackCatalog(t), openAI, nil)
 
-	result, err := router.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "hi"}}})
+	result, err := dispatcher.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "hi"}}})
 	if err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
@@ -153,15 +153,15 @@ func TestRouter_AliasFallback_PrimarySucceeds(t *testing.T) {
 	}
 }
 
-func TestRouter_AliasFallback_RetriesOnEligibleError(t *testing.T) {
+func TestDispatcher_AliasFallback_RetriesOnEligibleError(t *testing.T) {
 	// Primary fails with KindRateLimit (eligible) → next chain entry tried.
 	openAI := &fakeProvider{name: "openai"}
 	openAI.errors = map[string]*provider.Error{
 		"deepseek-v4-pro": {Kind: provider.KindRateLimit, Message: "throttled", StatusCode: 429},
 	}
-	router := mustRouter(t, fallbackCatalog(t), openAI, nil)
+	dispatcher := mustDispatcher(t, fallbackCatalog(t), openAI, nil)
 
-	result, err := router.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "hi"}}})
+	result, err := dispatcher.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "hi"}}})
 	if err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
@@ -182,14 +182,14 @@ func TestRouter_AliasFallback_RetriesOnEligibleError(t *testing.T) {
 	}
 }
 
-func TestRouter_StreamAliasFallback_RetriesOnEligiblePreStreamError(t *testing.T) {
+func TestDispatcher_StreamAliasFallback_RetriesOnEligiblePreStreamError(t *testing.T) {
 	openAI := &fakeProvider{name: "openai"}
 	openAI.streamErrors = map[string]*provider.Error{
 		"deepseek-v4-pro": {Kind: provider.KindRateLimit, Message: "stream throttled", StatusCode: 429},
 	}
-	router := mustRouter(t, fallbackCatalog(t), openAI, nil)
+	dispatcher := mustDispatcher(t, fallbackCatalog(t), openAI, nil)
 
-	result, err := router.CompleteStream(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "hi"}}})
+	result, err := dispatcher.CompleteStream(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "hi"}}})
 	if err != nil {
 		t.Fatalf("CompleteStream: %v", err)
 	}
@@ -213,15 +213,15 @@ func TestRouter_StreamAliasFallback_RetriesOnEligiblePreStreamError(t *testing.T
 	}
 }
 
-func TestRouter_AliasFallback_BadRequestStopsImmediately(t *testing.T) {
+func TestDispatcher_AliasFallback_BadRequestStopsImmediately(t *testing.T) {
 	// Primary fails with KindBadRequest (not eligible) → return immediately.
 	openAI := &fakeProvider{name: "openai"}
 	openAI.errors = map[string]*provider.Error{
 		"deepseek-v4-pro": {Kind: provider.KindBadRequest, Message: "malformed"},
 	}
-	router := mustRouter(t, fallbackCatalog(t), openAI, nil)
+	dispatcher := mustDispatcher(t, fallbackCatalog(t), openAI, nil)
 
-	result, err := router.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "hi"}}})
+	result, err := dispatcher.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "hi"}}})
 	if err == nil {
 		t.Fatal("Complete: want error")
 	}
@@ -237,14 +237,14 @@ func TestRouter_AliasFallback_BadRequestStopsImmediately(t *testing.T) {
 	}
 }
 
-func TestRouter_StreamAliasFallback_BadRequestStopsImmediately(t *testing.T) {
+func TestDispatcher_StreamAliasFallback_BadRequestStopsImmediately(t *testing.T) {
 	openAI := &fakeProvider{name: "openai"}
 	openAI.streamErrors = map[string]*provider.Error{
 		"deepseek-v4-pro": {Kind: provider.KindBadRequest, Message: "malformed stream"},
 	}
-	router := mustRouter(t, fallbackCatalog(t), openAI, nil)
+	dispatcher := mustDispatcher(t, fallbackCatalog(t), openAI, nil)
 
-	result, err := router.CompleteStream(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "hi"}}})
+	result, err := dispatcher.CompleteStream(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "hi"}}})
 	if err == nil {
 		t.Fatal("CompleteStream: want error")
 	}
@@ -260,12 +260,12 @@ func TestRouter_StreamAliasFallback_BadRequestStopsImmediately(t *testing.T) {
 	}
 }
 
-func TestRouter_AliasFallback_AllExhausted(t *testing.T) {
+func TestDispatcher_AliasFallback_AllExhausted(t *testing.T) {
 	openAI := &fakeProvider{name: "openai"}
 	openAI.errorAll = &provider.Error{Kind: provider.KindUpstream, Message: "boom", StatusCode: 502}
-	router := mustRouter(t, fallbackCatalog(t), openAI, nil)
+	dispatcher := mustDispatcher(t, fallbackCatalog(t), openAI, nil)
 
-	result, err := router.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "hi"}}})
+	result, err := dispatcher.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "hi"}}})
 	if err == nil {
 		t.Fatal("Complete: want error")
 	}
@@ -279,21 +279,21 @@ func TestRouter_AliasFallback_AllExhausted(t *testing.T) {
 	}
 }
 
-func TestRouter_StreamSkipsOpenCircuitModel(t *testing.T) {
+func TestDispatcher_StreamSkipsOpenCircuitModel(t *testing.T) {
 	openAI := &fakeProvider{name: "openai"}
 	openAI.errors = map[string]*provider.Error{
 		"deepseek-v4-pro": {Kind: provider.KindUpstream, Message: "boom"},
 	}
-	router := mustRouter(t, fallbackCatalog(t), openAI, nil)
+	dispatcher := mustDispatcher(t, fallbackCatalog(t), openAI, nil)
 
 	for i := 0; i < 3; i++ {
-		_, err := router.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
+		_, err := dispatcher.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
 		if err != nil {
 			t.Fatalf("run %d: unexpected error %v", i, err)
 		}
 	}
 
-	result, err := router.CompleteStream(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
+	result, err := dispatcher.CompleteStream(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
 	if err != nil {
 		t.Fatalf("CompleteStream: %v", err)
 	}
@@ -308,15 +308,15 @@ func TestRouter_StreamSkipsOpenCircuitModel(t *testing.T) {
 	}
 }
 
-func TestRouter_StreamPreStreamFailuresOpenCircuit(t *testing.T) {
+func TestDispatcher_StreamPreStreamFailuresOpenCircuit(t *testing.T) {
 	openAI := &fakeProvider{name: "openai"}
 	openAI.streamErrors = map[string]*provider.Error{
 		"deepseek-v4-pro": {Kind: provider.KindUpstream, Message: "stream setup failed"},
 	}
-	router := mustRouter(t, fallbackCatalog(t), openAI, nil)
+	dispatcher := mustDispatcher(t, fallbackCatalog(t), openAI, nil)
 
 	for i := 0; i < 3; i++ {
-		result, err := router.CompleteStream(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
+		result, err := dispatcher.CompleteStream(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
 		if err != nil {
 			t.Fatalf("run %d: unexpected error %v", i, err)
 		}
@@ -329,7 +329,7 @@ func TestRouter_StreamPreStreamFailuresOpenCircuit(t *testing.T) {
 	}
 
 	beforeSkip := openAI.streamCalls
-	result, err := router.CompleteStream(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
+	result, err := dispatcher.CompleteStream(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
 	if err != nil {
 		t.Fatalf("fourth CompleteStream: %v", err)
 	}
@@ -341,16 +341,16 @@ func TestRouter_StreamPreStreamFailuresOpenCircuit(t *testing.T) {
 	}
 }
 
-func TestRouter_StreamEmptyFirstEventFallsBack(t *testing.T) {
+func TestDispatcher_StreamEmptyFirstEventFallsBack(t *testing.T) {
 	openAI := &fakeProvider{
 		name: "openai",
 		streamEmptyEOF: map[string]bool{
 			"deepseek-v4-pro": true,
 		},
 	}
-	router := mustRouter(t, fallbackCatalog(t), openAI, nil)
+	dispatcher := mustDispatcher(t, fallbackCatalog(t), openAI, nil)
 
-	result, err := router.CompleteStream(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
+	result, err := dispatcher.CompleteStream(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
 	if err != nil {
 		t.Fatalf("CompleteStream: %v", err)
 	}
@@ -365,7 +365,7 @@ func TestRouter_StreamEmptyFirstEventFallsBack(t *testing.T) {
 	}
 }
 
-func TestRouter_CircuitOpensAfterRepeatedFailures(t *testing.T) {
+func TestDispatcher_CircuitOpensAfterRepeatedFailures(t *testing.T) {
 	// Only the primary fails — secondary always succeeds. Three failed
 	// runs trip the breaker on the primary; the fourth call must skip
 	// the primary and hit secondary directly.
@@ -373,10 +373,10 @@ func TestRouter_CircuitOpensAfterRepeatedFailures(t *testing.T) {
 	openAI.errors = map[string]*provider.Error{
 		"deepseek-v4-pro": {Kind: provider.KindUpstream, Message: "boom"},
 	}
-	router := mustRouter(t, fallbackCatalog(t), openAI, nil)
+	dispatcher := mustDispatcher(t, fallbackCatalog(t), openAI, nil)
 
 	for i := 0; i < 3; i++ {
-		_, err := router.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
+		_, err := dispatcher.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
 		if err != nil {
 			t.Fatalf("run %d: unexpected error %v", i, err)
 		}
@@ -388,14 +388,14 @@ func TestRouter_CircuitOpensAfterRepeatedFailures(t *testing.T) {
 
 	// Fourth run: primary breaker is open → only flash is called (1 call).
 	beforeSkip := openAI.completeCalls
-	_, _ = router.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
+	_, _ = dispatcher.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
 	added := openAI.completeCalls - beforeSkip
 	if added != 1 {
 		t.Errorf("fourth run added %d calls, want 1 (primary skipped)", added)
 	}
 }
 
-func TestRouter_CompleteTimeoutFallsBack(t *testing.T) {
+func TestDispatcher_CompleteTimeoutFallsBack(t *testing.T) {
 	openAI := &fakeProvider{
 		name: "openai",
 		completeDelays: map[string]time.Duration{
@@ -404,9 +404,9 @@ func TestRouter_CompleteTimeoutFallsBack(t *testing.T) {
 	}
 	policy := testPolicy
 	policy.CompleteTimeout = time.Millisecond
-	router := mustRouterWithPolicy(t, fallbackCatalog(t), openAI, nil, policy)
+	dispatcher := mustDispatcherWithPolicy(t, fallbackCatalog(t), openAI, nil, policy)
 
-	result, err := router.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
+	result, err := dispatcher.Complete(context.Background(), &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
 	if err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
@@ -421,7 +421,7 @@ func TestRouter_CompleteTimeoutFallsBack(t *testing.T) {
 	}
 }
 
-func TestRouter_RequestTimeoutStopsChain(t *testing.T) {
+func TestDispatcher_RequestTimeoutStopsChain(t *testing.T) {
 	openAI := &fakeProvider{
 		name: "openai",
 		completeDelays: map[string]time.Duration{
@@ -430,13 +430,13 @@ func TestRouter_RequestTimeoutStopsChain(t *testing.T) {
 	}
 	policy := testPolicy
 	policy.CompleteTimeout = time.Minute
-	router := mustRouterWithPolicy(t, fallbackCatalog(t), openAI, nil, policy)
+	dispatcher := mustDispatcherWithPolicy(t, fallbackCatalog(t), openAI, nil, policy)
 
 	// Request-level deadline lives on the caller's ctx (handler does this in
-	// production); router itself no longer adds a routeCtx wrap.
+	// production); dispatcher itself no longer adds a routeCtx wrap.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
 	defer cancel()
-	result, err := router.Complete(ctx, &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
+	result, err := dispatcher.Complete(ctx, &provider.Request{Model: "coder", Messages: []provider.Message{{Role: "user", Content: "x"}}})
 	if err == nil {
 		t.Fatal("Complete: want request timeout error")
 	}
@@ -452,11 +452,11 @@ func TestRouter_RequestTimeoutStopsChain(t *testing.T) {
 	}
 }
 
-func TestRouter_RawModelStillWorks(t *testing.T) {
+func TestDispatcher_RawModelStillWorks(t *testing.T) {
 	openAI := &fakeProvider{name: "openai"}
-	router := mustRouter(t, fallbackCatalog(t), openAI, nil)
+	dispatcher := mustDispatcher(t, fallbackCatalog(t), openAI, nil)
 
-	result, err := router.Complete(context.Background(), &provider.Request{Model: "kimi-k2.6", Messages: []provider.Message{{Role: "user", Content: "hi"}}})
+	result, err := dispatcher.Complete(context.Background(), &provider.Request{Model: "kimi-k2.6", Messages: []provider.Message{{Role: "user", Content: "hi"}}})
 	if err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
@@ -465,23 +465,23 @@ func TestRouter_RawModelStillWorks(t *testing.T) {
 	}
 }
 
-func mustRouter(t *testing.T, cat *catalog.Catalog, openAI provider.Provider, anth provider.Provider) *Router {
+func mustDispatcher(t *testing.T, cat *catalog.Catalog, openAI provider.Provider, anth provider.Provider) *Dispatcher {
 	t.Helper()
-	return mustRouterWithPolicy(t, cat, openAI, anth, testPolicy)
+	return mustDispatcherWithPolicy(t, cat, openAI, anth, testPolicy)
 }
 
-func mustRouterWithPolicy(t *testing.T, cat *catalog.Catalog, openAI provider.Provider, anth provider.Provider, policy FallbackPolicy) *Router {
+func mustDispatcherWithPolicy(t *testing.T, cat *catalog.Catalog, openAI provider.Provider, anth provider.Provider, policy FallbackPolicy) *Dispatcher {
 	t.Helper()
-	factories := map[string]AdapterFactory{
+	factories := map[string]ProviderFactory{
 		"openai": func(*catalog.Model) (provider.Provider, error) { return openAI, nil },
 	}
 	if anth == nil {
 		anth = &fakeProvider{name: "anthropic"}
 	}
 	factories["anthropic"] = func(*catalog.Model) (provider.Provider, error) { return anth, nil }
-	r, err := NewRouter(cat, factories, policy, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	r, err := NewDispatcher(cat, factories, policy, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
-		t.Fatalf("NewRouter: %v", err)
+		t.Fatalf("NewDispatcher: %v", err)
 	}
 	return r
 }
@@ -498,7 +498,7 @@ func fallbackCatalog(t *testing.T) *catalog.Catalog {
 	return cat
 }
 
-// stubCatalog builds a Catalog directly (no filesystem round-trip) so router
+// stubCatalog builds a Catalog directly (no filesystem round-trip) so dispatcher
 // tests stay focused on dispatch / fallback / breaker behavior. The real
 // loader is exercised in catalog_test.go.
 func stubCatalog(t *testing.T) *catalog.Catalog {

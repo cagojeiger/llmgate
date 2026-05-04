@@ -20,7 +20,7 @@ import (
 	"llmgate/internal/provider"
 	"llmgate/internal/provider/anthropic"
 	"llmgate/internal/provider/openai"
-	"llmgate/internal/router"
+	"llmgate/internal/dispatch"
 	"llmgate/internal/server"
 )
 
@@ -60,12 +60,12 @@ func run() error {
 	}
 	logger.Info("clients loaded", slog.Int("clients", clientStore.Len()))
 
-	factories := map[string]router.AdapterFactory{
+	factories := map[string]dispatch.ProviderFactory{
 		"openai":    openaiFactory,
 		"anthropic": anthropicFactory,
 	}
 
-	policy := router.FallbackPolicy{
+	policy := dispatch.FallbackPolicy{
 		OnKinds:         cfg.FallbackOn,
 		CircuitFailures: cfg.CircuitFailures,
 		CircuitOpen:     cfg.CircuitOpen,
@@ -73,7 +73,7 @@ func run() error {
 		CircuitJitter:   cfg.CircuitJitter,
 		CompleteTimeout: cfg.CompleteTimeout,
 	}
-	rtr, err := router.NewRouter(cat, factories, policy, logger)
+	rtr, err := dispatch.NewDispatcher(cat, factories, policy, logger)
 	if err != nil {
 		return err
 	}

@@ -10,19 +10,19 @@ import (
 
 	"llmgate/internal/audit"
 	"llmgate/internal/provider"
-	"llmgate/internal/router"
+	"llmgate/internal/dispatch"
 )
 
 const maxChatRequestBytes = 1 << 20
 
-// ChatRouter is the upstream contract Handler needs.
-type ChatRouter interface {
-	Complete(ctx context.Context, req *provider.Request) (*router.RouteResult, error)
-	CompleteStream(ctx context.Context, req *provider.Request) (*router.RouteResult, error)
+// ChatDispatcher is the upstream contract Handler needs.
+type ChatDispatcher interface {
+	Complete(ctx context.Context, req *provider.Request) (*dispatch.Result, error)
+	CompleteStream(ctx context.Context, req *provider.Request) (*dispatch.Result, error)
 }
 
 type Handler struct {
-	router         ChatRouter
+	dispatcher     ChatDispatcher
 	log            *slog.Logger
 	recorder       audit.Recorder
 	requestTimeout time.Duration
@@ -34,7 +34,7 @@ type HandlerConfig struct {
 	StreamIdleTimeout time.Duration
 }
 
-func NewHandler(router ChatRouter, log *slog.Logger, recorder audit.Recorder, cfg HandlerConfig) *Handler {
+func NewHandler(dispatcher ChatDispatcher, log *slog.Logger, recorder audit.Recorder, cfg HandlerConfig) *Handler {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -42,7 +42,7 @@ func NewHandler(router ChatRouter, log *slog.Logger, recorder audit.Recorder, cf
 		recorder = audit.Nop{}
 	}
 	return &Handler{
-		router:         router,
+		dispatcher:     dispatcher,
 		log:            log,
 		recorder:       recorder,
 		requestTimeout: cfg.RequestTimeout,
@@ -114,7 +114,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // adoptRoute copies routing metadata onto rec.
-func adoptRoute(rec *audit.Record, result *router.RouteResult) {
+func adoptRoute(rec *audit.Record, result *dispatch.Result) {
 	if result == nil {
 		return
 	}
@@ -158,7 +158,7 @@ func adoptStreamSummary(rec *audit.Record, sum *provider.Summary, now time.Time)
 }
 
 func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *provider.Request, rec *audit.Record) {
-	result, err := h.router.Complete(r.Context(), req)
+	result, err := h.dispatcher.Complete(r.Context(), req)
 	adoptRoute(rec, result)
 	if err != nil {
 		adoptError(rec, err)
@@ -195,7 +195,7 @@ func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *pro
 }
 
 func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *provider.Request, rec *audit.Record) {
-	result, err := h.router.CompleteStream(r.Context(), req)
+	result, err := h.dispatcher.CompleteStream(r.Context(), req)
 	adoptRoute(rec, result)
 	if err != nil {
 		adoptError(rec, err)

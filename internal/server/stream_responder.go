@@ -15,7 +15,7 @@ import (
 
 // streamResponder owns the SSE wire transcript for one streaming
 // request. Caller (Handler) handles the pre-stream phases (parse →
-// router → audit-route reflect) and the deferred Stream.Close /
+// dispatcher → audit-route reflect) and the deferred Stream.Close /
 // adoptStreamSummary; streamResponder takes over once a Stream is in
 // hand and runs the Recv loop until terminal state — EOF / idle
 // timeout / client disconnect / mid-stream provider error / encode

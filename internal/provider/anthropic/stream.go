@@ -68,19 +68,21 @@ type stream struct {
 	nextToolCallIndex int
 }
 
-// streamToolCallState accumulates one Anthropic tool_use block as the
-// matching OpenAI tool_calls entry is being emitted. Started records
-// whether we have already sent the *first* delta for this call (id +
-// name + initial arguments); subsequent deltas omit id/name and only
-// extend arguments. Placeholder marks the case where Anthropic begins
-// the block with input "{}" and intends to send the real arguments in
-// later input_json_delta events — when no deltas arrive (zero-arg tool)
-// we emit the empty object on content_block_stop.
+// streamToolCallState tracks the state of one Anthropic tool_use block
+// while OpenAI tool_calls deltas are being emitted for it. Anthropic
+// argument fragments are pass-through — each input_json_delta is
+// converted to an OpenAI arguments delta and forwarded immediately, so
+// no accumulator is needed here. Started records whether the *first*
+// delta (which carries id + name) has already been emitted; subsequent
+// deltas omit id/name and only extend arguments. Placeholder marks the
+// case where Anthropic begins the block with input "{}" and intends to
+// send the real arguments in later input_json_delta events — when no
+// deltas arrive (zero-arg tool) we emit the empty object on
+// content_block_stop.
 type streamToolCallState struct {
 	ID          string
 	Name        string
 	Index       int
-	Arguments   strings.Builder
 	Started     bool
 	Placeholder bool
 }
@@ -289,9 +291,6 @@ func (s *stream) handleContentBlockStart(event *anthropicStreamEvent) (bool, *pr
 		s.toolCalls[event.Index] = state
 		return false, nil, nil
 	}
-	if initial != "" {
-		_, _ = state.Arguments.WriteString(initial)
-	}
 	state.Started = true
 	s.toolCalls[event.Index] = state
 	return true, s.buildDeltaEvent(buildToolCallStartDelta(state, initial)), nil
@@ -310,10 +309,8 @@ func (s *stream) handleInputJSONDelta(event *anthropicStreamEvent) (bool, *provi
 		return false, nil, nil
 	}
 	if state.Placeholder {
-		state.Arguments.Reset()
 		state.Placeholder = false
 	}
-	_, _ = state.Arguments.WriteString(event.Delta.PartialJSON)
 	if !state.Started {
 		state.Started = true
 		return true, s.buildDeltaEvent(buildToolCallStartDelta(state, event.Delta.PartialJSON)), nil

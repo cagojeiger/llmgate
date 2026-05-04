@@ -10,7 +10,7 @@ import (
 // stream is alive, then returns a Stream that replays that event on its
 // first Recv() call. Adapters call this at the end of CompleteStream so
 // pre-first-event failures surface as a CompleteStream error — enabling
-// router-level fallback (Window-#2) without router needing its own
+// dispatch-level fallback (Window-#2) without router needing its own
 // eager-read.
 //
 // Lifecycle:

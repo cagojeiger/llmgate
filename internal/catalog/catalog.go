@@ -13,7 +13,7 @@
 // special code for that case.
 //
 // Routing policy (fallback eligibility, circuit breaker) is not part of the
-// catalog. It lives in env-driven config and reaches the router through
+// catalog. It lives in env-driven config and reaches the dispatcher through
 // main.go — the catalog's job is data only.
 //
 // Schema is intentionally flat. Operator-facing notes belong in yaml comments,

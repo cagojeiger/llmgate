@@ -20,7 +20,7 @@ type Server struct {
 	ShutdownDrainTimeout time.Duration
 	LogLevel             slog.Level
 
-	// Router fallback, breaker, and timeout settings.
+	// Dispatcher fallback, breaker, and timeout settings.
 	FallbackOn        []string
 	CircuitFailures   int
 	CircuitOpen       time.Duration

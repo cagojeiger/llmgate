@@ -57,7 +57,7 @@ func (e *Error) Is(target error) bool {
 }
 
 // KindOf extracts the gateway error kind from err. It is the common
-// read-side helper for router policy, server presentation, and audit
+// read-side helper for dispatch policy, server presentation, and audit
 // stamping so each layer does not repeat provider.Error unwrapping.
 func KindOf(err error) Kind {
 	if err == nil {

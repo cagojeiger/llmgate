@@ -60,7 +60,7 @@ type Consumer struct {
 	KeyHashes  []string `yaml:"key_hashes"`
 }
 
-// Store is the runtime view of the clients directory: an O(1) hash → consumer
+// Store is the runtime view of the consumers directory: an O(1) hash → consumer
 // map for auth lookups, plus a name → consumer map for completeness.
 type Store struct {
 	byHash  map[string]*Consumer
@@ -184,7 +184,7 @@ func validateHash(h string) error {
 	return nil
 }
 
-// Len returns the number of registered clients (one entry per yaml
+// Len returns the number of registered consumers (one entry per yaml
 // file). Useful for boot-time logging and tests; no auth path consults
 // it.
 func (s *Store) Len() int {

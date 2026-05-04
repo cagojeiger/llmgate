@@ -25,7 +25,7 @@ internal/provider/            Provider interface + OpenAI-shaped types
 internal/provider/openai/     OpenAI-protocol adapter
 internal/provider/anthropic/  Anthropic-protocol adapter (response normalized to OpenAI wire,
                               tools / tool_calls / tool_use translation in both directions)
-internal/router/              alias→chain dispatch + fallback + circuit breaker
+internal/dispatch/              alias→chain dispatch + fallback + circuit breaker
 internal/server/              chi handler, auth middleware, streamResponder, sseWriter, errors
 internal/audit/               per-request audit Record (incl. consumer_name / consumer_key_id)
 docs/adr/                     accepted decisions
@@ -76,7 +76,7 @@ the chain on fallback-eligible errors. Alias intent / chain rationale lives
 in yaml comments — `description` is not a data field. See
 `catalog/aliases/example.yaml.example` for the template.
 
-## Caller (client) registration
+## Caller (consumer) registration
 
 Every request to `/v1/chat/completions` must carry
 `Authorization: Bearer <raw-key>`. The probe routes (`/healthz`,
@@ -112,7 +112,7 @@ an external directory instead. The directory must contain `models/` (one
 yaml per model) and may contain `aliases/`. Yaml is parsed strictly —
 unknown fields (typos, stale `type:` / `specs:` / `notes:` blocks) fail
 boot. Use `models/example.yaml.example` and `aliases/example.yaml.example`
-as templates. Router/server policy (`LLMGATE_FALLBACK_ON`, circuit breaker
+as templates. Dispatcher/server policy (`LLMGATE_FALLBACK_ON`, circuit breaker
 settings, `LLMGATE_REQUEST_TIMEOUT`, `LLMGATE_COMPLETE_TIMEOUT`,
 `LLMGATE_STREAM_IDLE_TIMEOUT`) lives in env, not yaml. Hot-reload is not
 supported — change the catalog and restart.

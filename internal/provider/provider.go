@@ -18,7 +18,7 @@ type Stream interface {
 	Recv() (*Event, error)
 	// Close must be safe to call while Recv is blocked, and must cause any
 	// in-flight Recv to return promptly (within seconds, not minutes) — the
-	// router/handler use Close to break out of pending reads when the
+	// dispatcher/handler use Close to break out of pending reads when the
 	// request times out or the client disconnects. Callers apply a bounded
 	// grace period after Close as a safety net; if Recv still does not
 	// return, the spawning goroutine is abandoned (Go cannot forcibly

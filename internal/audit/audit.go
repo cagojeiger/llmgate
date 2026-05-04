@@ -17,7 +17,7 @@ type Record struct {
 	ModelRequested string
 
 	// ConsumerName identifies the registered caller (matched yaml `name` in
-	// clients/) for this request. Empty when the request was rejected at
+	// consumers/) for this request. Empty when the request was rejected at
 	// the auth boundary; the record is still emitted in that case so
 	// brute-force / mis-configured-key activity is observable. ConsumerKeyID
 	// is the first 8 hex chars of the matched hash (sha256), useful for

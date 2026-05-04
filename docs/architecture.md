@@ -22,7 +22,7 @@ graph LR
     end
 
     Catalog[(catalog/ yaml)]
-    Clients[(consumers/ yaml)]
+    Consumers[(consumers/ yaml)]
     Env[(env)]
     UpOAI[OpenAI-protocol upstream]
     UpAnth[Anthropic-protocol upstream]
@@ -40,7 +40,7 @@ graph LR
     Audit --> Sink
 
     Catalog -.boot.-> Dispatcher
-    Clients -.boot.-> Server
+    Consumers -.boot.-> Server
     Env -.boot.-> Server
     Env -.boot.-> Dispatcher
     Probe -.SIGTERM.-> Server
@@ -49,8 +49,8 @@ graph LR
 | 컴포넌트 | 역할 |
 |---|---|
 | HTTP Server | chi 라우터 + request_id / clientContext / access log / recoverer / read+request timeout. `/v1/chat/completions` (auth 보호), `/healthz/live` · `/healthz/ready` · `/healthz` (공개) |
-| auth middleware | `Authorization: Bearer` 추출 → sha256 → consumers Store lookup → ctx 에 ClientInfo 기록. 실패해도 short-circuit 안 함 — handler 가 audit-always emit (ADR 008) |
-| Handler | 요청 디코드, stream / non-stream 분기. ClientInfo 로 Record 채움 + auth 실패 시 401. 요청 총 wall-clock 한도의 권위자 (ADR 005) |
+| auth middleware | `Authorization: Bearer` 추출 → sha256 → consumers Store lookup → ctx 에 ConsumerInfo 기록. 실패해도 short-circuit 안 함 — handler 가 audit-always emit (ADR 008) |
+| Handler | 요청 디코드, stream / non-stream 분기. ConsumerInfo 로 Record 채움 + auth 실패 시 401. 요청 총 wall-clock 한도의 권위자 (ADR 005) |
 | streamResponder | 스트림 열린 뒤 SSE wire transcript. 이벤트 전송, idle timeout, client_closed, mid-stream error, `[DONE]` (ADR 006). 스트림 idle 한도의 권위자 (ADR 005) |
 | Dispatcher | 별명 → chain 해석, 폴백 적격 판정, 회로 차단 (ADR 004). non-stream 시도당 한도의 권위자 (ADR 005) |
 | OpenAI Adapter | OpenAI 와이어 호출. status 분류 + 첫 이벤트 검증 (ADR 006) |
@@ -203,9 +203,9 @@ sequenceDiagram
     participant Au as Audit
 
     A->>M: POST /v1/chat/completions<br/>Authorization: Bearer ...
-    Note over M: sha256(raw) lookup → ClientInfo on ctx<br/>(audit-always: pass through on failure)
+    Note over M: sha256(raw) lookup → ConsumerInfo on ctx<br/>(audit-always: pass through on failure)
     M->>H: next(r)
-    Note over H: ClientInfo → Record<br/>(auth 실패 시 401 emit + return)
+    Note over H: ConsumerInfo → Record<br/>(auth 실패 시 401 emit + return)
     H->>R: Complete(req)
     Note over R: 별명 해석 → chain 시도<br/>실패마다 Attempt 누적
     R-->>H: Result

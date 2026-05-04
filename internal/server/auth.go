@@ -64,7 +64,7 @@ func consumerContextMiddleware(next http.Handler) http.Handler {
 }
 
 // authMiddleware builds an HTTP middleware that classifies the
-// Authorization header against the given clients store and writes the
+// Authorization header against the given consumers store and writes the
 // result through the *ConsumerInfo pointer placed on ctx by
 // consumerContextMiddleware. Always calls next — the handler is the
 // single audit emitter and must run even on auth failure.

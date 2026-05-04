@@ -72,7 +72,7 @@ func accessLogMiddleware(log *slog.Logger) func(http.Handler) http.Handler {
 			// when auth rejected the request.
 			client := ClientFromContext(r.Context())
 
-			log.LogAttrs(r.Context(), slog.LevelInfo, "request",
+			attrs := []slog.Attr{
 				slog.String("method", r.Method),
 				slog.String("path", r.URL.Path),
 				slog.Int("status", cw.status),
@@ -80,7 +80,16 @@ func accessLogMiddleware(log *slog.Logger) func(http.Handler) http.Handler {
 				slog.Int64("bytes_out", cw.bytes),
 				slog.String("request_id", RequestIDFromContext(r.Context())),
 				slog.String("client", client.Name),
-			)
+			}
+			if client.AuthError != "" {
+				// Surface the auth-failure mode (missing / format / unknown)
+				// here too — the wire response only ever shows 401, so
+				// without this attr operators couldn't distinguish "no
+				// header sent" from "key rotated out" without diving into
+				// the audit stream.
+				attrs = append(attrs, slog.String("auth_error", string(client.AuthError)))
+			}
+			log.LogAttrs(r.Context(), slog.LevelInfo, "request", attrs...)
 		})
 	}
 }

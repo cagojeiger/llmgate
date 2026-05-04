@@ -21,9 +21,14 @@ type Record struct {
 	// the auth boundary; the record is still emitted in that case so
 	// brute-force / mis-configured-key activity is observable. ClientKeyID
 	// is the first 8 hex chars of the matched hash (sha256), useful for
-	// detecting which key in a rotating set was actually used.
+	// detecting which key in a rotating set was actually used. AuthError
+	// names the failure mode at the auth boundary ("missing" / "format" /
+	// "unknown") and is empty on success — it stays separate from ErrorKind
+	// because the wire response collapses every auth failure to 401, so
+	// the kind only lives in the audit / access-log surface.
 	ClientName  string
 	ClientKeyID string
+	AuthError   string
 
 	Vendor    string
 	ModelUsed string

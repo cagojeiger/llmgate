@@ -23,9 +23,9 @@ type ClientInfo struct {
 
 // AuthErrorKind is the reason auth failed at the gateway boundary. The
 // handler maps every non-empty value to a 401 KindAuth response; the
-// distinction stays on the audit record / access log only so operators
-// can grep "missing header" vs "unknown key" without re-reading the
-// matching code.
+// distinction is forwarded to audit Record.AuthError + the access log's
+// auth_error attr so operators can grep "missing header" vs "unknown
+// key" without re-reading the matching code.
 type AuthErrorKind string
 
 const (

@@ -32,6 +32,15 @@ func (r *LogRecorder) Record(ctx context.Context, rec *Record) {
 		slog.Int64("request_bytes", rec.RequestBytes),
 		slog.Int64("response_bytes", rec.ResponseBytes),
 	}
+	if rec.ClientName != "" {
+		attrs = append(attrs, slog.String("client_name", rec.ClientName))
+	}
+	if rec.ClientKeyID != "" {
+		attrs = append(attrs, slog.String("client_key_id", rec.ClientKeyID))
+	}
+	if rec.AuthError != "" {
+		attrs = append(attrs, slog.String("auth_error", rec.AuthError))
+	}
 	if rec.Vendor != "" {
 		attrs = append(attrs, slog.String("vendor", rec.Vendor))
 	}

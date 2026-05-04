@@ -205,17 +205,18 @@ func TestServer_AuthIntegration(t *testing.T) {
 	defer ts.Close()
 
 	type call struct {
-		label      string
-		header     string
-		wantStatus int
-		wantClient string
-		wantKind   provider.Kind
+		label         string
+		header        string
+		wantStatus    int
+		wantClient    string
+		wantKind      provider.Kind
+		wantAuthError string
 	}
 	cases := []call{
-		{"no-auth", "", http.StatusUnauthorized, "", provider.KindAuth},
-		{"bad-format", "Token foo", http.StatusUnauthorized, "", provider.KindAuth},
-		{"unknown-key", "Bearer wrong", http.StatusUnauthorized, "", provider.KindAuth},
-		{"good-key", "Bearer good-key", http.StatusOK, "alpha", ""},
+		{"no-auth", "", http.StatusUnauthorized, "", provider.KindAuth, "missing"},
+		{"bad-format", "Token foo", http.StatusUnauthorized, "", provider.KindAuth, "format"},
+		{"unknown-key", "Bearer wrong", http.StatusUnauthorized, "", provider.KindAuth, "unknown"},
+		{"good-key", "Bearer good-key", http.StatusOK, "alpha", "", ""},
 	}
 	body := `{"model":"claude-x","messages":[{"role":"user","content":"hi"}]}`
 	for _, c := range cases {
@@ -249,14 +250,25 @@ func TestServer_AuthIntegration(t *testing.T) {
 		if got.ErrorKind != c.wantKind {
 			t.Errorf("[%s] error_kind = %q, want %q", c.label, got.ErrorKind, c.wantKind)
 		}
+		if got.AuthError != c.wantAuthError {
+			t.Errorf("[%s] auth_error = %q, want %q", c.label, got.AuthError, c.wantAuthError)
+		}
 		if c.wantClient != "" && got.ClientKeyID == "" {
 			t.Errorf("[%s] client_key_id empty on success record", c.label)
 		}
 	}
 
-	// access log must include client name on the success line.
-	if !strings.Contains(logBuf.String(), `"client":"alpha"`) {
-		t.Errorf("access log missing client field for success request: %s", logBuf.String())
+	// Access log must surface caller identity on the success line and the
+	// specific failure mode on the auth-failure line, since the wire 401
+	// alone cannot distinguish missing vs format vs unknown.
+	logged := logBuf.String()
+	if !strings.Contains(logged, `"client":"alpha"`) {
+		t.Errorf("access log missing client field for success request: %s", logged)
+	}
+	for _, want := range []string{`"auth_error":"missing"`, `"auth_error":"format"`, `"auth_error":"unknown"`} {
+		if !strings.Contains(logged, want) {
+			t.Errorf("access log missing %s: %s", want, logged)
+		}
 	}
 }
 

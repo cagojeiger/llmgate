@@ -61,6 +61,69 @@ func TestLogRecorder_RecordSuccess(t *testing.T) {
 	}
 }
 
+func TestLogRecorder_RecordAuthFields(t *testing.T) {
+	// Caller-identity attrs land on the success line so post-processing
+	// can answer "who called?" from the audit stream alone.
+	log, buf := newCapturingLogger()
+	r := NewLogRecorder(log)
+
+	r.Record(context.Background(), &Record{
+		Timestamp:      time.Now(),
+		RequestID:      "req-auth-ok",
+		Method:         "chat.completions",
+		ModelRequested: "deepseek-v4-flash",
+		ClientName:     "alpha",
+		ClientKeyID:    "01234567",
+		StatusCode:     200,
+	})
+
+	var out map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out["client_name"] != "alpha" {
+		t.Errorf("client_name = %v, want alpha", out["client_name"])
+	}
+	if out["client_key_id"] != "01234567" {
+		t.Errorf("client_key_id = %v, want 01234567", out["client_key_id"])
+	}
+	if _, ok := out["auth_error"]; ok {
+		t.Errorf("auth_error must be omitted on success: %+v", out)
+	}
+}
+
+func TestLogRecorder_RecordAuthFailure(t *testing.T) {
+	// The audit-always property hinges on this: a 401 must still leave a
+	// recognizable line in the audit stream, with auth_error pinning the
+	// failure mode and ClientName/KeyID empty (kept off the line).
+	log, buf := newCapturingLogger()
+	r := NewLogRecorder(log)
+
+	r.Record(context.Background(), &Record{
+		Timestamp:      time.Now(),
+		RequestID:      "req-auth-bad",
+		Method:         "chat.completions",
+		ModelRequested: "",
+		AuthError:      "unknown",
+		ErrorKind:      provider.KindAuth,
+		StatusCode:     401,
+	})
+
+	var out map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out["auth_error"] != "unknown" {
+		t.Errorf("auth_error = %v, want unknown", out["auth_error"])
+	}
+	if _, ok := out["client_name"]; ok {
+		t.Errorf("client_name must be omitted on auth failure: %+v", out)
+	}
+	if _, ok := out["client_key_id"]; ok {
+		t.Errorf("client_key_id must be omitted on auth failure: %+v", out)
+	}
+}
+
 func TestLogRecorder_RecordError(t *testing.T) {
 	log, buf := newCapturingLogger()
 	r := NewLogRecorder(log)

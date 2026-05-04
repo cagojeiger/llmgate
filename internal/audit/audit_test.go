@@ -72,8 +72,8 @@ func TestLogRecorder_RecordAuthFields(t *testing.T) {
 		RequestID:      "req-auth-ok",
 		Method:         "chat.completions",
 		ModelRequested: "deepseek-v4-flash",
-		ClientName:     "alpha",
-		ClientKeyID:    "01234567",
+		ConsumerName:     "alpha",
+		ConsumerKeyID:    "01234567",
 		StatusCode:     200,
 	})
 
@@ -81,11 +81,11 @@ func TestLogRecorder_RecordAuthFields(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if out["client_name"] != "alpha" {
-		t.Errorf("client_name = %v, want alpha", out["client_name"])
+	if out["consumer_name"] != "alpha" {
+		t.Errorf("consumer_name = %v, want alpha", out["consumer_name"])
 	}
-	if out["client_key_id"] != "01234567" {
-		t.Errorf("client_key_id = %v, want 01234567", out["client_key_id"])
+	if out["consumer_key_id"] != "01234567" {
+		t.Errorf("consumer_key_id = %v, want 01234567", out["consumer_key_id"])
 	}
 	if _, ok := out["auth_error"]; ok {
 		t.Errorf("auth_error must be omitted on success: %+v", out)
@@ -95,7 +95,7 @@ func TestLogRecorder_RecordAuthFields(t *testing.T) {
 func TestLogRecorder_RecordAuthFailure(t *testing.T) {
 	// The audit-always property hinges on this: a 401 must still leave a
 	// recognizable line in the audit stream, with auth_error pinning the
-	// failure mode and ClientName/KeyID empty (kept off the line).
+	// failure mode and ConsumerName/KeyID empty (kept off the line).
 	log, buf := newCapturingLogger()
 	r := NewLogRecorder(log)
 
@@ -116,11 +116,11 @@ func TestLogRecorder_RecordAuthFailure(t *testing.T) {
 	if out["auth_error"] != "unknown" {
 		t.Errorf("auth_error = %v, want unknown", out["auth_error"])
 	}
-	if _, ok := out["client_name"]; ok {
-		t.Errorf("client_name must be omitted on auth failure: %+v", out)
+	if _, ok := out["consumer_name"]; ok {
+		t.Errorf("consumer_name must be omitted on auth failure: %+v", out)
 	}
-	if _, ok := out["client_key_id"]; ok {
-		t.Errorf("client_key_id must be omitted on auth failure: %+v", out)
+	if _, ok := out["consumer_key_id"]; ok {
+		t.Errorf("consumer_key_id must be omitted on auth failure: %+v", out)
 	}
 }
 

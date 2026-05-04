@@ -8,22 +8,22 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 
-	"llmgate/internal/clients"
+	"llmgate/internal/consumers"
 	"llmgate/internal/config"
 )
 
-func New(cfg *config.Server, log *slog.Logger, h *Handler, store *clients.Store, probe *ProbeState) *http.Server {
+func New(cfg *config.Server, log *slog.Logger, h *Handler, store *consumers.Store, probe *ProbeState) *http.Server {
 	r := chi.NewRouter()
 	r.Use(requestIDMiddleware)
-	// clientContextMiddleware must run before accessLogMiddleware so the
+	// consumerContextMiddleware must run before accessLogMiddleware so the
 	// access log's defer can read whatever the auth middleware later
-	// writes through the shared *ClientInfo pointer.
-	r.Use(clientContextMiddleware)
+	// writes through the shared *ConsumerInfo pointer.
+	r.Use(consumerContextMiddleware)
 	r.Use(accessLogMiddleware(log))
 	r.Use(chimiddleware.Recoverer)
 
 	// Probe endpoints: intentionally unauthenticated so orchestrators
-	// (k8s probes, load balancers) work without a registered client.
+	// (k8s probes, load balancers) work without a registered consumer.
 	// Two semantics:
 	//   /healthz/live  — always 200 (process alive)
 	//   /healthz/ready — 503 once SIGTERM has been received so endpoint

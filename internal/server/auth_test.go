@@ -15,7 +15,7 @@ import (
 	"testing"
 
 	"llmgate/internal/audit"
-	"llmgate/internal/clients"
+	"llmgate/internal/consumers"
 	"llmgate/internal/config"
 	"llmgate/internal/provider"
 	"llmgate/internal/dispatch"
@@ -48,18 +48,18 @@ func (s *stubDispatcher) CompleteStream(context.Context, *provider.Request) (*di
 	return s.resp, s.err
 }
 
-// writeStoreYAML drops one client yaml into a temp dir and loads it,
+// writeStoreYAML drops one consumer yaml into a temp dir and loads it,
 // returning the live store and the raw key the operator would issue.
-func writeStoreYAML(t *testing.T, name, rawKey string) *clients.Store {
+func writeStoreYAML(t *testing.T, name, rawKey string) *consumers.Store {
 	t.Helper()
 	dir := t.TempDir()
 	sum := sha256.Sum256([]byte(rawKey))
 	yaml := "name: " + name + "\nkey_hashes:\n  - sha256:" + hex.EncodeToString(sum[:]) + "\n"
 	path := filepath.Join(dir, name+".yaml")
 	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
-		t.Fatalf("write client yaml: %v", err)
+		t.Fatalf("write consumer yaml: %v", err)
 	}
-	store, err := clients.LoadDir(dir)
+	store, err := consumers.LoadDir(dir)
 	if err != nil {
 		t.Fatalf("load store: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestClassifyAuth_NoHeader(t *testing.T) {
 		t.Fatalf("AuthError = %q, want %q", got.AuthError, AuthErrorMissing)
 	}
 	if got.Name != "" || got.KeyID != "" {
-		t.Errorf("client info populated on missing header: %+v", got)
+		t.Errorf("consumer info populated on missing header: %+v", got)
 	}
 }
 
@@ -137,17 +137,17 @@ func TestClassifyAuth_BearerCaseInsensitive(t *testing.T) {
 }
 
 // authChain mirrors the production middleware order so unit tests that
-// exercise just the auth surface still get the *ClientInfo pointer
-// allocated by clientContextMiddleware.
-func authChain(store *clients.Store, next http.Handler) http.Handler {
-	return clientContextMiddleware(authMiddleware(store)(next))
+// exercise just the auth surface still get the *ConsumerInfo pointer
+// allocated by consumerContextMiddleware.
+func authChain(store *consumers.Store, next http.Handler) http.Handler {
+	return consumerContextMiddleware(authMiddleware(store)(next))
 }
 
 func TestAuthMiddleware_StashesContext(t *testing.T) {
 	store := writeStoreYAML(t, "alpha", "good-key")
-	var captured ClientInfo
+	var captured ConsumerInfo
 	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		captured = ClientFromContext(r.Context())
+		captured = ConsumerFromContext(r.Context())
 	})
 	srv := authChain(store, next)
 
@@ -168,7 +168,7 @@ func TestAuthMiddleware_AlwaysCallsNext(t *testing.T) {
 	called := false
 	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		called = true
-		got := ClientFromContext(r.Context())
+		got := ConsumerFromContext(r.Context())
 		if got.AuthError != AuthErrorUnknown {
 			t.Errorf("ctx AuthError = %q, want unknown", got.AuthError)
 		}
@@ -244,8 +244,8 @@ func TestServer_AuthIntegration(t *testing.T) {
 	}
 	for i, c := range cases {
 		got := rec.records[i]
-		if got.ClientName != c.wantClient {
-			t.Errorf("[%s] client_name = %q, want %q", c.label, got.ClientName, c.wantClient)
+		if got.ConsumerName != c.wantClient {
+			t.Errorf("[%s] consumer_name = %q, want %q", c.label, got.ConsumerName, c.wantClient)
 		}
 		if got.ErrorKind != c.wantKind {
 			t.Errorf("[%s] error_kind = %q, want %q", c.label, got.ErrorKind, c.wantKind)
@@ -253,8 +253,8 @@ func TestServer_AuthIntegration(t *testing.T) {
 		if got.AuthError != c.wantAuthError {
 			t.Errorf("[%s] auth_error = %q, want %q", c.label, got.AuthError, c.wantAuthError)
 		}
-		if c.wantClient != "" && got.ClientKeyID == "" {
-			t.Errorf("[%s] client_key_id empty on success record", c.label)
+		if c.wantClient != "" && got.ConsumerKeyID == "" {
+			t.Errorf("[%s] consumer_key_id empty on success record", c.label)
 		}
 	}
 
@@ -262,8 +262,8 @@ func TestServer_AuthIntegration(t *testing.T) {
 	// specific failure mode on the auth-failure line, since the wire 401
 	// alone cannot distinguish missing vs format vs unknown.
 	logged := logBuf.String()
-	if !strings.Contains(logged, `"client":"alpha"`) {
-		t.Errorf("access log missing client field for success request: %s", logged)
+	if !strings.Contains(logged, `"consumer":"alpha"`) {
+		t.Errorf("access log missing consumer field for success request: %s", logged)
 	}
 	for _, want := range []string{`"auth_error":"missing"`, `"auth_error":"format"`, `"auth_error":"unknown"`} {
 		if !strings.Contains(logged, want) {
@@ -273,7 +273,7 @@ func TestServer_AuthIntegration(t *testing.T) {
 }
 
 func TestServer_HealthzPublic(t *testing.T) {
-	// Smoke-only: probes are unauthenticated even when clients are
+	// Smoke-only: probes are unauthenticated even when consumers are
 	// registered. Detailed probe-state coverage lives in probe_test.go.
 	store := writeStoreYAML(t, "alpha", "good-key")
 	handler := NewHandler(&stubDispatcher{}, slog.Default(), &recordingRecorder{}, HandlerConfig{})

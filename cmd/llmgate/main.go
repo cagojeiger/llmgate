@@ -15,7 +15,7 @@ import (
 
 	"llmgate/internal/audit"
 	"llmgate/internal/catalog"
-	"llmgate/internal/clients"
+	"llmgate/internal/consumers"
 	"llmgate/internal/config"
 	"llmgate/internal/provider"
 	"llmgate/internal/provider/anthropic"
@@ -54,11 +54,11 @@ func run() error {
 		slog.Int("aliases", len(cat.Aliases)),
 	)
 
-	clientStore, err := clients.Load()
+	consumerStore, err := consumers.Load()
 	if err != nil {
-		return fmt.Errorf("load clients: %w", err)
+		return fmt.Errorf("load consumers: %w", err)
 	}
-	logger.Info("clients loaded", slog.Int("clients", clientStore.Len()))
+	logger.Info("consumers loaded", slog.Int("consumers", consumerStore.Len()))
 
 	factories := map[string]dispatch.ProviderFactory{
 		"openai":    openaiFactory,
@@ -90,7 +90,7 @@ func run() error {
 		StreamIdleTimeout: cfg.StreamIdleTimeout,
 	})
 	probe := server.NewProbeState()
-	srv := server.New(cfg, logger, handler, clientStore, probe)
+	srv := server.New(cfg, logger, handler, consumerStore, probe)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

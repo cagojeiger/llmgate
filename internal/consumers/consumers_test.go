@@ -1,4 +1,4 @@
-package clients
+package consumers
 
 import (
 	"crypto/sha256"
@@ -32,14 +32,14 @@ func writeClientDir(t *testing.T, files map[string]string) string {
 	return dir
 }
 
-// repoClientsDir points at the repo's clients/ directory from the
-// internal/clients package's working directory at test time.
-const repoClientsDir = "../../clients"
+// repoConsumersDir points at the repo's consumers/ directory from the
+// internal/consumers package's working directory at test time.
+const repoConsumersDir = "../../consumers"
 
-func TestLoadDir_RepoClients(t *testing.T) {
-	store, err := LoadDir(repoClientsDir)
+func TestLoadDir_RepoConsumers(t *testing.T) {
+	store, err := LoadDir(repoConsumersDir)
 	if err != nil {
-		t.Fatalf("LoadDir(%q) error = %v", repoClientsDir, err)
+		t.Fatalf("LoadDir(%q) error = %v", repoConsumersDir, err)
 	}
 	if got := len(store.byName); got == 0 {
 		t.Fatalf("len(byName) = 0, want at least one example registration")
@@ -107,8 +107,8 @@ func TestLoadDir_MissingDir(t *testing.T) {
 
 func TestLoadDir_EmptyDir(t *testing.T) {
 	_, err := LoadDir(t.TempDir())
-	if err == nil || !strings.Contains(err.Error(), "no clients registered") {
-		t.Fatalf("error = %v, want no-clients-registered error", err)
+	if err == nil || !strings.Contains(err.Error(), "no consumers registered") {
+		t.Fatalf("error = %v, want no-consumers-registered error", err)
 	}
 }
 
@@ -201,7 +201,7 @@ func TestLoadDir_DuplicateNameAcrossFiles(t *testing.T) {
 		"alpha.yml":  "name: alpha\nkey_hashes:\n  - " + sha256Hash(rawB) + "\n",
 	})
 	_, err := LoadDir(dir)
-	if err == nil || !strings.Contains(err.Error(), "duplicate client name") {
+	if err == nil || !strings.Contains(err.Error(), "duplicate consumer name") {
 		t.Fatalf("error = %v, want duplicate-name error", err)
 	}
 }
@@ -225,7 +225,7 @@ func TestLoadDir_DuplicateHashWithinClient(t *testing.T) {
 	})
 	_, err := LoadDir(dir)
 	if err == nil || !strings.Contains(err.Error(), "duplicate hash") {
-		t.Fatalf("error = %v, want intra-client duplicate-hash error", err)
+		t.Fatalf("error = %v, want intra-consumer duplicate-hash error", err)
 	}
 }
 
@@ -233,7 +233,7 @@ func TestLoadDir_IgnoresNonYamlFiles(t *testing.T) {
 	// .example template should not break boot.
 	dir := writeClientDir(t, map[string]string{
 		"alpha.yaml":   "name: alpha\nkey_hashes:\n  - " + sha256Hash("k") + "\n",
-		"README.md":    "Operator notes — not a client.",
+		"README.md":    "Operator notes — not a consumer.",
 		"sample.example": "name: sample\nkey_hashes: []\n",
 	})
 	store, err := LoadDir(dir)
@@ -249,7 +249,7 @@ func TestLoad_EnvOverride(t *testing.T) {
 	dir := writeClientDir(t, map[string]string{
 		"alpha.yaml": "name: alpha\nkey_hashes:\n  - " + sha256Hash("k") + "\n",
 	})
-	t.Setenv(envClientDir, dir)
+	t.Setenv(envConsumerDir, dir)
 	store, err := Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)

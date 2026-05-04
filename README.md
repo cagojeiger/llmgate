@@ -3,7 +3,7 @@
 OpenAI-wire-compatible LLM gateway. Logical model names resolve through a
 catalog to ordered fallback chains; per-process circuit breakers suppress
 dead upstreams. Every request to `/v1/chat/completions` carries a bearer
-key registered in `clients/`, and produces one audit record (success or
+key registered in `consumers/`, and produces one audit record (success or
 not).
 
 ## Layout
@@ -14,12 +14,12 @@ catalog/                      vendor-side yaml directory (operator-facing)
   models/<id>.yaml            one yaml per model (id + vendor + protocol +
                               base_url + auth_env + auth_scheme)
   aliases/<name>.yaml         one yaml per alias (alias + chain)
-clients/                      caller-side yaml directory (operator-facing)
+consumers/                      consumer-side yaml directory (operator-facing)
   <name>.yaml                 one yaml per caller (name + sha256 key_hashes;
                               raw keys never live on disk)
-scripts/gen-client.sh         helper to issue one caller (raw key + sha256 yaml)
+scripts/gen-consumer.sh         helper to issue one caller (raw key + sha256 yaml)
 internal/catalog/             vendor catalog loader (yaml -> Catalog struct)
-internal/clients/             caller registry loader (yaml -> Store, sha256 lookup)
+internal/consumers/             consumer registry loader (yaml -> Store, sha256 lookup)
 internal/config/              env-driven Server config (incl. router tuning)
 internal/provider/            Provider interface + OpenAI-shaped types
 internal/provider/openai/     OpenAI-protocol adapter
@@ -27,7 +27,7 @@ internal/provider/anthropic/  Anthropic-protocol adapter (response normalized to
                               tools / tool_calls / tool_use translation in both directions)
 internal/router/              alias→chain dispatch + fallback + circuit breaker
 internal/server/              chi handler, auth middleware, streamResponder, sseWriter, errors
-internal/audit/               per-request audit Record (incl. client_name / client_key_id)
+internal/audit/               per-request audit Record (incl. consumer_name / consumer_key_id)
 docs/adr/                     accepted decisions
 ```
 
@@ -41,13 +41,13 @@ make test     # unit tests
 make run      # start the gateway on :8080
 ```
 
-The gateway requires at least one registered caller — the `clients/`
+The gateway requires at least one registered caller — the `consumers/`
 directory ships with `example.yaml` (raw keys `example-key-001` /
 `example-key-002` documented in its comments) so `make run` boots
 straight away. For real deployments register your own caller:
 
 ```bash
-./scripts/gen-client.sh acme-prod
+./scripts/gen-consumer.sh acme-prod
 # prints the raw key once — store it in your secret manager.
 ```
 
@@ -82,14 +82,14 @@ Every request to `/v1/chat/completions` must carry
 `Authorization: Bearer <raw-key>`. The probe routes (`/healthz`,
 `/healthz/live`, `/healthz/ready`) stay public so orchestrator probes
 work without a key. Raw keys never live on disk — only their sha256
-hashes do — so a caught `clients/` directory leak does not expose the
+hashes do — so a caught `consumers/` directory leak does not expose the
 keys themselves.
 
 Register a new caller:
 
 ```bash
-./scripts/gen-client.sh acme-prod
-# wrote clients/acme-prod.yaml
+./scripts/gen-consumer.sh acme-prod
+# wrote consumers/acme-prod.yaml
 # raw key (give to caller, gateway never sees it again):
 #   <64 hex chars>
 ```
@@ -97,12 +97,12 @@ Register a new caller:
 Rotate a key by editing the `key_hashes` array — add the new sha256,
 deploy, switch the caller over, then remove the old hash on the next
 deploy. Multiple hashes per caller are valid; both keys authenticate
-during the rotation window. The audit record's `client_key_id` field
+during the rotation window. The audit record's `consumer_key_id` field
 (first 8 hex of the matched hash) tracks which key each call used.
 
-`./clients` is the default; override with `LLMGATE_CLIENTS=/path/to/dir`.
+`./consumers` is the default; override with `LLMGATE_CONSUMERS=/path/to/dir`.
 A missing or empty directory fails boot — there is no anonymous mode.
-Decisions and trade-offs in `docs/adr/008-clients.md`.
+Decisions and trade-offs in `docs/adr/008-consumers.md`.
 
 ## Catalog overrides
 
@@ -149,7 +149,7 @@ spec:
 
 ## Run in a container
 
-`compose.yaml` bind-mounts `./catalog` and `./clients` read-only into the
+`compose.yaml` bind-mounts `./catalog` and `./consumers` read-only into the
 container and reads `LLMGATE_OPENCODE_API_KEY` from `.env`, so editing
 yaml on the host flows through without rebuilding the image:
 

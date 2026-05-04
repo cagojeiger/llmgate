@@ -60,27 +60,27 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(ctx)
 	}
 
-	client := ClientFromContext(ctx)
+	consumer := ConsumerFromContext(ctx)
 	rec := &audit.Record{
 		Timestamp:   start,
 		RequestID:   RequestIDFromContext(ctx),
 		Method:      "chat.completions",
-		ClientName:  client.Name,
-		ClientKeyID: client.KeyID,
+		ConsumerName:  consumer.Name,
+		ConsumerKeyID: consumer.KeyID,
 	}
 	defer func() {
 		rec.DurationMS = time.Since(start).Milliseconds()
 		h.recorder.Record(ctx, rec)
 	}()
 
-	if client.AuthError != "" {
+	if consumer.AuthError != "" {
 		// Auth middleware ran but rejected; emit the audit record
 		// (audit-always — ADR 008) and return 401. The specific
 		// AuthErrorKind stays out of the wire response — callers see
 		// only "unauthorized" — but is stamped on rec.AuthError so
 		// audit/access-log surfaces show "missing" vs "format" vs
 		// "unknown" for operators.
-		rec.AuthError = string(client.AuthError)
+		rec.AuthError = string(consumer.AuthError)
 		perr := &provider.Error{Kind: provider.KindAuth, Message: "unauthorized"}
 		adoptError(rec, perr)
 		writeError(w, perr)

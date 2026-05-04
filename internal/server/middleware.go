@@ -66,11 +66,11 @@ func accessLogMiddleware(log *slog.Logger) func(http.Handler) http.Handler {
 
 			next.ServeHTTP(cw, r)
 
-			// Pull client identity that the auth middleware (when wired
+			// Pull consumer identity that the auth middleware (when wired
 			// for this route) set on ctx during the pre-handler phase.
 			// Empty string for routes without auth (e.g. /healthz) or
 			// when auth rejected the request.
-			client := ClientFromContext(r.Context())
+			consumer := ConsumerFromContext(r.Context())
 
 			attrs := []slog.Attr{
 				slog.String("method", r.Method),
@@ -79,15 +79,15 @@ func accessLogMiddleware(log *slog.Logger) func(http.Handler) http.Handler {
 				slog.Int64("duration_ms", time.Since(start).Milliseconds()),
 				slog.Int64("bytes_out", cw.bytes),
 				slog.String("request_id", RequestIDFromContext(r.Context())),
-				slog.String("client", client.Name),
+				slog.String("consumer", consumer.Name),
 			}
-			if client.AuthError != "" {
+			if consumer.AuthError != "" {
 				// Surface the auth-failure mode (missing / format / unknown)
 				// here too — the wire response only ever shows 401, so
 				// without this attr operators couldn't distinguish "no
 				// header sent" from "key rotated out" without diving into
 				// the audit stream.
-				attrs = append(attrs, slog.String("auth_error", string(client.AuthError)))
+				attrs = append(attrs, slog.String("auth_error", string(consumer.AuthError)))
 			}
 			log.LogAttrs(r.Context(), slog.LevelInfo, "request", attrs...)
 		})

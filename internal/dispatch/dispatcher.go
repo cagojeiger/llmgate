@@ -1,20 +1,31 @@
 // Package dispatch resolves model aliases, applies fallback policy, and
-// tracks per-process circuit-breaker state.
+// tracks per-process circuit-breaker state. The package depends only on
+// stdlib + provider abstractions — no HTTP, no yaml, no catalog. Wiring
+// (catalog yaml → Models / Aliases) is the caller's responsibility, so
+// Dispatcher stays a standalone service that any frontend (HTTP, CLI,
+// queue, gRPC) can drive.
 package dispatch
 
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
-	"llmgate/internal/catalog"
 	"llmgate/internal/provider"
 )
 
-type ProviderFactory func(*catalog.Model) (provider.Provider, error)
+// Models maps a model id to the provider that serves it. The id is the
+// stable identifier the caller sends in a request (or that an alias
+// resolves to). Lookup is case-insensitive — Dispatcher lowercases keys
+// internally so callers don't have to normalize.
+type Models = map[string]provider.Provider
+
+// Aliases maps an alias name to the ordered chain of model ids
+// Dispatcher should try in turn. A single-entry chain disables fallback
+// (it acts the same as a raw model call). Lookup is case-insensitive.
+type Aliases = map[string][]string
 
 // FallbackPolicy is env-driven dispatcher tuning. CircuitFailures or
 // CircuitOpen <= 0 disables the breaker; CircuitJitter is symmetric
@@ -59,34 +70,34 @@ type candidate struct {
 	provider provider.Provider
 }
 
-func NewDispatcher(cat *catalog.Catalog, factories map[string]ProviderFactory, policy FallbackPolicy, log *slog.Logger) (*Dispatcher, error) {
+// NewDispatcher builds a dispatcher from already-instantiated providers.
+// The caller is expected to have walked whatever data source it uses
+// (yaml catalog, in-memory config, …) and produced the Models map +
+// Aliases map. An empty Models map fails fast — there is nothing to
+// dispatch to.
+func NewDispatcher(models Models, aliases Aliases, policy FallbackPolicy, log *slog.Logger) (*Dispatcher, error) {
 	if log == nil {
 		log = slog.Default()
 	}
-
-	byModel := make(map[string]provider.Provider, len(cat.Models))
-	for modelID, m := range cat.Models {
-		factory, ok := factories[m.Protocol]
-		if !ok {
-			return nil, fmt.Errorf("dispatch: no adapter for protocol %q (model %q)", m.Protocol, m.ID)
-		}
-		p, err := factory(m)
-		if err != nil {
-			return nil, fmt.Errorf("dispatch: build adapter for model %q protocol %q: %w", m.ID, m.Protocol, err)
-		}
-		byModel[strings.ToLower(modelID)] = p
-	}
-	if len(byModel) == 0 {
-		return nil, errors.New("dispatch: no models registered (check protocol factories)")
+	if len(models) == 0 {
+		return nil, errors.New("dispatch: no models registered")
 	}
 
-	aliases := make(map[string][]string, len(cat.Aliases))
-	for name, a := range cat.Aliases {
-		chain := make([]string, len(a.Chain))
-		for i, m := range a.Chain {
-			chain[i] = strings.ToLower(m)
+	byModel := make(map[string]provider.Provider, len(models))
+	for id, p := range models {
+		if p == nil {
+			return nil, errors.New("dispatch: model " + id + " has nil provider")
 		}
-		aliases[strings.ToLower(name)] = chain
+		byModel[strings.ToLower(id)] = p
+	}
+
+	aliasMap := make(map[string][]string, len(aliases))
+	for name, chain := range aliases {
+		normalized := make([]string, len(chain))
+		for i, m := range chain {
+			normalized[i] = strings.ToLower(m)
+		}
+		aliasMap[strings.ToLower(name)] = normalized
 	}
 
 	internalPolicy := fallbackPolicy{
@@ -99,7 +110,7 @@ func NewDispatcher(cat *catalog.Catalog, factories map[string]ProviderFactory, p
 
 	return &Dispatcher{
 		byModel:  byModel,
-		aliases:  aliases,
+		aliases:  aliasMap,
 		policy:   internalPolicy,
 		log:      log,
 		breakers: newBreakerStore(policy.CircuitFailures, policy.CircuitOpen, policy.CircuitMaxOpen, policy.CircuitJitter, log),

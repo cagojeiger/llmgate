@@ -60,9 +60,13 @@ func run() error {
 	}
 	logger.Info("consumers loaded", slog.Int("consumers", consumerStore.Len()))
 
-	factories := map[string]dispatch.ProviderFactory{
+	factories := map[string]providerFactory{
 		"openai":    openaiFactory,
 		"anthropic": anthropicFactory,
+	}
+	models, aliases, err := buildDispatcherInputs(cat, factories)
+	if err != nil {
+		return err
 	}
 
 	policy := dispatch.FallbackPolicy{
@@ -73,7 +77,7 @@ func run() error {
 		CircuitJitter:   cfg.CircuitJitter,
 		CompleteTimeout: cfg.CompleteTimeout,
 	}
-	rtr, err := dispatch.NewDispatcher(cat, factories, policy, logger)
+	rtr, err := dispatch.NewDispatcher(models, aliases, policy, logger)
 	if err != nil {
 		return err
 	}
@@ -122,6 +126,37 @@ func run() error {
 		return serveErr
 	}
 	return nil
+}
+
+// providerFactory builds the Provider for one catalog model. Lives in
+// the cmd binary because it bridges two boundaries the dispatch package
+// deliberately does not know about: the catalog yaml shape (catalog.Model
+// fields) and the env-driven credential lookup (auth_env).
+type providerFactory func(*catalog.Model) (provider.Provider, error)
+
+// buildDispatcherInputs walks the catalog and turns it into the runtime
+// shape the dispatcher expects: model id → already-instantiated Provider,
+// alias name → ordered chain of model ids. The dispatcher itself stays
+// catalog-agnostic; this helper is the single point that bridges the
+// yaml shape into the service.
+func buildDispatcherInputs(cat *catalog.Catalog, factories map[string]providerFactory) (dispatch.Models, dispatch.Aliases, error) {
+	models := make(dispatch.Models, len(cat.Models))
+	for id, m := range cat.Models {
+		f, ok := factories[m.Protocol]
+		if !ok {
+			return nil, nil, fmt.Errorf("no adapter for protocol %q (model %q)", m.Protocol, m.ID)
+		}
+		p, err := f(m)
+		if err != nil {
+			return nil, nil, fmt.Errorf("build adapter for model %q protocol %q: %w", m.ID, m.Protocol, err)
+		}
+		models[id] = p
+	}
+	aliases := make(dispatch.Aliases, len(cat.Aliases))
+	for name, a := range cat.Aliases {
+		aliases[name] = append([]string(nil), a.Chain...)
+	}
+	return models, aliases, nil
 }
 
 func openaiFactory(m *catalog.Model) (provider.Provider, error) {

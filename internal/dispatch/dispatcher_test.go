@@ -26,29 +26,31 @@ var testPolicy = FallbackPolicy{
 	CompleteTimeout: time.Minute,
 }
 
-func TestDispatcher_MissingProtocolFactoryFailsFast(t *testing.T) {
-	_, err := NewDispatcher(stubCatalog(t), map[string]ProviderFactory{
-		"openai": func(*catalog.Model) (provider.Provider, error) {
-			return &fakeProvider{name: "openai"}, nil
-		},
-	}, testPolicy, slog.New(slog.NewTextHandler(io.Discard, nil)))
+func TestDispatcher_EmptyModelsFailsFast(t *testing.T) {
+	_, err := NewDispatcher(Models{}, Aliases{}, testPolicy, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err == nil {
-		t.Fatal("NewDispatcher() error = nil, want missing protocol factory error")
+		t.Fatal("NewDispatcher() error = nil, want empty-models error")
 	}
-	if !strings.Contains(err.Error(), `no adapter for protocol "anthropic"`) {
-		t.Fatalf("NewDispatcher() error = %q, want missing anthropic protocol factory", err.Error())
+	if !strings.Contains(err.Error(), "no models registered") {
+		t.Fatalf("NewDispatcher() error = %q, want no-models-registered error", err.Error())
+	}
+}
+
+func TestDispatcher_NilProviderFailsFast(t *testing.T) {
+	_, err := NewDispatcher(Models{"a": nil}, Aliases{}, testPolicy, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err == nil {
+		t.Fatal("NewDispatcher() error = nil, want nil-provider error")
+	}
+	if !strings.Contains(err.Error(), "nil provider") {
+		t.Fatalf("NewDispatcher() error = %q, want nil-provider error", err.Error())
 	}
 }
 
 func TestDispatcher_Both(t *testing.T) {
-	dispatcher, err := NewDispatcher(stubCatalog(t), map[string]ProviderFactory{
-		"openai": func(*catalog.Model) (provider.Provider, error) {
-			return &fakeProvider{name: "openai"}, nil
-		},
-		"anthropic": func(*catalog.Model) (provider.Provider, error) {
-			return &fakeProvider{name: "anthropic"}, nil
-		},
-	}, testPolicy, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	cat := stubCatalog(t)
+	models := buildTestModels(t, cat, &fakeProvider{name: "openai"}, &fakeProvider{name: "anthropic"})
+	aliases := buildTestAliases(cat)
+	dispatcher, err := NewDispatcher(models, aliases, testPolicy, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatalf("NewDispatcher() error = %v", err)
 	}
@@ -58,14 +60,10 @@ func TestDispatcher_Both(t *testing.T) {
 }
 
 func TestDispatcher_UnknownModel(t *testing.T) {
-	dispatcher, err := NewDispatcher(stubCatalog(t), map[string]ProviderFactory{
-		"openai": func(*catalog.Model) (provider.Provider, error) {
-			return &fakeProvider{name: "openai"}, nil
-		},
-		"anthropic": func(*catalog.Model) (provider.Provider, error) {
-			return &fakeProvider{name: "anthropic"}, nil
-		},
-	}, testPolicy, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	cat := stubCatalog(t)
+	models := buildTestModels(t, cat, &fakeProvider{name: "openai"}, &fakeProvider{name: "anthropic"})
+	aliases := buildTestAliases(cat)
+	dispatcher, err := NewDispatcher(models, aliases, testPolicy, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatalf("NewDispatcher() error = %v", err)
 	}
@@ -89,14 +87,10 @@ func TestDispatcher_UnknownModel(t *testing.T) {
 func TestDispatcher_Dispatch(t *testing.T) {
 	openAI := &fakeProvider{name: "openai"}
 	anthropic := &fakeProvider{name: "anthropic"}
-	dispatcher, err := NewDispatcher(stubCatalog(t), map[string]ProviderFactory{
-		"openai": func(*catalog.Model) (provider.Provider, error) {
-			return openAI, nil
-		},
-		"anthropic": func(*catalog.Model) (provider.Provider, error) {
-			return anthropic, nil
-		},
-	}, testPolicy, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	cat := stubCatalog(t)
+	models := buildTestModels(t, cat, openAI, anthropic)
+	aliases := buildTestAliases(cat)
+	dispatcher, err := NewDispatcher(models, aliases, testPolicy, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatalf("NewDispatcher() error = %v", err)
 	}
@@ -472,18 +466,48 @@ func mustDispatcher(t *testing.T, cat *catalog.Catalog, openAI provider.Provider
 
 func mustDispatcherWithPolicy(t *testing.T, cat *catalog.Catalog, openAI provider.Provider, anth provider.Provider, policy FallbackPolicy) *Dispatcher {
 	t.Helper()
-	factories := map[string]ProviderFactory{
-		"openai": func(*catalog.Model) (provider.Provider, error) { return openAI, nil },
-	}
-	if anth == nil {
-		anth = &fakeProvider{name: "anthropic"}
-	}
-	factories["anthropic"] = func(*catalog.Model) (provider.Provider, error) { return anth, nil }
-	r, err := NewDispatcher(cat, factories, policy, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	models := buildTestModels(t, cat, openAI, anth)
+	aliases := buildTestAliases(cat)
+	r, err := NewDispatcher(models, aliases, policy, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
 	return r
+}
+
+// buildTestModels turns a catalog into the dispatch.Models map by
+// picking the openai or anthropic provider per the catalog model's
+// Protocol field. Tests use this in place of the production
+// buildDispatcherInputs (which lives in cmd/llmgate). nil anth gets a
+// stub fakeProvider so tests that only care about the openai side
+// don't have to construct one.
+func buildTestModels(t *testing.T, cat *catalog.Catalog, openAI, anth provider.Provider) Models {
+	t.Helper()
+	if anth == nil {
+		anth = &fakeProvider{name: "anthropic"}
+	}
+	m := make(Models, len(cat.Models))
+	for id, mc := range cat.Models {
+		switch mc.Protocol {
+		case "openai":
+			m[id] = openAI
+		case "anthropic":
+			m[id] = anth
+		default:
+			t.Fatalf("buildTestModels: unknown protocol %q for model %q", mc.Protocol, id)
+		}
+	}
+	return m
+}
+
+// buildTestAliases turns the catalog's alias entries into the simpler
+// chain-only Aliases shape dispatcher consumes.
+func buildTestAliases(cat *catalog.Catalog) Aliases {
+	a := make(Aliases, len(cat.Aliases))
+	for name, al := range cat.Aliases {
+		a[name] = append([]string(nil), al.Chain...)
+	}
+	return a
 }
 
 // fallbackCatalog mirrors stubCatalog with the addition of a "coder" alias

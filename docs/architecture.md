@@ -6,24 +6,38 @@ OpenAI SDK 와이어 호환 게이트웨이. 모델은 *기본 등록 단위*, *
 
 ## 시스템 지도
 
+게이트웨이는 3 레이어로 쌓여있다. 의존 방향은 **단방향** — Delivery → Service → Wire.
+boot data 와 셧다운 흐름은 *별도 다이어그램* (`## 부팅 시퀀스`, `## 프로브 & 셧다운`) 이
+담당하므로 이 그림은 *runtime 호출 흐름* 만 보인다.
+
 ```mermaid
 graph LR
     Agent[Agent / OpenAI SDK]
 
     subgraph Gateway[llmgate process]
         direction TB
-        Server["HTTP Server<br/>chi + middleware + auth"]
-        Handler[Handler]
-        Dispatcher[Dispatcher]
-        OAI[OpenAI Adapter]
-        Anth[Anthropic Adapter]
-        Probe[ProbeState]
-        Audit[Audit Recorder]
+
+        subgraph Delivery[Delivery — HTTP transport]
+            direction TB
+            Server["HTTP Server<br/>chi + middleware + auth"]
+            Handler[Handler]
+            StreamResp[streamResponder]
+            Probe[ProbeState]
+            Audit[Audit Recorder]
+        end
+
+        subgraph Service[Service — chain dispatch]
+            direction TB
+            Dispatcher
+        end
+
+        subgraph Wire[Wire — vendor providers]
+            direction TB
+            OAI[OpenAI Adapter]
+            Anth[Anthropic Adapter]
+        end
     end
 
-    Catalog[(catalog/ yaml)]
-    Consumers[(consumers/ yaml)]
-    Env[(env)]
     UpOAI[OpenAI-protocol upstream]
     UpAnth[Anthropic-protocol upstream]
     Sink[stdout]
@@ -31,33 +45,37 @@ graph LR
     Agent -->|"/v1/chat/completions<br/>Bearer ..."| Server
     Server --> Handler
     Handler -->|Request| Dispatcher
-    Dispatcher -->|Result| Handler
+    Dispatcher -->|Result.Response| Handler
+    Dispatcher -->|Result.Stream| StreamResp
+    StreamResp -.SSE chunks.-> Agent
     Dispatcher --> OAI
     Dispatcher --> Anth
     OAI --> UpOAI
     Anth --> UpAnth
     Handler --> Audit
+    StreamResp --> Audit
     Audit --> Sink
-
-    Catalog -.boot.-> Dispatcher
-    Consumers -.boot.-> Server
-    Env -.boot.-> Server
-    Env -.boot.-> Dispatcher
-    Probe -.SIGTERM.-> Server
 ```
 
-| 컴포넌트 | 역할 |
-|---|---|
-| HTTP Server | chi 라우터 + request_id / clientContext / access log / recoverer / read+request timeout. `/v1/chat/completions` (auth 보호), `/healthz/live` · `/healthz/ready` · `/healthz` (공개) |
-| auth middleware | `Authorization: Bearer` 추출 → sha256 → consumers Store lookup → ctx 에 ConsumerInfo 기록. 실패해도 short-circuit 안 함 — handler 가 audit-always emit (ADR 008) |
-| Handler | 요청 디코드, stream / non-stream 분기. ConsumerInfo 로 Record 채움 + auth 실패 시 401. 요청 총 wall-clock 한도의 권위자 (ADR 005) |
-| streamResponder | 스트림 열린 뒤 SSE wire transcript. 이벤트 전송, idle timeout, client_closed, mid-stream error, `[DONE]` (ADR 006). 스트림 idle 한도의 권위자 (ADR 005) |
-| Dispatcher | 별명 → chain 해석, 폴백 적격 판정, 회로 차단 (ADR 004). non-stream 시도당 한도의 권위자 (ADR 005) |
-| OpenAI Adapter | OpenAI 와이어 호출. status 분류 + 첫 이벤트 검증 (ADR 006) |
-| Anthropic Adapter | Anthropic ↔ OpenAI 와이어 양방향 변환 (tools / tool_choice / tool_calls / tool_use). status 분류 + 첫 이벤트 검증 (ADR 006) |
-| consumers Store | 부팅 시 yaml → sha256 → consumer 매핑 read-only. 0 개면 부팅 fail (ADR 008) |
-| ProbeState | SIGTERM 시 `MarkShuttingDown()` → readiness 만 503. liveness · in-flight 영향 없음 |
-| Audit Recorder | 요청당 1 개 fact record. consumer_name + consumer_key_id + auth_error 포함 — *누가 / 왜 실패* 의 사실 |
+### 레이어 의존성과 경계
+
+- **Service** (`internal/dispatch/`) — stdlib + `internal/provider/` 만 의존. *standalone* — HTTP 외 frontend (CLI / queue / gRPC) 가 `dispatch.NewDispatcher(models, aliases, ...)` 만 호출하면 chain / 폴백 / 회로 / 시도당 한도 그대로 사용 가능.
+- **Delivery** (`internal/server/`) — Service 를 HTTP 로 노출. chi + middleware + auth + Handler + streamResponder + probes + audit. Service 가 모르는 *와이어 시맨틱* (SSE / `[DONE]` / idle timeout / 401 / readiness) 을 책임.
+- **Wire** (`internal/provider/openai|anthropic/`) — `provider.Provider` 인터페이스 구현. vendor 와이어 차이 (status 분류 / 첫 이벤트 검증 / 와이어 정규화) 를 자기 안에 가둠.
+- **boundary**: Service 가 Delivery 로 돌려주는 형식은 `provider.Stream` (인터페이스) / `provider.Response` (struct). 둘 다 HTTP 모름. ADR 006 의 *first-event boundary* = 시간축에서의 레이어 경계 표현.
+
+| 레이어 | 컴포넌트 | 역할 |
+|---|---|---|
+| Delivery | HTTP Server | chi 라우터 + request_id / clientContext / access log / recoverer / read+request timeout. `/v1/chat/completions` (auth 보호), `/healthz/live` · `/healthz/ready` · `/healthz` (공개) |
+| Delivery | auth middleware | `Authorization: Bearer` 추출 → sha256 → consumers Store lookup → ctx 에 ConsumerInfo 기록. 실패해도 short-circuit 안 함 — Handler 가 audit-always emit (ADR 008) |
+| Delivery | Handler | 요청 디코드, stream / non-stream 분기. ConsumerInfo 로 Record 채움 + auth 실패 시 401. 요청 총 wall-clock 한도의 권위자 (ADR 005) |
+| Delivery | streamResponder | 스트림 열린 뒤 SSE wire transcript. 이벤트 전송, idle timeout, client_closed, mid-stream error, `[DONE]` (ADR 006). 스트림 idle 한도의 권위자 (ADR 005) |
+| Delivery | ProbeState | SIGTERM 시 `MarkShuttingDown()` → readiness 만 503. liveness · in-flight 영향 없음 |
+| Delivery | Audit Recorder | 요청당 1 개 fact record. consumer_name + consumer_key_id + auth_error 포함 — *누가 / 왜 실패* 의 사실 |
+| Service | Dispatcher | 별명 → chain 해석, 폴백 적격 판정, 회로 차단 (ADR 004). non-stream 시도당 한도의 권위자 (ADR 005). stdlib + provider 만 import |
+| Wire | OpenAI Adapter | OpenAI 와이어 호출. status 분류 + 첫 이벤트 검증 (ADR 006) |
+| Wire | Anthropic Adapter | Anthropic ↔ OpenAI 와이어 양방향 변환 (tools / tool_choice / tool_calls / tool_use). status 분류 + 첫 이벤트 검증 (ADR 006) |
+| Boot data | consumers Store | 부팅 시 yaml → sha256 → consumer 매핑 read-only. 0 개면 부팅 fail (ADR 008). Delivery 의 auth middleware 가 소비 |
 
 각 컴포넌트의 단일 책임 (*권위자가 한 명*) 결정 근거는 ADR 007.
 

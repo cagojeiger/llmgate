@@ -1,0 +1,619 @@
+package anthropic
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"llmgate/internal/core"
+)
+
+// decodeRequestBody marshals a Request through toAnthropicRequest and
+// returns the resulting wire JSON as a generic map for assertion.
+func decodeRequestBody(t *testing.T, req *core.Request) map[string]any {
+	t.Helper()
+	body, err := toAnthropicRequest(req, 32, false)
+	if err != nil {
+		t.Fatalf("toAnthropicRequest error = %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	return got
+}
+
+func TestToAnthropicRequest_PlainText(t *testing.T) {
+	got := decodeRequestBody(t, &core.Request{
+		Model:    "claude-x",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	})
+	msgs := got["messages"].([]any)
+	if len(msgs) != 1 {
+		t.Fatalf("messages len = %d, want 1", len(msgs))
+	}
+	m := msgs[0].(map[string]any)
+	if m["role"] != "user" {
+		t.Errorf("role = %q, want user", m["role"])
+	}
+	if m["content"] != "hi" {
+		t.Errorf("content = %v, want \"hi\"", m["content"])
+	}
+	if _, has := got["tools"]; has {
+		t.Errorf("tools must be omitted when none provided")
+	}
+	if _, has := got["tool_choice"]; has {
+		t.Errorf("tool_choice must be omitted when none provided")
+	}
+}
+
+func TestToAnthropicRequest_ToolsBasic(t *testing.T) {
+	got := decodeRequestBody(t, &core.Request{
+		Model:    "claude-x",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		Extra: map[string]json.RawMessage{
+			"tools": json.RawMessage(`[
+				{"type":"function","function":{"name":"get_time","description":"return current time","parameters":{"type":"object","properties":{"tz":{"type":"string"}},"required":["tz"]}}}
+			]`),
+		},
+	})
+	tools, ok := got["tools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("tools = %v, want one element", got["tools"])
+	}
+	tool := tools[0].(map[string]any)
+	if tool["name"] != "get_time" {
+		t.Errorf("tool.name = %q, want get_time", tool["name"])
+	}
+	if tool["description"] != "return current time" {
+		t.Errorf("tool.description = %q, want return current time", tool["description"])
+	}
+	schema, ok := tool["input_schema"].(map[string]any)
+	if !ok {
+		t.Fatalf("input_schema missing or wrong type: %T", tool["input_schema"])
+	}
+	if schema["type"] != "object" {
+		t.Errorf("input_schema.type = %q, want object", schema["type"])
+	}
+	if _, has := tool["parameters"]; has {
+		t.Errorf("anthropic tool must not carry OpenAI's parameters key")
+	}
+}
+
+func TestToAnthropicRequest_ToolsEmptyParametersDefaultsToObject(t *testing.T) {
+	got := decodeRequestBody(t, &core.Request{
+		Model:    "claude-x",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		Extra: map[string]json.RawMessage{
+			"tools": json.RawMessage(`[{"type":"function","function":{"name":"ping"}}]`),
+		},
+	})
+	tools := got["tools"].([]any)
+	tool := tools[0].(map[string]any)
+	schema := tool["input_schema"].(map[string]any)
+	if schema["type"] != "object" {
+		t.Errorf("default schema.type = %q, want object", schema["type"])
+	}
+	if props, ok := schema["properties"].(map[string]any); !ok || len(props) != 0 {
+		t.Errorf("default schema.properties = %v, want empty object", schema["properties"])
+	}
+}
+
+func TestToAnthropicRequest_ToolsRejectsNonObjectSchema(t *testing.T) {
+	_, err := toAnthropicRequest(&core.Request{
+		Model:    "claude-x",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		Extra: map[string]json.RawMessage{
+			"tools": json.RawMessage(`[{"type":"function","function":{"name":"odd","parameters":{"type":"string"}}}]`),
+		},
+	}, 32, false)
+	if err == nil || !strings.Contains(err.Error(), "object schema") {
+		t.Fatalf("error = %v, want object-schema error", err)
+	}
+}
+
+func TestToAnthropicRequest_ToolsRejectsUnsupportedType(t *testing.T) {
+	_, err := toAnthropicRequest(&core.Request{
+		Model:    "claude-x",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		Extra: map[string]json.RawMessage{
+			"tools": json.RawMessage(`[{"type":"web_search"}]`),
+		},
+	}, 32, false)
+	if err == nil || !strings.Contains(err.Error(), "tool type") {
+		t.Fatalf("error = %v, want unsupported-tool-type error", err)
+	}
+}
+
+func TestToAnthropicRequest_ToolChoiceVariants(t *testing.T) {
+	cases := []struct {
+		label    string
+		raw      string
+		wantType string
+		wantName string
+		wantNone bool
+	}{
+		{"auto-string", `"auto"`, "auto", "", false},
+		{"required-string", `"required"`, "any", "", false},
+		{"none-string", `"none"`, "", "", true},
+		{"empty-string", `""`, "auto", "", false},
+		{"object-auto", `{"type":"auto"}`, "auto", "", false},
+		{"object-any", `{"type":"any"}`, "any", "", false},
+		{"object-function", `{"type":"function","function":{"name":"pick"}}`, "tool", "pick", false},
+		{"object-tool-direct-name", `{"type":"tool","name":"pick"}`, "tool", "pick", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.label, func(t *testing.T) {
+			body, err := toAnthropicRequest(&core.Request{
+				Model:    "claude-x",
+				Messages: []core.Message{{Role: "user", Content: "hi"}},
+				Extra: map[string]json.RawMessage{
+					"tools":       json.RawMessage(`[{"type":"function","function":{"name":"pick"}}]`),
+					"tool_choice": json.RawMessage(tc.raw),
+				},
+			}, 32, false)
+			if err != nil {
+				t.Fatalf("toAnthropicRequest error = %v", err)
+			}
+			var got map[string]any
+			if err := json.Unmarshal(body, &got); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if tc.wantNone {
+				if _, has := got["tools"]; has {
+					t.Errorf("tools should be dropped on tool_choice=none")
+				}
+				if _, has := got["tool_choice"]; has {
+					t.Errorf("tool_choice should be dropped on tool_choice=none")
+				}
+				return
+			}
+			choice, ok := got["tool_choice"].(map[string]any)
+			if !ok {
+				t.Fatalf("tool_choice missing or wrong type: %T", got["tool_choice"])
+			}
+			if choice["type"] != tc.wantType {
+				t.Errorf("type = %q, want %q", choice["type"], tc.wantType)
+			}
+			if tc.wantName != "" && choice["name"] != tc.wantName {
+				t.Errorf("name = %q, want %q", choice["name"], tc.wantName)
+			}
+		})
+	}
+}
+
+func TestToAnthropicRequest_ParallelToolCallsFalse(t *testing.T) {
+	got := decodeRequestBody(t, &core.Request{
+		Model:    "claude-x",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		Extra: map[string]json.RawMessage{
+			"tools":               json.RawMessage(`[{"type":"function","function":{"name":"pick"}}]`),
+			"parallel_tool_calls": json.RawMessage(`false`),
+		},
+	})
+	choice, ok := got["tool_choice"].(map[string]any)
+	if !ok {
+		t.Fatalf("tool_choice should be auto-injected when parallel_tool_calls=false")
+	}
+	if choice["type"] != "auto" {
+		t.Errorf("type = %q, want auto", choice["type"])
+	}
+	if disable, _ := choice["disable_parallel_tool_use"].(bool); !disable {
+		t.Errorf("disable_parallel_tool_use = %v, want true", choice["disable_parallel_tool_use"])
+	}
+}
+
+func TestToAnthropicRequest_ParallelToolCallsTrueLeavesUnset(t *testing.T) {
+	got := decodeRequestBody(t, &core.Request{
+		Model:    "claude-x",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		Extra: map[string]json.RawMessage{
+			"tools":               json.RawMessage(`[{"type":"function","function":{"name":"pick"}}]`),
+			"parallel_tool_calls": json.RawMessage(`true`),
+		},
+	})
+	if _, has := got["tool_choice"]; has {
+		t.Errorf("tool_choice should not be auto-set when parallel_tool_calls=true")
+	}
+}
+
+func TestToAnthropicRequest_AssistantWithToolCalls(t *testing.T) {
+	got := decodeRequestBody(t, &core.Request{
+		Model: "claude-x",
+		Messages: []core.Message{
+			{Role: "user", Content: "what time?"},
+			{
+				Role:    "assistant",
+				Content: "let me check",
+				Extra: map[string]json.RawMessage{
+					"tool_calls": json.RawMessage(`[{"id":"call-1","type":"function","function":{"name":"get_time","arguments":"{\"tz\":\"UTC\"}"}}]`),
+				},
+			},
+		},
+	})
+	msgs := got["messages"].([]any)
+	if len(msgs) != 2 {
+		t.Fatalf("messages len = %d, want 2", len(msgs))
+	}
+	asst := msgs[1].(map[string]any)
+	blocks, ok := asst["content"].([]any)
+	if !ok {
+		t.Fatalf("assistant content should be array of blocks, got %T", asst["content"])
+	}
+	if len(blocks) != 2 {
+		t.Fatalf("blocks len = %d, want 2 (text + tool_use)", len(blocks))
+	}
+	textBlock := blocks[0].(map[string]any)
+	if textBlock["type"] != "text" || textBlock["text"] != "let me check" {
+		t.Errorf("text block = %v", textBlock)
+	}
+	useBlock := blocks[1].(map[string]any)
+	if useBlock["type"] != "tool_use" || useBlock["id"] != "call-1" || useBlock["name"] != "get_time" {
+		t.Errorf("tool_use block = %v", useBlock)
+	}
+	input, ok := useBlock["input"].(map[string]any)
+	if !ok || input["tz"] != "UTC" {
+		t.Errorf("input = %v, want {tz: UTC}", useBlock["input"])
+	}
+}
+
+func TestToAnthropicRequest_AssistantToolCallsWithEmptyArgs(t *testing.T) {
+	got := decodeRequestBody(t, &core.Request{
+		Model: "claude-x",
+		Messages: []core.Message{
+			{Role: "user", Content: "go"},
+			{
+				Role: "assistant",
+				Extra: map[string]json.RawMessage{
+					"tool_calls": json.RawMessage(`[{"id":"c","type":"function","function":{"name":"noop","arguments":""}}]`),
+				},
+			},
+		},
+	})
+	asst := got["messages"].([]any)[1].(map[string]any)
+	blocks := asst["content"].([]any)
+	if len(blocks) != 1 {
+		t.Fatalf("blocks len = %d, want 1 (only tool_use, no text)", len(blocks))
+	}
+	use := blocks[0].(map[string]any)
+	input, ok := use["input"].(map[string]any)
+	if !ok || len(input) != 0 {
+		t.Errorf("empty arguments must default to empty object, got %v", use["input"])
+	}
+}
+
+func TestToAnthropicRequest_ToolCallArgs_TrailingContentRejected(t *testing.T) {
+	// Two flavors of trailing content: a second valid JSON value (caught
+	// by the explicit "exactly one JSON object" guard) and unparseable
+	// garbage (caught by the second Decode bubbling up the parse error).
+	// Either way, silent truncation must not happen.
+	cases := map[string]struct {
+		args    string
+		wantSub string
+	}{
+		"second-object": {`{}{}`, "exactly one JSON object"},
+		"garbage":       {`{}garbage`, "invalid character"},
+	}
+	for label, tc := range cases {
+		t.Run(label, func(t *testing.T) {
+			_, err := toAnthropicRequest(&core.Request{
+				Model: "claude-x",
+				Messages: []core.Message{
+					{Role: "user", Content: "go"},
+					{
+						Role: "assistant",
+						Extra: map[string]json.RawMessage{
+							"tool_calls": json.RawMessage(`[{"id":"c","type":"function","function":{"name":"f","arguments":` + jsonString(tc.args) + `}}]`),
+						},
+					},
+				},
+			}, 32, false)
+			if err == nil || !strings.Contains(err.Error(), tc.wantSub) {
+				t.Fatalf("error = %v, want substring %q", err, tc.wantSub)
+			}
+		})
+	}
+}
+
+// jsonString escapes a Go string into a JSON string literal so test
+// fixtures can embed payloads containing braces without manual escaping.
+func jsonString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
+func TestToAnthropicRequest_ToolCallArgs_LargeIntegerPreserved(t *testing.T) {
+	// 1234567890123456789 exceeds float64 precision; default
+	// json.Unmarshal would round-trip it through float64 and emit
+	// 1.234567890123457e+18 on re-marshal. UseNumber must keep the
+	// literal intact on the Anthropic-wire body.
+	body, err := toAnthropicRequest(&core.Request{
+		Model: "claude-x",
+		Messages: []core.Message{
+			{Role: "user", Content: "go"},
+			{
+				Role: "assistant",
+				Extra: map[string]json.RawMessage{
+					"tool_calls": json.RawMessage(`[{"id":"c","type":"function","function":{"name":"f","arguments":"{\"id\":1234567890123456789}"}}]`),
+				},
+			},
+		},
+	}, 32, false)
+	if err != nil {
+		t.Fatalf("toAnthropicRequest: %v", err)
+	}
+	if !strings.Contains(string(body), "1234567890123456789") {
+		t.Fatalf("wire body lost integer precision: %s", body)
+	}
+}
+
+func TestToAnthropicRequest_ToolMessage(t *testing.T) {
+	got := decodeRequestBody(t, &core.Request{
+		Model: "claude-x",
+		Messages: []core.Message{
+			{Role: "user", Content: "go"},
+			{Role: "assistant", Content: "calling", Extra: map[string]json.RawMessage{
+				"tool_calls": json.RawMessage(`[{"id":"call-1","type":"function","function":{"name":"f","arguments":"{}"}}]`),
+			}},
+			{Role: "tool", Content: "12:34Z", Extra: map[string]json.RawMessage{
+				"tool_call_id": json.RawMessage(`"call-1"`),
+			}},
+		},
+	})
+	msgs := got["messages"].([]any)
+	tool := msgs[2].(map[string]any)
+	if tool["role"] != "user" {
+		t.Errorf("tool message role = %q, want user (anthropic has no tool role)", tool["role"])
+	}
+	blocks, ok := tool["content"].([]any)
+	if !ok || len(blocks) != 1 {
+		t.Fatalf("tool content = %v", tool["content"])
+	}
+	block := blocks[0].(map[string]any)
+	if block["type"] != "tool_result" || block["tool_use_id"] != "call-1" || block["content"] != "12:34Z" {
+		t.Errorf("tool_result block = %v", block)
+	}
+}
+
+func TestToAnthropicRequest_ToolMessageMissingID(t *testing.T) {
+	_, err := toAnthropicRequest(&core.Request{
+		Model: "claude-x",
+		Messages: []core.Message{
+			{Role: "user", Content: "go"},
+			{Role: "tool", Content: "12:34Z"},
+		},
+	}, 32, false)
+	if err == nil || !strings.Contains(err.Error(), "tool_call_id") {
+		t.Fatalf("error = %v, want missing-tool_call_id error", err)
+	}
+}
+
+func TestToAnthropicRequest_PreservesUnrelatedExtra(t *testing.T) {
+	got := decodeRequestBody(t, &core.Request{
+		Model:    "claude-x",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		Extra: map[string]json.RawMessage{
+			"vendor_request": json.RawMessage(`"keep"`),
+			"tools":          json.RawMessage(`[{"type":"function","function":{"name":"pick"}}]`),
+		},
+	})
+	if got["vendor_request"] != "keep" {
+		t.Errorf("vendor_request = %v, want kept passthrough", got["vendor_request"])
+	}
+	if _, has := got["tools"]; !has {
+		t.Errorf("tools should be present after translation")
+	}
+}
+
+// strPtr returns a pointer to the given string for fields like StopReason
+// that are *string in anthropicResponse.
+func strPtr(s string) *string { return &s }
+
+func decodeToolCalls(t *testing.T, msg core.Message) []map[string]any {
+	t.Helper()
+	raw, ok := msg.Extra["tool_calls"]
+	if !ok {
+		return nil
+	}
+	var out []map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode tool_calls: %v", err)
+	}
+	return out
+}
+
+func TestToOpenAIResponse_PlainText(t *testing.T) {
+	resp, err := toOpenAIResponse(&anthropicResponse{
+		ID:    "msg-1",
+		Model: "claude-x",
+		Content: []anthropicContent{
+			{Type: "text", Text: "hello"},
+		},
+		StopReason: strPtr("end_turn"),
+	})
+	if err != nil {
+		t.Fatalf("toOpenAIResponse error = %v", err)
+	}
+	msg := resp.Choices[0].Message
+	if msg.Content != "hello" {
+		t.Errorf("content = %q, want hello", msg.Content)
+	}
+	if calls := decodeToolCalls(t, msg); calls != nil {
+		t.Errorf("tool_calls should be absent, got %v", calls)
+	}
+	if resp.Choices[0].FinishReason != "stop" {
+		t.Errorf("finish_reason = %q, want stop", resp.Choices[0].FinishReason)
+	}
+}
+
+func TestToOpenAIResponse_SingleToolUse(t *testing.T) {
+	resp, err := toOpenAIResponse(&anthropicResponse{
+		ID:    "msg-1",
+		Model: "claude-x",
+		Content: []anthropicContent{
+			{Type: "tool_use", ID: "call-1", Name: "get_time", Input: json.RawMessage(`{"tz":"UTC"}`)},
+		},
+		StopReason: strPtr("tool_use"),
+	})
+	if err != nil {
+		t.Fatalf("toOpenAIResponse error = %v", err)
+	}
+	if resp.Choices[0].FinishReason != "tool_calls" {
+		t.Errorf("finish_reason = %q, want tool_calls", resp.Choices[0].FinishReason)
+	}
+	calls := decodeToolCalls(t, resp.Choices[0].Message)
+	if len(calls) != 1 {
+		t.Fatalf("calls len = %d, want 1", len(calls))
+	}
+	c := calls[0]
+	if c["id"] != "call-1" || c["type"] != "function" {
+		t.Errorf("call header = %v", c)
+	}
+	function := c["function"].(map[string]any)
+	if function["name"] != "get_time" {
+		t.Errorf("function.name = %q, want get_time", function["name"])
+	}
+	args, ok := function["arguments"].(string)
+	if !ok {
+		t.Fatalf("arguments must be a string (OpenAI shape), got %T", function["arguments"])
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(args), &parsed); err != nil {
+		t.Fatalf("arguments must be valid JSON: %v", err)
+	}
+	if parsed["tz"] != "UTC" {
+		t.Errorf("decoded args = %v, want {tz:UTC}", parsed)
+	}
+}
+
+func TestToOpenAIResponse_MultipleToolUseOrderPreserved(t *testing.T) {
+	resp, err := toOpenAIResponse(&anthropicResponse{
+		ID:    "msg-1",
+		Model: "claude-x",
+		Content: []anthropicContent{
+			{Type: "tool_use", ID: "a", Name: "first", Input: json.RawMessage(`{}`)},
+			{Type: "tool_use", ID: "b", Name: "second", Input: json.RawMessage(`{}`)},
+			{Type: "tool_use", ID: "c", Name: "third", Input: json.RawMessage(`{}`)},
+		},
+		StopReason: strPtr("tool_use"),
+	})
+	if err != nil {
+		t.Fatalf("toOpenAIResponse error = %v", err)
+	}
+	calls := decodeToolCalls(t, resp.Choices[0].Message)
+	if len(calls) != 3 {
+		t.Fatalf("calls len = %d, want 3", len(calls))
+	}
+	want := []string{"a", "b", "c"}
+	for i, c := range calls {
+		if c["id"] != want[i] {
+			t.Errorf("calls[%d].id = %q, want %q", i, c["id"], want[i])
+		}
+	}
+}
+
+func TestToOpenAIResponse_MixedTextAndToolUse(t *testing.T) {
+	resp, err := toOpenAIResponse(&anthropicResponse{
+		ID:    "msg-1",
+		Model: "claude-x",
+		Content: []anthropicContent{
+			{Type: "text", Text: "let me check"},
+			{Type: "tool_use", ID: "call-1", Name: "lookup", Input: json.RawMessage(`{"q":"x"}`)},
+		},
+		StopReason: strPtr("tool_use"),
+	})
+	if err != nil {
+		t.Fatalf("toOpenAIResponse error = %v", err)
+	}
+	msg := resp.Choices[0].Message
+	if msg.Content != "let me check" {
+		t.Errorf("content = %q, want \"let me check\"", msg.Content)
+	}
+	calls := decodeToolCalls(t, msg)
+	if len(calls) != 1 || calls[0]["id"] != "call-1" {
+		t.Errorf("tool_calls = %v, want one call call-1", calls)
+	}
+}
+
+func TestToOpenAIResponse_EmptyInputDefaultsToObjectString(t *testing.T) {
+	resp, err := toOpenAIResponse(&anthropicResponse{
+		ID:    "msg-1",
+		Model: "claude-x",
+		Content: []anthropicContent{
+			{Type: "tool_use", ID: "x", Name: "noop"},
+		},
+		StopReason: strPtr("tool_use"),
+	})
+	if err != nil {
+		t.Fatalf("toOpenAIResponse error = %v", err)
+	}
+	calls := decodeToolCalls(t, resp.Choices[0].Message)
+	if len(calls) != 1 {
+		t.Fatalf("calls len = %d, want 1", len(calls))
+	}
+	args := calls[0]["function"].(map[string]any)["arguments"].(string)
+	if args != "{}" {
+		t.Errorf("empty input arguments = %q, want \"{}\"", args)
+	}
+}
+
+func TestToOpenAIResponse_ToolUseWithoutNameSkipped(t *testing.T) {
+	resp, err := toOpenAIResponse(&anthropicResponse{
+		ID:    "msg-1",
+		Model: "claude-x",
+		Content: []anthropicContent{
+			{Type: "tool_use", ID: "no-name"},
+			{Type: "tool_use", ID: "ok", Name: "good", Input: json.RawMessage(`{}`)},
+		},
+		StopReason: strPtr("tool_use"),
+	})
+	if err != nil {
+		t.Fatalf("toOpenAIResponse error = %v", err)
+	}
+	calls := decodeToolCalls(t, resp.Choices[0].Message)
+	if len(calls) != 1 || calls[0]["id"] != "ok" {
+		t.Errorf("expected only the named tool_use, got %v", calls)
+	}
+}
+
+func TestToOpenAIResponse_MarshalledMessageIncludesToolCalls(t *testing.T) {
+	// Through the full Message MarshalJSON path so we verify wire shape.
+	resp, err := toOpenAIResponse(&anthropicResponse{
+		ID:    "msg-1",
+		Model: "claude-x",
+		Content: []anthropicContent{
+			{Type: "tool_use", ID: "call-1", Name: "ping", Input: json.RawMessage(`{}`)},
+		},
+		StopReason: strPtr("tool_use"),
+	})
+	if err != nil {
+		t.Fatalf("toOpenAIResponse error = %v", err)
+	}
+	body, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+	if !strings.Contains(string(body), `"tool_calls":[`) {
+		t.Errorf("marshaled response is missing tool_calls field at the message level: %s", body)
+	}
+}
+
+func TestToAnthropicRequest_DropsConsumedExtraOnError_None(t *testing.T) {
+	// tool_choice=none must drop tools AND tool_choice from the wire even
+	// though Extra had them — verifying the Extra-merge does not leak the
+	// original OpenAI-shaped values back.
+	got := decodeRequestBody(t, &core.Request{
+		Model:    "claude-x",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		Extra: map[string]json.RawMessage{
+			"tools":       json.RawMessage(`[{"type":"function","function":{"name":"pick"}}]`),
+			"tool_choice": json.RawMessage(`"none"`),
+		},
+	})
+	if _, has := got["tools"]; has {
+		t.Errorf("tools must be dropped on tool_choice=none, body=%v", got)
+	}
+	if _, has := got["tool_choice"]; has {
+		t.Errorf("tool_choice must be dropped on tool_choice=none, body=%v", got)
+	}
+}

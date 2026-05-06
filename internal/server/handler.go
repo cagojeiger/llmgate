@@ -9,24 +9,24 @@ import (
 	"time"
 
 	"llmgate/internal/audit"
-	"llmgate/internal/provider"
-	"llmgate/internal/dispatch"
+	"llmgate/internal/core"
+	"llmgate/internal/gateway"
 )
 
 const maxChatRequestBytes = 1 << 20
 
-// ChatDispatcher is the upstream contract Handler needs.
-type ChatDispatcher interface {
-	Complete(ctx context.Context, req *provider.Request) (*dispatch.Result, error)
-	CompleteStream(ctx context.Context, req *provider.Request) (*dispatch.Result, error)
+// ChatGateway is the upstream contract Handler needs.
+type ChatGateway interface {
+	Complete(ctx context.Context, req *core.Request) (*gateway.RouteResult, error)
+	CompleteStream(ctx context.Context, req *core.Request) (*gateway.RouteResult, error)
 }
 
 type Handler struct {
-	dispatcher     ChatDispatcher
+	gateway        ChatGateway
 	log            *slog.Logger
 	recorder       audit.Recorder
 	requestTimeout time.Duration
-	stream         *streamResponder
+	stream         *streamRelay
 }
 
 type HandlerConfig struct {
@@ -34,7 +34,7 @@ type HandlerConfig struct {
 	StreamIdleTimeout time.Duration
 }
 
-func NewHandler(dispatcher ChatDispatcher, log *slog.Logger, recorder audit.Recorder, cfg HandlerConfig) *Handler {
+func NewHandler(gateway ChatGateway, log *slog.Logger, recorder audit.Recorder, cfg HandlerConfig) *Handler {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -42,11 +42,11 @@ func NewHandler(dispatcher ChatDispatcher, log *slog.Logger, recorder audit.Reco
 		recorder = audit.Nop{}
 	}
 	return &Handler{
-		dispatcher:     dispatcher,
+		gateway:        gateway,
 		log:            log,
 		recorder:       recorder,
 		requestTimeout: cfg.RequestTimeout,
-		stream:         newStreamResponder(log, cfg.StreamIdleTimeout),
+		stream:         newStreamRelay(log, cfg.StreamIdleTimeout),
 	}
 }
 
@@ -62,9 +62,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	consumer := ConsumerFromContext(ctx)
 	rec := &audit.Record{
-		Timestamp:   start,
-		RequestID:   RequestIDFromContext(ctx),
-		Method:      "chat.completions",
+		Timestamp:     start,
+		RequestID:     RequestIDFromContext(ctx),
+		Method:        "chat.completions",
 		ConsumerName:  consumer.Name,
 		ConsumerKeyID: consumer.KeyID,
 	}
@@ -81,7 +81,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// audit/access-log surfaces show "missing" vs "format" vs
 		// "unknown" for operators.
 		rec.AuthError = string(consumer.AuthError)
-		perr := &provider.Error{Kind: provider.KindAuth, Message: "unauthorized"}
+		perr := &core.Error{ErrorKind: core.KindAuth, Message: "unauthorized"}
 		adoptError(rec, perr)
 		writeError(w, perr)
 		return
@@ -89,16 +89,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxChatRequestBytes))
 	if err != nil {
-		perr := &provider.Error{Kind: provider.KindBadRequest, Message: "read request body: " + err.Error()}
+		perr := &core.Error{ErrorKind: core.KindBadRequest, Message: "read request body: " + err.Error()}
 		adoptError(rec, perr)
 		writeError(w, perr)
 		return
 	}
 	rec.RequestBytes = int64(len(body))
 
-	req := &provider.Request{}
+	req := &core.Request{}
 	if err := json.Unmarshal(body, req); err != nil {
-		perr := &provider.Error{Kind: provider.KindBadRequest, Message: "decode request: " + err.Error()}
+		perr := &core.Error{ErrorKind: core.KindBadRequest, Message: "decode request: " + err.Error()}
 		adoptError(rec, perr)
 		writeError(w, perr)
 		return
@@ -114,7 +114,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // adoptRoute copies routing metadata onto rec.
-func adoptRoute(rec *audit.Record, result *dispatch.Result) {
+func adoptRoute(rec *audit.Record, result *gateway.RouteResult) {
 	if result == nil {
 		return
 	}
@@ -125,12 +125,12 @@ func adoptRoute(rec *audit.Record, result *dispatch.Result) {
 
 // adoptError populates rec.ErrorKind and rec.StatusCode from err.
 func adoptError(rec *audit.Record, err error) {
-	rec.ErrorKind = provider.KindOf(err)
+	rec.ErrorKind = core.ErrorKindOf(err)
 	rec.StatusCode = errStatus(err)
 }
 
 // adoptStreamSummary finalizes stream audit fields after the stream ends.
-func adoptStreamSummary(rec *audit.Record, sum *provider.Summary, now time.Time) {
+func adoptStreamSummary(rec *audit.Record, sum *core.Summary, now time.Time) {
 	if len(rec.Attempts) > 0 {
 		last := &rec.Attempts[len(rec.Attempts)-1]
 		last.DurationMS = now.Sub(last.StartedAt).Milliseconds()
@@ -157,8 +157,8 @@ func adoptStreamSummary(rec *audit.Record, sum *provider.Summary, now time.Time)
 	}
 }
 
-func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *provider.Request, rec *audit.Record) {
-	result, err := h.dispatcher.Complete(r.Context(), req)
+func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *core.Request, rec *audit.Record) {
+	result, err := h.gateway.Complete(r.Context(), req)
 	adoptRoute(rec, result)
 	if err != nil {
 		adoptError(rec, err)
@@ -168,7 +168,7 @@ func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *pro
 
 	out, err := json.Marshal(result.Response)
 	if err != nil {
-		perr := &provider.Error{Kind: provider.KindUnknown, Message: "encode response: " + err.Error(), Cause: err}
+		perr := &core.Error{ErrorKind: core.KindUnknown, Message: "encode response: " + err.Error(), Cause: err}
 		adoptError(rec, perr)
 		writeError(w, perr)
 		return
@@ -186,7 +186,7 @@ func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *pro
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if _, werr := w.Write(out); werr != nil {
-		rec.ErrorKind = provider.KindClientClosed
+		rec.ErrorKind = core.KindClientClosed
 		h.log.LogAttrs(r.Context(), slog.LevelInfo, "client write failed",
 			slog.String("vendor", rec.Vendor),
 			slog.String("err", werr.Error()),
@@ -194,8 +194,8 @@ func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *pro
 	}
 }
 
-func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *provider.Request, rec *audit.Record) {
-	result, err := h.dispatcher.CompleteStream(r.Context(), req)
+func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *core.Request, rec *audit.Record) {
+	result, err := h.gateway.CompleteStream(r.Context(), req)
 	adoptRoute(rec, result)
 	if err != nil {
 		adoptError(rec, err)

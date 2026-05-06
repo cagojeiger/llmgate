@@ -13,7 +13,7 @@
 // special code for that case.
 //
 // Routing policy (fallback eligibility, circuit breaker) is not part of the
-// catalog. It lives in env-driven config and reaches the dispatcher through
+// catalog. It lives in env-driven config and reaches the gateway router through
 // main.go — the catalog's job is data only.
 //
 // Schema is intentionally flat. Operator-facing notes belong in yaml comments,
@@ -48,7 +48,7 @@ type Catalog struct {
 }
 
 // Model is one registration. The 6 fields below are exactly what the router
-// needs to dispatch one upstream call. Operator-facing context (description,
+// needs to route one upstream call. Operator-facing context (description,
 // modality, pricing) lives in yaml comments or in external systems — not here.
 type Model struct {
 	ID         string `yaml:"id"`

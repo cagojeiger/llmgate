@@ -15,10 +15,10 @@ import (
 	"testing"
 
 	"llmgate/internal/audit"
-	"llmgate/internal/consumers"
 	"llmgate/internal/config"
-	"llmgate/internal/provider"
-	"llmgate/internal/dispatch"
+	"llmgate/internal/consumers"
+	"llmgate/internal/core"
+	"llmgate/internal/gateway"
 )
 
 // recordingRecorder captures every emitted audit Record so tests can
@@ -32,19 +32,19 @@ func (r *recordingRecorder) Record(_ context.Context, rec *audit.Record) {
 }
 func (r *recordingRecorder) Close() error { return nil }
 
-// stubDispatcher implements ChatDispatcher without doing any real work — the
+// stubGateway implements ChatGateway without doing any real work — the
 // handler tests in this file exercise auth, not routing, so a stub
 // keeps test isolation tight. Complete is what serveComplete calls;
 // stream is unused in these tests.
-type stubDispatcher struct {
-	resp *dispatch.Result
+type stubGateway struct {
+	resp *gateway.RouteResult
 	err  error
 }
 
-func (s *stubDispatcher) Complete(context.Context, *provider.Request) (*dispatch.Result, error) {
+func (s *stubGateway) Complete(context.Context, *core.Request) (*gateway.RouteResult, error) {
 	return s.resp, s.err
 }
-func (s *stubDispatcher) CompleteStream(context.Context, *provider.Request) (*dispatch.Result, error) {
+func (s *stubGateway) CompleteStream(context.Context, *core.Request) (*gateway.RouteResult, error) {
 	return s.resp, s.err
 }
 
@@ -79,11 +79,11 @@ func TestClassifyAuth_NoHeader(t *testing.T) {
 
 func TestClassifyAuth_BadFormat(t *testing.T) {
 	cases := map[string]string{
-		"raw-key":          "raw-key",
-		"basic":            "Basic abcdef",
-		"bearer-no-token":  "Bearer ",
-		"bearer-spaces":    "Bearer    ",
-		"bearer-no-space":  "Bearerabcdef",
+		"raw-key":         "raw-key",
+		"basic":           "Basic abcdef",
+		"bearer-no-token": "Bearer ",
+		"bearer-spaces":   "Bearer    ",
+		"bearer-no-space": "Bearerabcdef",
 	}
 	for label, header := range cases {
 		t.Run(label, func(t *testing.T) {
@@ -188,13 +188,13 @@ func TestServer_AuthIntegration(t *testing.T) {
 	logBuf := &bytes.Buffer{}
 	logger := slog.New(slog.NewJSONHandler(logBuf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	stub := &stubDispatcher{resp: &dispatch.Result{
-		Response: &provider.Response{
+	stub := &stubGateway{resp: &gateway.RouteResult{
+		Response: &core.Response{
 			ID:      "resp-1",
 			Object:  "chat.completion",
 			Model:   "claude-x",
-			Choices: []provider.Choice{{Index: 0, Message: provider.Message{Role: "assistant", Content: "ok"}}},
-			Usage:   &provider.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2},
+			Choices: []core.Choice{{Index: 0, Message: core.Message{Role: "assistant", Content: "ok"}}},
+			Usage:   &core.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2},
 		},
 		Vendor:    "anthropic",
 		ModelUsed: "claude-x",
@@ -209,13 +209,13 @@ func TestServer_AuthIntegration(t *testing.T) {
 		header        string
 		wantStatus    int
 		wantClient    string
-		wantKind      provider.Kind
+		wantKind      core.ErrorKind
 		wantAuthError string
 	}
 	cases := []call{
-		{"no-auth", "", http.StatusUnauthorized, "", provider.KindAuth, "missing"},
-		{"bad-format", "Token foo", http.StatusUnauthorized, "", provider.KindAuth, "format"},
-		{"unknown-key", "Bearer wrong", http.StatusUnauthorized, "", provider.KindAuth, "unknown"},
+		{"no-auth", "", http.StatusUnauthorized, "", core.KindAuth, "missing"},
+		{"bad-format", "Token foo", http.StatusUnauthorized, "", core.KindAuth, "format"},
+		{"unknown-key", "Bearer wrong", http.StatusUnauthorized, "", core.KindAuth, "unknown"},
 		{"good-key", "Bearer good-key", http.StatusOK, "alpha", "", ""},
 	}
 	body := `{"model":"claude-x","messages":[{"role":"user","content":"hi"}]}`
@@ -276,7 +276,7 @@ func TestServer_HealthzPublic(t *testing.T) {
 	// Smoke-only: probes are unauthenticated even when consumers are
 	// registered. Detailed probe-state coverage lives in probe_test.go.
 	store := writeStoreYAML(t, "alpha", "good-key")
-	handler := NewHandler(&stubDispatcher{}, slog.Default(), &recordingRecorder{}, HandlerConfig{})
+	handler := NewHandler(&stubGateway{}, slog.Default(), &recordingRecorder{}, HandlerConfig{})
 	srv := New(&config.Server{Addr: ":0"}, slog.Default(), handler, store, NewProbeState())
 	ts := httptest.NewServer(srv.Handler)
 	defer ts.Close()

@@ -20,7 +20,7 @@ type Server struct {
 	ShutdownDrainTimeout time.Duration
 	LogLevel             slog.Level
 
-	// Dispatcher fallback, breaker, and timeout settings.
+	// Gateway router fallback, breaker, and timeout settings.
 	FallbackOn        []string
 	CircuitFailures   int
 	CircuitOpen       time.Duration
@@ -73,14 +73,14 @@ func LoadServer() (*Server, error) {
 		Addr:                 orDefault("LLMGATE_ADDR", ":8080"),
 		ShutdownDrainTimeout: drainTimeout,
 		LogLevel:             logLevel,
-		FallbackOn:            parseCSV("LLMGATE_FALLBACK_ON", "rate_limit,upstream,timeout,network"),
-		CircuitFailures:       circuitFailures,
-		CircuitOpen:           circuitOpen,
-		CircuitMaxOpen:        circuitMaxOpen,
-		CircuitJitter:         circuitJitter,
-		RequestTimeout:        requestTimeout,
-		CompleteTimeout:       completeTimeout,
-		StreamIdleTimeout:     streamIdleTimeout,
+		FallbackOn:           parseCSV("LLMGATE_FALLBACK_ON", "rate_limit,upstream,timeout,network"),
+		CircuitFailures:      circuitFailures,
+		CircuitOpen:          circuitOpen,
+		CircuitMaxOpen:       circuitMaxOpen,
+		CircuitJitter:        circuitJitter,
+		RequestTimeout:       requestTimeout,
+		CompleteTimeout:      completeTimeout,
+		StreamIdleTimeout:    streamIdleTimeout,
 	}, nil
 }
 

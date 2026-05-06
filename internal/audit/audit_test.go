@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"llmgate/internal/provider"
+	"llmgate/internal/core"
 )
 
 func newCapturingLogger() (*slog.Logger, *bytes.Buffer) {
@@ -23,15 +23,15 @@ func TestLogRecorder_RecordSuccess(t *testing.T) {
 	r := NewLogRecorder(log)
 
 	rec := &Record{
-		Timestamp:     time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
-		RequestID:     "req-1",
-		Method:        "chat.completions",
+		Timestamp:      time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
+		RequestID:      "req-1",
+		Method:         "chat.completions",
 		ModelRequested: "deepseek-v4-flash",
-		StatusCode:    200,
-		DurationMS:    234,
-		RequestBytes:  100,
-		ResponseBytes: 500,
-		Usage: &provider.Usage{
+		StatusCode:     200,
+		DurationMS:     234,
+		RequestBytes:   100,
+		ResponseBytes:  500,
+		Usage: &core.Usage{
 			PromptTokens:     10,
 			CompletionTokens: 20,
 			TotalTokens:      30,
@@ -72,8 +72,8 @@ func TestLogRecorder_RecordAuthFields(t *testing.T) {
 		RequestID:      "req-auth-ok",
 		Method:         "chat.completions",
 		ModelRequested: "deepseek-v4-flash",
-		ConsumerName:     "alpha",
-		ConsumerKeyID:    "01234567",
+		ConsumerName:   "alpha",
+		ConsumerKeyID:  "01234567",
 		StatusCode:     200,
 	})
 
@@ -105,7 +105,7 @@ func TestLogRecorder_RecordAuthFailure(t *testing.T) {
 		Method:         "chat.completions",
 		ModelRequested: "",
 		AuthError:      "unknown",
-		ErrorKind:      provider.KindAuth,
+		ErrorKind:      core.KindAuth,
 		StatusCode:     401,
 	})
 
@@ -134,7 +134,7 @@ func TestLogRecorder_RecordError(t *testing.T) {
 		Method:         "chat.completions",
 		ModelRequested: "kimi-k2.6",
 		StatusCode:     429,
-		ErrorKind:      provider.KindRateLimit,
+		ErrorKind:      core.KindRateLimit,
 		DurationMS:     50,
 	})
 
@@ -171,10 +171,10 @@ func TestLogRecorder_FallbackFields(t *testing.T) {
 		Vendor:         "opencode",
 		ModelUsed:      "deepseek-v4-flash",
 		StatusCode:     200,
-		Usage:          &provider.Usage{PromptTokens: 5, CompletionTokens: 7, TotalTokens: 12},
-		Attempts: []provider.Attempt{
-			{Vendor: "opencode", Model: "deepseek-v4-pro", DurationMS: 80, ErrorKind: provider.KindRateLimit, StatusCode: 429},
-			{Vendor: "opencode", Model: "deepseek-v4-flash", DurationMS: 200, StatusCode: 200, Usage: &provider.Usage{PromptTokens: 5, CompletionTokens: 7, TotalTokens: 12}},
+		Usage:          &core.Usage{PromptTokens: 5, CompletionTokens: 7, TotalTokens: 12},
+		Attempts: []core.Attempt{
+			{Vendor: "opencode", Model: "deepseek-v4-pro", DurationMS: 80, ErrorKind: core.KindRateLimit, StatusCode: 429},
+			{Vendor: "opencode", Model: "deepseek-v4-flash", DurationMS: 200, StatusCode: 200, Usage: &core.Usage{PromptTokens: 5, CompletionTokens: 7, TotalTokens: 12}},
 		},
 	})
 
@@ -209,7 +209,7 @@ func TestLogRecorder_OmitsAttemptsWhenSingle(t *testing.T) {
 		Vendor:         "opencode",
 		ModelUsed:      "deepseek-v4-flash",
 		StatusCode:     200,
-		Attempts: []provider.Attempt{
+		Attempts: []core.Attempt{
 			{Vendor: "opencode", Model: "deepseek-v4-flash", StatusCode: 200},
 		},
 	})

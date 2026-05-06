@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"llmgate/internal/provider"
+	"llmgate/internal/core"
 )
 
 func TestParseRetryAfter(t *testing.T) {
@@ -165,8 +165,8 @@ func TestDefaultClient_TuningPreservedAcrossCalls(t *testing.T) {
 
 func TestLowLevelError_DeadlineExceededBecomesTimeout(t *testing.T) {
 	perr := LowLevelError("opencode", "send request", context.DeadlineExceeded)
-	if perr.Kind != provider.KindTimeout {
-		t.Errorf("Kind = %q, want timeout", perr.Kind)
+	if perr.ErrorKind != core.KindTimeout {
+		t.Errorf("ErrorKind = %q, want timeout", perr.ErrorKind)
 	}
 	if perr.Provider != "opencode" {
 		t.Errorf("Provider = %q, want opencode", perr.Provider)
@@ -188,15 +188,15 @@ var _ net.Error = timeoutNetErr{}
 
 func TestLowLevelError_NetTimeoutBecomesTimeout(t *testing.T) {
 	perr := LowLevelError("opencode", "dial", timeoutNetErr{})
-	if perr.Kind != provider.KindTimeout {
-		t.Errorf("Kind = %q, want timeout (from net.Error.Timeout())", perr.Kind)
+	if perr.ErrorKind != core.KindTimeout {
+		t.Errorf("ErrorKind = %q, want timeout (from net.Error.Timeout())", perr.ErrorKind)
 	}
 }
 
 func TestLowLevelError_GenericFailureIsNetwork(t *testing.T) {
 	perr := LowLevelError("opencode", "read response", errors.New("connection reset"))
-	if perr.Kind != provider.KindNetwork {
-		t.Errorf("Kind = %q, want network", perr.Kind)
+	if perr.ErrorKind != core.KindNetwork {
+		t.Errorf("ErrorKind = %q, want network", perr.ErrorKind)
 	}
 }
 
@@ -204,8 +204,8 @@ func TestBadRequest_AssemblesMessageAndRaw(t *testing.T) {
 	cause := errors.New("invalid json")
 	raw := []byte(`{"bad":`)
 	perr := BadRequest("opencode", "decode body", cause, raw)
-	if perr.Kind != provider.KindBadRequest {
-		t.Errorf("Kind = %q, want bad_request", perr.Kind)
+	if perr.ErrorKind != core.KindBadRequest {
+		t.Errorf("ErrorKind = %q, want bad_request", perr.ErrorKind)
 	}
 	if perr.Provider != "opencode" {
 		t.Errorf("Provider = %q, want opencode", perr.Provider)

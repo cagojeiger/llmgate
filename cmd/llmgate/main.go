@@ -15,12 +15,12 @@ import (
 
 	"llmgate/internal/audit"
 	"llmgate/internal/catalog"
-	"llmgate/internal/consumers"
 	"llmgate/internal/config"
-	"llmgate/internal/provider"
-	"llmgate/internal/provider/anthropic"
-	"llmgate/internal/provider/openai"
-	"llmgate/internal/dispatch"
+	"llmgate/internal/consumers"
+	"llmgate/internal/core"
+	"llmgate/internal/gateway"
+	"llmgate/internal/providers/anthropic"
+	"llmgate/internal/providers/openai"
 	"llmgate/internal/server"
 )
 
@@ -64,12 +64,12 @@ func run() error {
 		"openai":    openaiFactory,
 		"anthropic": anthropicFactory,
 	}
-	models, aliases, err := buildDispatcherInputs(cat, factories)
+	models, aliases, err := buildGatewayInputs(cat, factories)
 	if err != nil {
 		return err
 	}
 
-	policy := dispatch.FallbackPolicy{
+	policy := gateway.FallbackPolicy{
 		OnKinds:         cfg.FallbackOn,
 		CircuitFailures: cfg.CircuitFailures,
 		CircuitOpen:     cfg.CircuitOpen,
@@ -77,7 +77,7 @@ func run() error {
 		CircuitJitter:   cfg.CircuitJitter,
 		CompleteTimeout: cfg.CompleteTimeout,
 	}
-	rtr, err := dispatch.NewDispatcher(models, aliases, policy, logger)
+	router, err := gateway.NewRouter(models, aliases, policy, logger)
 	if err != nil {
 		return err
 	}
@@ -89,7 +89,7 @@ func run() error {
 		}
 	}()
 
-	handler := server.NewHandler(rtr, logger, recorder, server.HandlerConfig{
+	handler := server.NewHandler(router, logger, recorder, server.HandlerConfig{
 		RequestTimeout:    cfg.RequestTimeout,
 		StreamIdleTimeout: cfg.StreamIdleTimeout,
 	})
@@ -129,18 +129,18 @@ func run() error {
 }
 
 // providerFactory builds the Provider for one catalog model. Lives in
-// the cmd binary because it bridges two boundaries the dispatch package
+// the cmd binary because it bridges two boundaries the gateway package
 // deliberately does not know about: the catalog yaml shape (catalog.Model
 // fields) and the env-driven credential lookup (auth_env).
-type providerFactory func(*catalog.Model) (provider.Provider, error)
+type providerFactory func(*catalog.Model) (core.Provider, error)
 
-// buildDispatcherInputs walks the catalog and turns it into the runtime
-// shape the dispatcher expects: model id → already-instantiated Provider,
-// alias name → ordered chain of model ids. The dispatcher itself stays
+// buildGatewayInputs walks the catalog and turns it into the runtime
+// shape the gateway router expects: model id → already-instantiated Provider,
+// alias name → ordered chain of model ids. The gateway router itself stays
 // catalog-agnostic; this helper is the single point that bridges the
 // yaml shape into the service.
-func buildDispatcherInputs(cat *catalog.Catalog, factories map[string]providerFactory) (dispatch.Models, dispatch.Aliases, error) {
-	models := make(dispatch.Models, len(cat.Models))
+func buildGatewayInputs(cat *catalog.Catalog, factories map[string]providerFactory) (gateway.Models, gateway.Aliases, error) {
+	models := make(gateway.Models, len(cat.Models))
 	for id, m := range cat.Models {
 		f, ok := factories[m.Protocol]
 		if !ok {
@@ -152,14 +152,14 @@ func buildDispatcherInputs(cat *catalog.Catalog, factories map[string]providerFa
 		}
 		models[id] = p
 	}
-	aliases := make(dispatch.Aliases, len(cat.Aliases))
+	aliases := make(gateway.Aliases, len(cat.Aliases))
 	for name, a := range cat.Aliases {
 		aliases[name] = append([]string(nil), a.Chain...)
 	}
 	return models, aliases, nil
 }
 
-func openaiFactory(m *catalog.Model) (provider.Provider, error) {
+func openaiFactory(m *catalog.Model) (core.Provider, error) {
 	apiKey, err := readAuthKey(m)
 	if err != nil {
 		return nil, err
@@ -172,7 +172,7 @@ func openaiFactory(m *catalog.Model) (provider.Provider, error) {
 	})
 }
 
-func anthropicFactory(m *catalog.Model) (provider.Provider, error) {
+func anthropicFactory(m *catalog.Model) (core.Provider, error) {
 	apiKey, err := readAuthKey(m)
 	if err != nil {
 		return nil, err

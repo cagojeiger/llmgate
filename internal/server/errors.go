@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"llmgate/internal/provider"
+	"llmgate/internal/core"
 )
 
 func writeError(w http.ResponseWriter, err error) {
@@ -30,35 +30,35 @@ func errStatus(err error) int {
 // so handler call sites never have to special-case nil or wrapped errors.
 func errorPayload(err error) (int, time.Duration, []byte) {
 	status := http.StatusInternalServerError
-	kind := provider.KindOf(err)
+	kind := core.ErrorKindOf(err)
 	if kind == "" {
-		kind = provider.KindUnknown
+		kind = core.KindUnknown
 	}
-	message := provider.MessageOf(err)
+	message := core.MessageOf(err)
 	if message == "" {
 		message = "unknown error"
 	}
 	var code any
-	retryAfter := provider.RetryAfterOf(err)
+	retryAfter := core.RetryAfterOf(err)
 
 	if err != nil {
 		switch kind {
-		case provider.KindAuth:
+		case core.KindAuth:
 			status = http.StatusUnauthorized
-		case provider.KindRateLimit:
+		case core.KindRateLimit:
 			status = http.StatusTooManyRequests
-		case provider.KindBadRequest:
+		case core.KindBadRequest:
 			status = http.StatusBadRequest
-		case provider.KindContextLength:
+		case core.KindContextLength:
 			status, code = http.StatusBadRequest, "context_length_exceeded"
-		case provider.KindContentFilter:
+		case core.KindContentFilter:
 			status, code = http.StatusBadRequest, "content_filter"
-		case provider.KindUpstream, provider.KindNetwork, provider.KindTimeout, provider.KindEmpty:
+		case core.KindUpstream, core.KindNetwork, core.KindTimeout, core.KindEmpty:
 			status = http.StatusBadGateway
-		case provider.KindClientClosed:
+		case core.KindClientClosed:
 			status = 499
 		}
-		if provider.MessageOf(err) == "" {
+		if core.MessageOf(err) == "" {
 			message = http.StatusText(status)
 		}
 	}

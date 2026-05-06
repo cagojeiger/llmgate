@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"llmgate/internal/provider"
+	"llmgate/internal/core"
 )
 
 func TestSSEWriter_WriteHeaders(t *testing.T) {
@@ -79,7 +79,7 @@ func TestSSEWriter_SendError_EmbedsErrorPayload(t *testing.T) {
 	flusher := &stubFlusher{}
 	sw := newSSEWriter(rec, flusher)
 
-	sw.SendError(&provider.Error{Kind: provider.KindUpstream, Message: "boom"})
+	sw.SendError(&core.Error{ErrorKind: core.KindUpstream, Message: "boom"})
 
 	body := rec.Body.String()
 	if !strings.HasPrefix(body, "data: ") || !strings.HasSuffix(body, "\n\n") {

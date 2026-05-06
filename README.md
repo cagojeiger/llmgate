@@ -21,12 +21,13 @@ scripts/gen-consumer.sh         helper to issue one caller (raw key + sha256 yam
 internal/catalog/             vendor catalog loader (yaml -> Catalog struct)
 internal/consumers/             consumer registry loader (yaml -> Store, sha256 lookup)
 internal/config/              env-driven Server config (incl. router tuning)
-internal/provider/            Provider interface + OpenAI-shaped types
-internal/provider/openai/     OpenAI-protocol adapter
-internal/provider/anthropic/  Anthropic-protocol adapter (response normalized to OpenAI wire,
+internal/core/                Provider contract + OpenAI-shaped request/response types
+internal/providers/openai/    OpenAI-protocol adapter
+internal/providers/anthropic/ Anthropic-protocol adapter (response normalized to OpenAI wire,
                               tools / tool_calls / tool_use translation in both directions)
-internal/dispatch/              alias→chain dispatch + fallback + circuit breaker
-internal/server/              chi handler, auth middleware, streamResponder, sseWriter, errors
+internal/gateway/               alias→chain routing + fallback + circuit breaker
+internal/streaming/           stream start/close helpers shared by server and adapters
+internal/server/              chi handler, auth middleware, streamRelay, sseWriter, errors
 internal/audit/               per-request audit Record (incl. consumer_name / consumer_key_id)
 docs/adr/                     accepted decisions
 ```
@@ -112,7 +113,7 @@ an external directory instead. The directory must contain `models/` (one
 yaml per model) and may contain `aliases/`. Yaml is parsed strictly —
 unknown fields (typos, stale `type:` / `specs:` / `notes:` blocks) fail
 boot. Use `models/example.yaml.example` and `aliases/example.yaml.example`
-as templates. Dispatcher/server policy (`LLMGATE_FALLBACK_ON`, circuit breaker
+as templates. Gateway/server policy (`LLMGATE_FALLBACK_ON`, circuit breaker
 settings, `LLMGATE_REQUEST_TIMEOUT`, `LLMGATE_COMPLETE_TIMEOUT`,
 `LLMGATE_STREAM_IDLE_TIMEOUT`) lives in env, not yaml. Hot-reload is not
 supported — change the catalog and restart.

@@ -21,14 +21,14 @@ graph LR
             direction TB
             Server["HTTP Server<br/>chi + middleware + auth"]
             Handler[Handler]
-            StreamResp[streamResponder]
+            StreamResp[streamRelay]
             Probe[ProbeState]
             Audit[Audit Recorder]
         end
 
-        subgraph Service[Service — chain dispatch]
+        subgraph Service[Service — gateway routing]
             direction TB
-            Dispatcher
+            Router
         end
 
         subgraph Wire[Wire — vendor providers]
@@ -44,12 +44,12 @@ graph LR
 
     Agent -->|"/v1/chat/completions<br/>Bearer ..."| Server
     Server --> Handler
-    Handler -->|Request| Dispatcher
-    Dispatcher -->|Result.Response| Handler
-    Dispatcher -->|Result.Stream| StreamResp
+    Handler -->|Request| Router
+    Router -->|Result.Response| Handler
+    Router -->|Result.Stream| StreamResp
     StreamResp -.SSE chunks.-> Agent
-    Dispatcher --> OAI
-    Dispatcher --> Anth
+    Router --> OAI
+    Router --> Anth
     OAI --> UpOAI
     Anth --> UpAnth
     Handler --> Audit
@@ -59,20 +59,21 @@ graph LR
 
 ### 레이어 의존성과 경계
 
-- **Service** (`internal/dispatch/`) — stdlib + `internal/provider/` 만 의존. *standalone* — HTTP 외 frontend (CLI / queue / gRPC) 가 `dispatch.NewDispatcher(models, aliases, ...)` 만 호출하면 chain / 폴백 / 회로 / 시도당 한도 그대로 사용 가능.
-- **Delivery** (`internal/server/`) — Service 를 HTTP 로 노출. chi + middleware + auth + Handler + streamResponder + probes + audit. Service 가 모르는 *와이어 시맨틱* (SSE / `[DONE]` / idle timeout / 401 / readiness) 을 책임.
-- **Wire** (`internal/provider/openai|anthropic/`) — `provider.Provider` 인터페이스 구현. vendor 와이어 차이 (status 분류 / 첫 이벤트 검증 / 와이어 정규화) 를 자기 안에 가둠.
-- **boundary**: Service 가 Delivery 로 돌려주는 형식은 `provider.Stream` (인터페이스) / `provider.Response` (struct). 둘 다 HTTP 모름. ADR 006 의 *first-event boundary* = 시간축에서의 레이어 경계 표현.
+- **Service** (`internal/gateway/`) — stdlib + `internal/core/` 만 의존. *standalone* — HTTP 외 frontend (CLI / queue / gRPC) 가 `gateway.NewRouter(models, aliases, ...)` 만 호출하면 chain / 폴백 / 회로 / 시도당 한도 그대로 사용 가능.
+- **Delivery** (`internal/server/`) — Service 를 HTTP 로 노출. chi + middleware + auth + Handler + streamRelay + probes + audit. Service 가 모르는 *와이어 시맨틱* (SSE / `[DONE]` / idle timeout / 401 / readiness) 을 책임.
+- **Core** (`internal/core/`) — gateway / server / providers 가 공유하는 Provider 계약, OpenAI-shaped DTO, ErrorKind, Stream 계약.
+- **Wire** (`internal/providers/openai|anthropic/`) — `core.Provider` 인터페이스 구현. vendor 와이어 차이 (status 분류 / 첫 이벤트 검증 / 와이어 정규화) 를 자기 안에 가둠.
+- **boundary**: Service 가 Delivery 로 돌려주는 형식은 `core.Stream` (인터페이스) / `core.Response` (struct). 둘 다 HTTP 모름. ADR 006 의 *first-event boundary* = 시간축에서의 레이어 경계 표현.
 
 | 레이어 | 컴포넌트 | 역할 |
 |---|---|---|
 | Delivery | HTTP Server | chi 라우터 + request_id / clientContext / access log / recoverer / read+request timeout. `/v1/chat/completions` (auth 보호), `/healthz/live` · `/healthz/ready` · `/healthz` (공개) |
 | Delivery | auth middleware | `Authorization: Bearer` 추출 → sha256 → consumers Store lookup → ctx 에 ConsumerInfo 기록. 실패해도 short-circuit 안 함 — Handler 가 audit-always emit (ADR 008) |
 | Delivery | Handler | 요청 디코드, stream / non-stream 분기. ConsumerInfo 로 Record 채움 + auth 실패 시 401. 요청 총 wall-clock 한도의 권위자 (ADR 005) |
-| Delivery | streamResponder | 스트림 열린 뒤 SSE wire transcript. 이벤트 전송, idle timeout, client_closed, mid-stream error, `[DONE]` (ADR 006). 스트림 idle 한도의 권위자 (ADR 005) |
+| Delivery | streamRelay | 스트림 열린 뒤 SSE wire transcript. 이벤트 전송, idle timeout, client_closed, mid-stream error, `[DONE]` (ADR 006). 스트림 idle 한도의 권위자 (ADR 005) |
 | Delivery | ProbeState | SIGTERM 시 `MarkShuttingDown()` → readiness 만 503. liveness · in-flight 영향 없음 |
 | Delivery | Audit Recorder | 요청당 1 개 fact record. consumer_name + consumer_key_id + auth_error 포함 — *누가 / 왜 실패* 의 사실 |
-| Service | Dispatcher | 별명 → chain 해석, 폴백 적격 판정, 회로 차단 (ADR 004). non-stream 시도당 한도의 권위자 (ADR 005). stdlib + provider 만 import |
+| Service | Router | 별명 → chain 해석, 폴백 적격 판정, 회로 차단 (ADR 004). non-stream 시도당 한도의 권위자 (ADR 005). stdlib + core 만 import |
 | Wire | OpenAI Adapter | OpenAI 와이어 호출. status 분류 + 첫 이벤트 검증 (ADR 006) |
 | Wire | Anthropic Adapter | Anthropic ↔ OpenAI 와이어 양방향 변환 (tools / tool_choice / tool_calls / tool_use). status 분류 + 첫 이벤트 검증 (ADR 006) |
 | Boot data | consumers Store | 부팅 시 yaml → sha256 → consumer 매핑 read-only. 0 개면 부팅 fail (ADR 008). Delivery 의 auth middleware 가 소비 |
@@ -90,11 +91,13 @@ consumers/                     호출자 등록 (운영자, 코드 0줄)
 internal/catalog/            yaml → Catalog 로더
 internal/consumers/            yaml → Store (sha256 → consumer lookup)
 internal/config/             env → Server 설정
-internal/provider/           Adapter 계약 + 공통 타입
+internal/core/               공통 계약 + OpenAI-shaped DTO + ErrorKind
+internal/providers/          벤더 어댑터
   ├─ openai/                 OpenAI 와이어 어댑터
   └─ anthropic/              Anthropic ↔ OpenAI 와이어 변환
-internal/dispatch/            별명 → chain, 폴백, 회로 (breaker.go 분리)
-internal/server/             chi + middleware + auth + handler + streamResponder + probes
+internal/gateway/             별명 → chain, 폴백, 회로 (breaker.go 분리)
+internal/streaming/          스트림 시작 검증 + close grace helper
+internal/server/             chi + middleware + auth + handler + streamRelay + probes
 internal/audit/              Recorder + LogRecorder (stdout)
 cmd/llmgate/                 wiring + shutdown
 scripts/gen-consumer.sh        호출자 발급 헬퍼
@@ -170,18 +173,18 @@ graph TD
     Env[env config] --> ServerCfg[Server config]
     Env --> Policy[fallback / circuit / timeouts]
     CatalogM[catalog/models] --> Adapters[Adapter instances]
-    Adapters --> Dispatcher
-    CatalogA[catalog/aliases] --> Dispatcher
-    Policy --> Dispatcher
+    Adapters --> Router
+    CatalogA[catalog/aliases] --> Router
+    Policy --> Router
     Consumers[consumers/] --> Store[sha256 → name store]
     ServerCfg --> Server
     Store --> Server
-    Dispatcher --> Server
+    Router --> Server
     Probe[ProbeState] --> Server
     Server --> Listen([HTTP Listen])
 ```
 
-순서 (`cmd/llmgate/main.go`): env 로드 → catalog 파싱 → adapter factory → Dispatcher 조립 → consumers 파싱 (0 개면 fail) → Audit + Handler + middleware wire → ProbeState + Listen.
+순서 (`cmd/llmgate/main.go`): env 로드 → catalog 파싱 → adapter factory → Router 조립 → consumers 파싱 (0 개면 fail) → Audit + Handler + middleware wire → ProbeState + Listen.
 
 ## 프로브 & 셧다운
 
@@ -216,7 +219,7 @@ sequenceDiagram
     participant A as Agent
     participant M as auth middleware
     participant H as Handler
-    participant R as Dispatcher
+    participant R as Router
     participant P as Adapter
     participant Au as Audit
 
@@ -242,18 +245,18 @@ Time ─────────────────────────
    └────────┬────────┘    └─────────┬───────┘    └──────────┬───────────┘
             │                       │                       │
         ✅ fallback              ✅ fallback              ❌ no fallback
-        (dispatcher)                 (dispatcher)                 SSE error frame
+        (gateway router)             (gateway router)             SSE error frame
                                                           + [DONE], 종결
 
    ◄────────── 폴백 가능 영역 ──────────►◄────── 폴백 불가 ──────►
 ```
 
-dispatcher 는 status open / first event 단계의 실패만 받는다 — 와이어 분류는 adapter 가 끝낸
+gateway router 는 status open / first event 단계의 실패만 받는다 — 와이어 분류는 adapter 가 끝낸
 상태이므로 폴백 적격 판정 (ADR 004) 을 non-stream 과 같은 규칙으로 적용. 스트림 시작에
 별도 timeout 을 만들지 않고 Handler 의 request context 를 그대로 넘긴다 (ADR 005) —
 시작 / 첫 이벤트 / 전송 전체가 `LLMGATE_REQUEST_TIMEOUT` 하나를 공유.
 
-Handler 가 200 OK 를 커밋한 뒤에는 streamResponder 가 SSE 전송. 이벤트 사이 idle 은
+Handler 가 200 OK 를 커밋한 뒤에는 streamRelay 가 SSE 전송. 이벤트 사이 idle 은
 `LLMGATE_STREAM_IDLE_TIMEOUT`, end-of-stream 에서 `Stream.Summary()` 로 usage / finish
 reason 을 audit 에 finalize. mid-stream 폴백 거부 근거 (HTTP 시맨틱 / SDK 호환 / record
 무결성) 는 ADR 006.
@@ -266,7 +269,7 @@ reason 을 audit 에 finalize. mid-stream 폴백 거부 근거 (HTTP 시맨틱 /
 | 호출자 등록 (해시만) | `consumers/` yaml | 외부 갱신 시 재시작 |
 | 호출자 raw 키 | **gateway 보관 안 함** (호출자 측 vault) | — |
 | 디스패처 정책 + 서버 런타임 | env → Server config | 프로세스 수명 |
-| 회로 차단 상태 | Dispatcher breakerStore (per-process) | 프로세스 수명 |
+| 회로 차단 상태 | Router breakerStore (per-process) | 프로세스 수명 |
 | 호출자 lookup | consumers Store (per-process) | 프로세스 수명 |
 | 요청별 시도 이력 | Result → Record | 요청 1 회 |
 | 감사 record | Sink 정책 따라 | Sink 정책 |

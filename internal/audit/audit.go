@@ -5,7 +5,7 @@ import (
 	"context"
 	"time"
 
-	"llmgate/internal/provider"
+	"llmgate/internal/core"
 )
 
 // Record captures the per-request audit payload.
@@ -28,22 +28,22 @@ type Record struct {
 	// the kind only lives in the audit / access-log surface.
 	ConsumerName  string
 	ConsumerKeyID string
-	AuthError   string
+	AuthError     string
 
 	Vendor    string
 	ModelUsed string
 
 	StatusCode int
-	ErrorKind  provider.Kind
+	ErrorKind  core.ErrorKind
 	DurationMS int64
 
 	RequestBytes  int64
 	ResponseBytes int64
 
-	Usage      *provider.Usage
+	Usage      *core.Usage
 	VendorCost string
 
-	Attempts []provider.Attempt
+	Attempts []core.Attempt
 }
 
 // Recorder receives one Record per gateway request.

@@ -150,7 +150,7 @@ spec:
 
 ## Run in a container
 
-`compose.yaml` bind-mounts `./catalog` and `./consumers` read-only into the
+`docker-compose.yaml` bind-mounts `./catalog` and `./consumers` read-only into the
 container and reads `LLMGATE_OPENCODE_API_KEY` from `.env`, so editing
 yaml on the host flows through without rebuilding the image:
 

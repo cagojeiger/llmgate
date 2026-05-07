@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"llmgate/internal/core"
+	"llmgate/internal/llmtypes"
 )
 
 func TestComplete_Success(t *testing.T) {
@@ -63,9 +63,9 @@ func TestComplete_Success(t *testing.T) {
 	defer server.Close()
 
 	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
-	resp, err := c.Complete(context.Background(), &core.Request{
+	resp, err := c.Complete(context.Background(), &llmtypes.Request{
 		Model:     "minimax-m2.5",
-		Messages:  []core.Message{{Role: "user", Content: "ping"}},
+		Messages:  []llmtypes.Message{{Role: "user", Content: "ping"}},
 		MaxTokens: 32,
 		Extra:     map[string]json.RawMessage{"vendor_request": json.RawMessage(`"keep"`)},
 	})
@@ -119,9 +119,9 @@ func TestComplete_SystemMessageExtracted(t *testing.T) {
 	defer server.Close()
 
 	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client})
-	_, err := c.Complete(context.Background(), &core.Request{
+	_, err := c.Complete(context.Background(), &llmtypes.Request{
 		Model: "minimax-m2.5",
-		Messages: []core.Message{
+		Messages: []llmtypes.Message{
 			{Role: "system", Content: "policy one"},
 			{Role: "user", Content: "ping"},
 			{Role: "system", Content: "policy two"},
@@ -151,9 +151,9 @@ func TestComplete_ThinkingContentMappedToReasoning(t *testing.T) {
 	defer server.Close()
 
 	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client})
-	resp, err := c.Complete(context.Background(), &core.Request{
+	resp, err := c.Complete(context.Background(), &llmtypes.Request{
 		Model:    "minimax-m2.5",
-		Messages: []core.Message{{Role: "user", Content: "ping"}},
+		Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
 	})
 	if err != nil {
 		t.Fatalf("Complete returned error: %v", err)
@@ -184,9 +184,9 @@ func TestComplete_MaxTokensDefault(t *testing.T) {
 	defer server.Close()
 
 	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client})
-	_, err := c.Complete(context.Background(), &core.Request{
+	_, err := c.Complete(context.Background(), &llmtypes.Request{
 		Model:    "minimax-m2.5",
-		Messages: []core.Message{{Role: "user", Content: "ping"}},
+		Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
 	})
 	if err != nil {
 		t.Fatalf("Complete returned error: %v", err)
@@ -203,25 +203,25 @@ func TestClassify_ContentFilterOverridesStatus(t *testing.T) {
 		name   string
 		status int
 		body   string
-		want   core.ErrorKind
+		want   llmtypes.ErrorKind
 	}{
 		{
 			name:   "400 + content_filter",
 			status: 400,
 			body:   `{"type":"error","error":{"type":"content_filter","message":"blocked by policy"}}`,
-			want:   core.KindContentFilter,
+			want:   llmtypes.KindContentFilter,
 		},
 		{
 			name:   "422 + content_filter_error",
 			status: 422,
 			body:   `{"type":"error","error":{"type":"content_filter_error","message":"blocked"}}`,
-			want:   core.KindContentFilter,
+			want:   llmtypes.KindContentFilter,
 		},
 		{
 			name:   "400 + invalid_request_error stays bad_request",
 			status: 400,
 			body:   `{"type":"error","error":{"type":"invalid_request_error","message":"bad field"}}`,
-			want:   core.KindBadRequest,
+			want:   llmtypes.KindBadRequest,
 		},
 	}
 	for _, tc := range cases {
@@ -242,19 +242,19 @@ func TestClassify_ContentFilterOverridesStatus(t *testing.T) {
 func TestKindFromAnthropicErrorType(t *testing.T) {
 	cases := []struct {
 		errorType string
-		want      core.ErrorKind
+		want      llmtypes.ErrorKind
 	}{
-		{"authentication_error", core.KindAuth},
-		{"permission_error", core.KindAuth},
-		{"invalid_request_error", core.KindBadRequest},
-		{"not_found_error", core.KindBadRequest},
-		{"request_too_large", core.KindBadRequest},
-		{"rate_limit_error", core.KindRateLimit},
-		{"content_filter", core.KindContentFilter},
-		{"content_filter_error", core.KindContentFilter},
-		{"overloaded_error", core.KindUpstream},
-		{"api_error", core.KindUpstream},
-		{"future_unknown_2030", core.KindUpstream},
+		{"authentication_error", llmtypes.KindAuth},
+		{"permission_error", llmtypes.KindAuth},
+		{"invalid_request_error", llmtypes.KindBadRequest},
+		{"not_found_error", llmtypes.KindBadRequest},
+		{"request_too_large", llmtypes.KindBadRequest},
+		{"rate_limit_error", llmtypes.KindRateLimit},
+		{"content_filter", llmtypes.KindContentFilter},
+		{"content_filter_error", llmtypes.KindContentFilter},
+		{"overloaded_error", llmtypes.KindUpstream},
+		{"api_error", llmtypes.KindUpstream},
+		{"future_unknown_2030", llmtypes.KindUpstream},
 	}
 	for _, tc := range cases {
 		t.Run(tc.errorType, func(t *testing.T) {
@@ -286,9 +286,9 @@ func TestComplete_StopReasonMapping(t *testing.T) {
 			defer server.Close()
 
 			c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client})
-			resp, err := c.Complete(context.Background(), &core.Request{
+			resp, err := c.Complete(context.Background(), &llmtypes.Request{
 				Model:    "minimax-m2.5",
-				Messages: []core.Message{{Role: "user", Content: "ping"}},
+				Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
 			})
 			if err != nil {
 				t.Fatalf("Complete returned error: %v", err)
@@ -309,13 +309,13 @@ func TestComplete_ErrorEnvelope(t *testing.T) {
 	defer server.Close()
 
 	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "bad-key", HTTPClient: server.Client, Name: "opencode"})
-	_, err := c.Complete(context.Background(), &core.Request{
+	_, err := c.Complete(context.Background(), &llmtypes.Request{
 		Model:    "minimax-m2.5",
-		Messages: []core.Message{{Role: "user", Content: "ping"}},
+		Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
 	})
 	perr := requireProviderError(t, err)
-	if perr.ErrorKind != core.KindAuth {
-		t.Errorf("ErrorKind = %q, want %q", perr.ErrorKind, core.KindAuth)
+	if perr.ErrorKind != llmtypes.KindAuth {
+		t.Errorf("ErrorKind = %q, want %q", perr.ErrorKind, llmtypes.KindAuth)
 	}
 	if !strings.Contains(perr.Message, "invalid api key") {
 		t.Errorf("Message = %q, want invalid api key", perr.Message)
@@ -352,9 +352,9 @@ func TestCompleteStream_Success(t *testing.T) {
 	defer server.Close()
 
 	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
-	stream, err := c.CompleteStream(context.Background(), &core.Request{
+	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
 		Model:    "minimax-m2.5",
-		Messages: []core.Message{{Role: "user", Content: "ping"}},
+		Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
 	})
 	if err != nil {
 		t.Fatalf("CompleteStream returned error: %v", err)
@@ -364,12 +364,12 @@ func TestCompleteStream_Success(t *testing.T) {
 	var content strings.Builder
 	var reasoning strings.Builder
 	var finishReason string
-	var usage *core.Usage
+	var usage *llmtypes.Usage
 	roleSeen := false
 	chunks := 0
 	for {
 		event, err := stream.Recv()
-		if errors.Is(err, core.ErrStreamDone) {
+		if errors.Is(err, llmtypes.ErrStreamDone) {
 			break
 		}
 		if err != nil {
@@ -426,9 +426,9 @@ func TestCompleteStream_ErrorMidFlight(t *testing.T) {
 	defer server.Close()
 
 	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
-	stream, err := c.CompleteStream(context.Background(), &core.Request{
+	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
 		Model:    "minimax-m2.5",
-		Messages: []core.Message{{Role: "user", Content: "ping"}},
+		Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
 	})
 	if err != nil {
 		t.Fatalf("CompleteStream returned error: %v", err)
@@ -440,8 +440,8 @@ func TestCompleteStream_ErrorMidFlight(t *testing.T) {
 	}
 	_, err = stream.Recv()
 	perr := requireProviderError(t, err)
-	if perr.ErrorKind != core.KindUpstream {
-		t.Fatalf("ErrorKind = %q, want %q", perr.ErrorKind, core.KindUpstream)
+	if perr.ErrorKind != llmtypes.KindUpstream {
+		t.Fatalf("ErrorKind = %q, want %q", perr.ErrorKind, llmtypes.KindUpstream)
 	}
 	if !strings.Contains(perr.Message, "stream exploded") {
 		t.Fatalf("Message = %q, want stream exploded", perr.Message)
@@ -457,9 +457,9 @@ func TestCompleteStream_NoMessageStop(t *testing.T) {
 	defer server.Close()
 
 	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
-	stream, err := c.CompleteStream(context.Background(), &core.Request{
+	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
 		Model:    "minimax-m2.5",
-		Messages: []core.Message{{Role: "user", Content: "ping"}},
+		Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
 	})
 	if err != nil {
 		t.Fatalf("CompleteStream returned error: %v", err)
@@ -474,8 +474,8 @@ func TestCompleteStream_NoMessageStop(t *testing.T) {
 	}
 	_, err = stream.Recv()
 	perr := requireProviderError(t, err)
-	if perr.ErrorKind != core.KindUpstream {
-		t.Fatalf("ErrorKind = %q, want %q", perr.ErrorKind, core.KindUpstream)
+	if perr.ErrorKind != llmtypes.KindUpstream {
+		t.Fatalf("ErrorKind = %q, want %q", perr.ErrorKind, llmtypes.KindUpstream)
 	}
 	if !strings.Contains(perr.Message, "stream ended without message_stop") {
 		t.Fatalf("Message = %q, want missing message_stop", perr.Message)
@@ -493,9 +493,9 @@ func TestCompleteStream_PingIgnored(t *testing.T) {
 	defer server.Close()
 
 	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
-	stream, err := c.CompleteStream(context.Background(), &core.Request{
+	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
 		Model:    "minimax-m2.5",
-		Messages: []core.Message{{Role: "user", Content: "ping"}},
+		Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
 	})
 	if err != nil {
 		t.Fatalf("CompleteStream returned error: %v", err)
@@ -522,9 +522,9 @@ func TestStreamSummary_Success(t *testing.T) {
 	defer server.Close()
 
 	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
-	stream, err := c.CompleteStream(context.Background(), &core.Request{
+	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
 		Model:    "minimax-m2.5",
-		Messages: []core.Message{{Role: "user", Content: "ping"}},
+		Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
 	})
 	if err != nil {
 		t.Fatalf("CompleteStream: %v", err)
@@ -532,7 +532,7 @@ func TestStreamSummary_Success(t *testing.T) {
 	defer stream.Close()
 
 	for {
-		if _, err := stream.Recv(); errors.Is(err, core.ErrStreamDone) {
+		if _, err := stream.Recv(); errors.Is(err, llmtypes.ErrStreamDone) {
 			break
 		} else if err != nil {
 			t.Fatalf("Recv: %v", err)
@@ -572,9 +572,9 @@ func TestStreamSummary_PartialOnError(t *testing.T) {
 	defer server.Close()
 
 	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
-	stream, err := c.CompleteStream(context.Background(), &core.Request{
+	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
 		Model:    "minimax-m2.5",
-		Messages: []core.Message{{Role: "user", Content: "ping"}},
+		Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
 	})
 	if err != nil {
 		t.Fatalf("CompleteStream: %v", err)
@@ -635,14 +635,14 @@ func writeSSEEvent(t *testing.T, w http.ResponseWriter, event, payload string) {
 	time.Sleep(time.Millisecond)
 }
 
-func requireProviderError(t *testing.T, err error) *core.Error {
+func requireProviderError(t *testing.T, err error) *llmtypes.Error {
 	t.Helper()
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	var perr *core.Error
+	var perr *llmtypes.Error
 	if !errors.As(err, &perr) {
-		t.Fatalf("err type = %T, want *core.Error", err)
+		t.Fatalf("err type = %T, want *llmtypes.Error", err)
 	}
 	return perr
 }
@@ -746,13 +746,13 @@ type streamToolCallAcc struct {
 	args strings.Builder
 }
 
-func collectStreamToolCalls(t *testing.T, stream core.Stream) (map[int]*streamToolCallAcc, string) {
+func collectStreamToolCalls(t *testing.T, stream llmtypes.Stream) (map[int]*streamToolCallAcc, string) {
 	t.Helper()
 	acc := make(map[int]*streamToolCallAcc)
 	finish := ""
 	for {
 		event, err := stream.Recv()
-		if errors.Is(err, core.ErrStreamDone) {
+		if errors.Is(err, llmtypes.ErrStreamDone) {
 			break
 		}
 		if err != nil {
@@ -811,9 +811,9 @@ func TestCompleteStream_ToolUse_Standard(t *testing.T) {
 	defer server.Close()
 
 	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
-	stream, err := c.CompleteStream(context.Background(), &core.Request{
+	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
 		Model:    "claude-x",
-		Messages: []core.Message{{Role: "user", Content: "what time?"}},
+		Messages: []llmtypes.Message{{Role: "user", Content: "what time?"}},
 	})
 	if err != nil {
 		t.Fatalf("CompleteStream: %v", err)
@@ -856,9 +856,9 @@ func TestCompleteStream_ToolUse_ZeroArgFlushedOnStop(t *testing.T) {
 	defer server.Close()
 
 	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
-	stream, err := c.CompleteStream(context.Background(), &core.Request{
+	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
 		Model:    "claude-x",
-		Messages: []core.Message{{Role: "user", Content: "go"}},
+		Messages: []llmtypes.Message{{Role: "user", Content: "go"}},
 	})
 	if err != nil {
 		t.Fatalf("CompleteStream: %v", err)
@@ -894,9 +894,9 @@ func TestCompleteStream_ToolUse_MultipleCalls(t *testing.T) {
 	defer server.Close()
 
 	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
-	stream, err := c.CompleteStream(context.Background(), &core.Request{
+	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
 		Model:    "claude-x",
-		Messages: []core.Message{{Role: "user", Content: "do both"}},
+		Messages: []llmtypes.Message{{Role: "user", Content: "do both"}},
 	})
 	if err != nil {
 		t.Fatalf("CompleteStream: %v", err)
@@ -931,9 +931,9 @@ func TestCompleteStream_ToolUse_MixedTextAndToolCall(t *testing.T) {
 	defer server.Close()
 
 	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
-	stream, err := c.CompleteStream(context.Background(), &core.Request{
+	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
 		Model:    "claude-x",
-		Messages: []core.Message{{Role: "user", Content: "go"}},
+		Messages: []llmtypes.Message{{Role: "user", Content: "go"}},
 	})
 	if err != nil {
 		t.Fatalf("CompleteStream: %v", err)
@@ -944,7 +944,7 @@ func TestCompleteStream_ToolUse_MixedTextAndToolCall(t *testing.T) {
 	acc := make(map[int]*streamToolCallAcc)
 	for {
 		event, err := stream.Recv()
-		if errors.Is(err, core.ErrStreamDone) {
+		if errors.Is(err, llmtypes.ErrStreamDone) {
 			break
 		}
 		if err != nil {

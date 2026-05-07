@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"llmgate/internal/core"
+	"llmgate/internal/llmtypes"
 )
 
 func newCapturingLogger() (*slog.Logger, *bytes.Buffer) {
@@ -31,7 +31,7 @@ func TestLogRecorder_RecordSuccess(t *testing.T) {
 		DurationMS:     234,
 		RequestBytes:   100,
 		ResponseBytes:  500,
-		Usage: &core.Usage{
+		Usage: &llmtypes.Usage{
 			PromptTokens:     10,
 			CompletionTokens: 20,
 			TotalTokens:      30,
@@ -105,7 +105,7 @@ func TestLogRecorder_RecordAuthFailure(t *testing.T) {
 		Method:         "chat.completions",
 		ModelRequested: "",
 		AuthError:      "unknown",
-		ErrorKind:      core.KindAuth,
+		ErrorKind:      llmtypes.KindAuth,
 		StatusCode:     401,
 	})
 
@@ -134,7 +134,7 @@ func TestLogRecorder_RecordError(t *testing.T) {
 		Method:         "chat.completions",
 		ModelRequested: "kimi-k2.6",
 		StatusCode:     429,
-		ErrorKind:      core.KindRateLimit,
+		ErrorKind:      llmtypes.KindRateLimit,
 		DurationMS:     50,
 	})
 
@@ -171,10 +171,10 @@ func TestLogRecorder_FallbackFields(t *testing.T) {
 		Vendor:         "opencode",
 		ModelUsed:      "deepseek-v4-flash",
 		StatusCode:     200,
-		Usage:          &core.Usage{PromptTokens: 5, CompletionTokens: 7, TotalTokens: 12},
-		Attempts: []core.Attempt{
-			{Vendor: "opencode", Model: "deepseek-v4-pro", DurationMS: 80, ErrorKind: core.KindRateLimit, StatusCode: 429},
-			{Vendor: "opencode", Model: "deepseek-v4-flash", DurationMS: 200, StatusCode: 200, Usage: &core.Usage{PromptTokens: 5, CompletionTokens: 7, TotalTokens: 12}},
+		Usage:          &llmtypes.Usage{PromptTokens: 5, CompletionTokens: 7, TotalTokens: 12},
+		Attempts: []llmtypes.Attempt{
+			{Vendor: "opencode", Model: "deepseek-v4-pro", DurationMS: 80, ErrorKind: llmtypes.KindRateLimit, StatusCode: 429},
+			{Vendor: "opencode", Model: "deepseek-v4-flash", DurationMS: 200, StatusCode: 200, Usage: &llmtypes.Usage{PromptTokens: 5, CompletionTokens: 7, TotalTokens: 12}},
 		},
 	})
 
@@ -209,7 +209,7 @@ func TestLogRecorder_OmitsAttemptsWhenSingle(t *testing.T) {
 		Vendor:         "opencode",
 		ModelUsed:      "deepseek-v4-flash",
 		StatusCode:     200,
-		Attempts: []core.Attempt{
+		Attempts: []llmtypes.Attempt{
 			{Vendor: "opencode", Model: "deepseek-v4-flash", StatusCode: 200},
 		},
 	})

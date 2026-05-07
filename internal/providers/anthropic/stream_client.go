@@ -8,14 +8,14 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"llmgate/internal/core"
+	"llmgate/internal/llmtypes"
 	"llmgate/internal/streaming"
 	"llmgate/internal/upstream"
 )
 
-func (c *Client) CompleteStream(ctx context.Context, req *core.Request) (core.Stream, error) {
+func (c *Client) CompleteStream(ctx context.Context, req *llmtypes.Request) (llmtypes.Stream, error) {
 	if err := req.Validate(); err != nil {
-		return nil, core.StampProvider(err, c.cfg.Name)
+		return nil, llmtypes.StampProvider(err, c.cfg.Name)
 	}
 
 	body, err := toAnthropicRequest(req, c.cfg.DefaultMaxTokens, true)
@@ -108,7 +108,7 @@ type anthropicEnd struct {
 // event.Type to a per-event handler, (3) run finalize when the
 // scanner runs dry. Each per-event handler is small and single-purpose
 // so the state-machine surface stays readable.
-func (s *stream) Recv() (*core.Event, error) {
+func (s *stream) Recv() (*llmtypes.Event, error) {
 	if s.closed.Load() {
 		return nil, io.EOF
 	}
@@ -151,20 +151,20 @@ func (s *stream) Recv() (*core.Event, error) {
 
 // emitFinish flushes the buffered finish event exactly once, advancing
 // internal state so the next Recv returns io.EOF.
-func (s *stream) emitFinish() *core.Event {
+func (s *stream) emitFinish() *llmtypes.Event {
 	s.pendingEmitted = true
 	s.RecordEmit()
 	return s.buildFinishEvent(s.pendingFinish)
 }
 
 // decodePayload parses a single SSE data payload into the wire-shape
-// anthropicStreamEvent. Failures wrap into a typed *core.Error so
+// anthropicStreamEvent. Failures wrap into a typed *llmtypes.Error so
 // the loop can return immediately.
 func (s *stream) decodePayload(payload []byte) (*anthropicStreamEvent, error) {
 	var event anthropicStreamEvent
 	if err := json.Unmarshal(payload, &event); err != nil {
-		return nil, &core.Error{
-			ErrorKind: core.KindUpstream,
+		return nil, &llmtypes.Error{
+			ErrorKind: llmtypes.KindUpstream,
 			Provider:  s.ProviderName,
 			Message:   "decode stream event: " + err.Error(),
 			Cause:     err,
@@ -182,7 +182,7 @@ func (s *stream) decodePayload(payload []byte) (*anthropicStreamEvent, error) {
 //
 // payload is passed through to the error-event handlers because they
 // re-parse the envelope shape that anthropicStreamEvent doesn't model.
-func (s *stream) dispatch(event *anthropicStreamEvent, payload []byte) (emitted bool, evt *core.Event, err error) {
+func (s *stream) dispatch(event *anthropicStreamEvent, payload []byte) (emitted bool, evt *llmtypes.Event, err error) {
 	switch event.Type {
 	case "message_start":
 		return true, s.handleMessageStart(event), nil
@@ -211,20 +211,20 @@ func (s *stream) dispatch(event *anthropicStreamEvent, payload []byte) (emitted 
 
 // handleMessageStart captures message metadata + input usage and emits
 // the assistant-role chunk that opens an OpenAI-shaped stream.
-func (s *stream) handleMessageStart(event *anthropicStreamEvent) *core.Event {
+func (s *stream) handleMessageStart(event *anthropicStreamEvent) *llmtypes.Event {
 	if event.Message != nil {
 		s.msgID = event.Message.ID
 		s.msgModel = event.Message.Model
 		s.inputTokens = event.Message.Usage.InputTokens
 	}
 	s.RecordEmit()
-	return &core.Event{
+	return &llmtypes.Event{
 		ID:     s.msgID,
 		Object: "chat.completion.chunk",
 		Model:  s.msgModel,
-		Choices: []core.ChoiceDelta{{
+		Choices: []llmtypes.ChoiceDelta{{
 			Index: 0,
-			Delta: core.Delta{Role: "assistant"},
+			Delta: llmtypes.Delta{Role: "assistant"},
 		}},
 	}
 }
@@ -235,16 +235,16 @@ func (s *stream) handleMessageStart(event *anthropicStreamEvent) *core.Event {
 // — older API shape); input_json_delta extends the matching tool_use
 // accumulator and emits an OpenAI tool_calls argument fragment.
 // Unknown delta types are silently skipped.
-func (s *stream) handleContentBlockDelta(event *anthropicStreamEvent) (bool, *core.Event, error) {
+func (s *stream) handleContentBlockDelta(event *anthropicStreamEvent) (bool, *llmtypes.Event, error) {
 	switch event.Delta.Type {
 	case "text_delta":
-		return true, s.buildDeltaEvent(core.Delta{Content: event.Delta.Text}), nil
+		return true, s.buildDeltaEvent(llmtypes.Delta{Content: event.Delta.Text}), nil
 	case "thinking_delta":
 		thinking := event.Delta.Thinking
 		if thinking == "" {
 			thinking = event.Delta.Text
 		}
-		return true, s.buildDeltaEvent(core.Delta{ReasoningContent: thinking}), nil
+		return true, s.buildDeltaEvent(llmtypes.Delta{ReasoningContent: thinking}), nil
 	case "input_json_delta":
 		return s.handleInputJSONDelta(event)
 	default:
@@ -252,16 +252,16 @@ func (s *stream) handleContentBlockDelta(event *anthropicStreamEvent) (bool, *co
 	}
 }
 
-// buildDeltaEvent wraps a core.Delta into the surrounding chunk
+// buildDeltaEvent wraps a llmtypes.Delta into the surrounding chunk
 // envelope (id, model, single choice). RecordEmit is called as part of
 // every emitted chunk so audit chunk counts stay accurate.
-func (s *stream) buildDeltaEvent(delta core.Delta) *core.Event {
+func (s *stream) buildDeltaEvent(delta llmtypes.Delta) *llmtypes.Event {
 	s.RecordEmit()
-	return &core.Event{
+	return &llmtypes.Event{
 		ID:     s.msgID,
 		Object: "chat.completion.chunk",
 		Model:  s.msgModel,
-		Choices: []core.ChoiceDelta{{
+		Choices: []llmtypes.ChoiceDelta{{
 			Index: 0,
 			Delta: delta,
 		}},
@@ -273,7 +273,7 @@ func (s *stream) buildDeltaEvent(delta core.Delta) *core.Event {
 // tool_calls fragment carrying id + function.name. Other block types
 // (text / thinking) need no preamble in the OpenAI wire — the deltas
 // themselves carry everything callers expect.
-func (s *stream) handleContentBlockStart(event *anthropicStreamEvent) (bool, *core.Event, error) {
+func (s *stream) handleContentBlockStart(event *anthropicStreamEvent) (bool, *llmtypes.Event, error) {
 	if event.ContentBlock == nil || event.ContentBlock.Type != "tool_use" {
 		return false, nil, nil
 	}
@@ -301,7 +301,7 @@ func (s *stream) handleContentBlockStart(event *anthropicStreamEvent) (bool, *co
 // is incrementally streaming a tool_use block's JSON input. The first
 // delta also carries the id + name (because content_block_start used a
 // placeholder); subsequent deltas only extend arguments.
-func (s *stream) handleInputJSONDelta(event *anthropicStreamEvent) (bool, *core.Event, error) {
+func (s *stream) handleInputJSONDelta(event *anthropicStreamEvent) (bool, *llmtypes.Event, error) {
 	if event.Delta.PartialJSON == "" {
 		return false, nil, nil
 	}
@@ -323,7 +323,7 @@ func (s *stream) handleInputJSONDelta(event *anthropicStreamEvent) (bool, *core.
 // zero-argument tool (content_block_start saw input "{}", no
 // input_json_delta events arrived, content_block_stop now closes the
 // block). Other paths have already emitted their deltas.
-func (s *stream) handleContentBlockStop(event *anthropicStreamEvent) (bool, *core.Event, error) {
+func (s *stream) handleContentBlockStop(event *anthropicStreamEvent) (bool, *llmtypes.Event, error) {
 	state, ok := s.toolCalls[event.Index]
 	if !ok || state == nil || state.Started {
 		return false, nil, nil
@@ -349,7 +349,7 @@ func initialToolArguments(input json.RawMessage) string {
 // buildToolCallStartDelta builds the *first* OpenAI tool_calls fragment
 // for a tool call: includes the openai-allocated index, id, type, and
 // function name plus the initial arguments fragment.
-func buildToolCallStartDelta(state *streamToolCallState, args string) core.Delta {
+func buildToolCallStartDelta(state *streamToolCallState, args string) llmtypes.Delta {
 	return toolCallDelta([]map[string]any{{
 		"index": state.Index,
 		"id":    state.ID,
@@ -363,7 +363,7 @@ func buildToolCallStartDelta(state *streamToolCallState, args string) core.Delta
 
 // buildToolCallArgsDelta builds a continuation tool_calls fragment
 // (no id / name) extending an in-flight call's arguments.
-func buildToolCallArgsDelta(index int, args string) core.Delta {
+func buildToolCallArgsDelta(index int, args string) llmtypes.Delta {
 	return toolCallDelta([]map[string]any{{
 		"index": index,
 		"function": map[string]any{
@@ -372,9 +372,9 @@ func buildToolCallArgsDelta(index int, args string) core.Delta {
 	}})
 }
 
-func toolCallDelta(toolCalls []map[string]any) core.Delta {
+func toolCallDelta(toolCalls []map[string]any) llmtypes.Delta {
 	raw, _ := json.Marshal(toolCalls)
-	return core.Delta{
+	return llmtypes.Delta{
 		Extra: map[string]json.RawMessage{"tool_calls": raw},
 	}
 }
@@ -398,7 +398,7 @@ func (s *stream) handleMessageDelta(event *anthropicStreamEvent) {
 // handleMessageStop emits the terminal finish chunk. If message_delta
 // never arrived (server cut early after a content block), synthesize a
 // generic "stop" reason so callers still see a clean finish.
-func (s *stream) handleMessageStop() *core.Event {
+func (s *stream) handleMessageStop() *llmtypes.Event {
 	if s.pendingFinish == nil {
 		s.pendingFinish = &anthropicEnd{finishReason: "stop"}
 	}
@@ -412,26 +412,26 @@ func (s *stream) handleMessageStop() *core.Event {
 // finish but never saw message_stop, surface it as the final chunk —
 // otherwise treat the abrupt clean-EOF as an upstream fault (Anthropic
 // must terminate with message_stop).
-func (s *stream) finalize() (*core.Event, error) {
+func (s *stream) finalize() (*llmtypes.Event, error) {
 	if s.pendingFinish != nil && !s.pendingEmitted {
 		return s.emitFinish(), nil
 	}
-	return nil, &core.Error{
-		ErrorKind: core.KindUpstream,
+	return nil, &llmtypes.Error{
+		ErrorKind: llmtypes.KindUpstream,
 		Provider:  s.ProviderName,
 		Message:   "stream ended without message_stop",
 	}
 }
 
-func (s *stream) Summary() *core.Summary {
-	summary := &core.Summary{
+func (s *stream) Summary() *llmtypes.Summary {
+	summary := &llmtypes.Summary{
 		Model:       s.msgModel,
 		ChunkCount:  s.ChunkCount,
 		FirstByteAt: s.FirstByteAt,
 	}
 	if s.pendingFinish != nil {
 		summary.FinishReason = s.pendingFinish.finishReason
-		usage := &core.Usage{
+		usage := &llmtypes.Usage{
 			PromptTokens:     s.inputTokens,
 			CompletionTokens: s.pendingFinish.outputTokens,
 			TotalTokens:      s.inputTokens + s.pendingFinish.outputTokens,
@@ -441,7 +441,7 @@ func (s *stream) Summary() *core.Summary {
 	} else if s.inputTokens > 0 {
 		// Partial: only message_start arrived. Surface what we got so audit
 		// can record prompt token consumption even when generation aborted.
-		summary.Usage = &core.Usage{
+		summary.Usage = &llmtypes.Usage{
 			PromptTokens: s.inputTokens,
 			TotalTokens:  s.inputTokens,
 		}
@@ -449,23 +449,23 @@ func (s *stream) Summary() *core.Summary {
 	return summary
 }
 
-func (s *stream) buildFinishEvent(end *anthropicEnd) *core.Event {
+func (s *stream) buildFinishEvent(end *anthropicEnd) *llmtypes.Event {
 	if end == nil {
 		end = &anthropicEnd{finishReason: "stop"}
 	}
-	usage := &core.Usage{
+	usage := &llmtypes.Usage{
 		PromptTokens:     s.inputTokens,
 		CompletionTokens: end.outputTokens,
 		TotalTokens:      s.inputTokens + end.outputTokens,
 	}
 	addCacheUsageExtra(usage, end.cacheCreationTokens, end.cacheReadTokens)
-	return &core.Event{
+	return &llmtypes.Event{
 		ID:     s.msgID,
 		Object: "chat.completion.chunk",
 		Model:  s.msgModel,
-		Choices: []core.ChoiceDelta{{
+		Choices: []llmtypes.ChoiceDelta{{
 			Index:        0,
-			Delta:        core.Delta{},
+			Delta:        llmtypes.Delta{},
 			FinishReason: end.finishReason,
 		}},
 		Usage: usage,
@@ -487,7 +487,7 @@ type anthropicStreamEvent struct {
 	Usage anthropicUsage `json:"usage"`
 }
 
-func parseMaybeStreamError(payload []byte, providerName string) *core.Error {
+func parseMaybeStreamError(payload []byte, providerName string) *llmtypes.Error {
 	message, _ := envelopeMessage(payload)
 	if message == "" {
 		return nil

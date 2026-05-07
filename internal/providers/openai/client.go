@@ -1,4 +1,4 @@
-// Package openai adapts OpenAI-compatible upstreams to core.Provider.
+// Package openai adapts OpenAI-compatible upstreams to llmtypes.Provider.
 package openai
 
 import (

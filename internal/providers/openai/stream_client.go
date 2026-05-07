@@ -4,14 +4,14 @@ import (
 	"context"
 	"encoding/json"
 
-	"llmgate/internal/core"
+	"llmgate/internal/llmtypes"
 	"llmgate/internal/streaming"
 	"llmgate/internal/upstream"
 )
 
-func (c *Client) CompleteStream(ctx context.Context, req *core.Request) (core.Stream, error) {
+func (c *Client) CompleteStream(ctx context.Context, req *llmtypes.Request) (llmtypes.Stream, error) {
 	if err := req.Validate(); err != nil {
-		return nil, core.StampProvider(err, c.cfg.Name)
+		return nil, llmtypes.StampProvider(err, c.cfg.Name)
 	}
 
 	body, err := requestBodyWithStream(req)
@@ -49,23 +49,23 @@ type stream struct {
 	// accumulated state for Summary()
 	model        string
 	finishReason string
-	usage        *core.Usage
+	usage        *llmtypes.Usage
 	vendorCost   string
 }
 
-func (s *stream) Recv() (*core.Event, error) {
+func (s *stream) Recv() (*llmtypes.Event, error) {
 	data, err := s.reader.Recv()
 	if err != nil {
-		return nil, core.StampProvider(err, s.ProviderName)
+		return nil, llmtypes.StampProvider(err, s.ProviderName)
 	}
 	if perr := parseStreamError(data, s.ProviderName); perr != nil {
 		return nil, perr
 	}
 
-	var event core.Event
+	var event llmtypes.Event
 	if err := json.Unmarshal(data, &event); err != nil {
-		return nil, &core.Error{
-			ErrorKind: core.KindUpstream,
+		return nil, &llmtypes.Error{
+			ErrorKind: llmtypes.KindUpstream,
 			Provider:  s.ProviderName,
 			Message:   "decode stream event: " + err.Error(),
 			Cause:     err,
@@ -90,8 +90,8 @@ func (s *stream) Recv() (*core.Event, error) {
 	return &event, nil
 }
 
-func (s *stream) Summary() *core.Summary {
-	return &core.Summary{
+func (s *stream) Summary() *llmtypes.Summary {
+	return &llmtypes.Summary{
 		Model:        s.model,
 		FinishReason: s.finishReason,
 		Usage:        s.usage,
@@ -103,23 +103,23 @@ func (s *stream) Summary() *core.Summary {
 
 // requestBodyWithStream marshals a copy of req with Stream forced true
 // so callers don't need to set the flag themselves.
-func requestBodyWithStream(req *core.Request) ([]byte, error) {
+func requestBodyWithStream(req *llmtypes.Request) ([]byte, error) {
 	cp := *req
 	t := true
 	cp.Stream = &t
 	return json.Marshal(&cp)
 }
 
-// parseStreamError returns a *core.Error if the SSE event payload is
+// parseStreamError returns a *llmtypes.Error if the SSE event payload is
 // an upstream error envelope (mid-stream surfaced as data: {"error":...}).
 // Heuristic kind detection: error.type or message string match — best
 // effort, default KindUpstream when no token wins.
-func parseStreamError(data []byte, providerName string) *core.Error {
+func parseStreamError(data []byte, providerName string) *llmtypes.Error {
 	env := parseErrorEnvelope(data)
 	if env.Message == "" {
 		return nil
 	}
-	return &core.Error{
+	return &llmtypes.Error{
 		ErrorKind: kindFromOpenAIError(0, env),
 		Provider:  providerName,
 		Message:   env.Message,

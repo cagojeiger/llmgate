@@ -10,13 +10,13 @@ import (
 	"time"
 
 	"llmgate/internal/audit"
-	"llmgate/internal/core"
+	"llmgate/internal/llmtypes"
 	"llmgate/internal/streaming"
 )
 
 // streamRelay owns the SSE wire transcript for one streaming
 // request. Caller (Handler) handles the pre-stream phases (parse →
-// gateway router → audit-route reflect) and the deferred Stream.Close /
+// Service → audit-route reflect) and the deferred Stream.Close /
 // adoptStreamSummary; streamRelay takes over once a Stream is in
 // hand and runs the Recv loop until terminal state — EOF / idle
 // timeout / client disconnect / mid-stream provider error / encode
@@ -35,10 +35,10 @@ func newStreamRelay(log *slog.Logger, idleTimeout time.Duration) *streamRelay {
 // fully drained or a terminal condition was reached. rec is mutated in
 // place: StatusCode, ResponseBytes, ErrorKind. The caller's deferred
 // stream.Close() and adoptStreamSummary() finalize the rest.
-func (s *streamRelay) Run(ctx context.Context, w http.ResponseWriter, stream core.Stream, rec *audit.Record) {
+func (s *streamRelay) Run(ctx context.Context, w http.ResponseWriter, stream llmtypes.Stream, rec *audit.Record) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		perr := &core.Error{ErrorKind: core.KindUnknown, Message: "streaming unsupported"}
+		perr := &llmtypes.Error{ErrorKind: llmtypes.KindUnknown, Message: "streaming unsupported"}
 		adoptError(rec, perr)
 		writeError(w, perr)
 		return
@@ -62,7 +62,7 @@ func (s *streamRelay) Run(ctx context.Context, w http.ResponseWriter, stream cor
 				s.recordClientClosed(ctx, rec, err)
 				return
 			}
-			rec.ErrorKind = core.ErrorKindOf(err)
+			rec.ErrorKind = llmtypes.ErrorKindOf(err)
 			s.log.LogAttrs(ctx, slog.LevelWarn, "stream receive failed",
 				slog.String("vendor", rec.Vendor),
 				slog.String("err", err.Error()),
@@ -74,7 +74,7 @@ func (s *streamRelay) Run(ctx context.Context, w http.ResponseWriter, stream cor
 
 		payload, err := json.Marshal(event)
 		if err != nil {
-			perr := &core.Error{ErrorKind: core.KindUnknown, Message: "encode stream event: " + err.Error(), Cause: err}
+			perr := &llmtypes.Error{ErrorKind: llmtypes.KindUnknown, Message: "encode stream event: " + err.Error(), Cause: err}
 			rec.ErrorKind = perr.ErrorKind
 			_ = sink.SendError(perr)
 			_ = sink.SendDone()
@@ -91,7 +91,7 @@ func (s *streamRelay) Run(ctx context.Context, w http.ResponseWriter, stream cor
 // Caller should return immediately afterwards — further writes would
 // fail the same way and SendDone would too.
 func (s *streamRelay) recordClientClosed(ctx context.Context, rec *audit.Record, werr error) {
-	rec.ErrorKind = core.KindClientClosed
+	rec.ErrorKind = llmtypes.KindClientClosed
 	s.log.LogAttrs(ctx, slog.LevelInfo, "client disconnected mid-stream",
 		slog.String("vendor", rec.Vendor),
 		slog.String("err", werr.Error()),
@@ -99,7 +99,7 @@ func (s *streamRelay) recordClientClosed(ctx context.Context, rec *audit.Record,
 }
 
 type recvResult struct {
-	event *core.Event
+	event *llmtypes.Event
 	err   error
 }
 
@@ -107,7 +107,7 @@ type recvResult struct {
 // idle timeout (no event between Recv calls). On timeout the stream is
 // closed and a bounded grace period waits for the goroutine to exit;
 // see streaming.CloseGrace for the safety net rationale.
-func recvWithIdleTimeout(ctx context.Context, stream core.Stream, timeout time.Duration) (*core.Event, error) {
+func recvWithIdleTimeout(ctx context.Context, stream llmtypes.Stream, timeout time.Duration) (*llmtypes.Event, error) {
 	ch := make(chan recvResult, 1)
 	go func() {
 		event, err := stream.Recv()
@@ -128,12 +128,12 @@ func recvWithIdleTimeout(ctx context.Context, stream core.Stream, timeout time.D
 	case <-timeoutC:
 		_ = stream.Close()
 		streaming.DrainRecvOrAbandon(ch, streaming.CloseGrace)
-		return nil, &core.Error{ErrorKind: core.KindTimeout, Message: "stream idle timeout"}
+		return nil, &llmtypes.Error{ErrorKind: llmtypes.KindTimeout, Message: "stream idle timeout"}
 	case <-ctx.Done():
 		_ = stream.Close()
 		streaming.DrainRecvOrAbandon(ch, streaming.CloseGrace)
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, &core.Error{ErrorKind: core.KindTimeout, Message: ctx.Err().Error(), Cause: ctx.Err()}
+			return nil, &llmtypes.Error{ErrorKind: llmtypes.KindTimeout, Message: ctx.Err().Error(), Cause: ctx.Err()}
 		}
 		return nil, ctx.Err()
 	}

@@ -17,8 +17,8 @@ import (
 	"llmgate/internal/audit"
 	"llmgate/internal/config"
 	"llmgate/internal/consumers"
-	"llmgate/internal/core"
-	"llmgate/internal/gateway"
+	"llmgate/internal/llmtypes"
+	"llmgate/internal/llmrouter"
 )
 
 // recordingRecorder captures every emitted audit Record so tests can
@@ -32,19 +32,19 @@ func (r *recordingRecorder) Record(_ context.Context, rec *audit.Record) {
 }
 func (r *recordingRecorder) Close() error { return nil }
 
-// stubGateway implements ChatGateway without doing any real work — the
+// stubService implements ChatService without doing any real work — the
 // handler tests in this file exercise auth, not routing, so a stub
 // keeps test isolation tight. Complete is what serveComplete calls;
 // stream is unused in these tests.
-type stubGateway struct {
-	resp *gateway.RouteResult
+type stubService struct {
+	resp *llmrouter.RouteResult
 	err  error
 }
 
-func (s *stubGateway) Complete(context.Context, *core.Request) (*gateway.RouteResult, error) {
+func (s *stubService) Complete(context.Context, *llmtypes.Request) (*llmrouter.RouteResult, error) {
 	return s.resp, s.err
 }
-func (s *stubGateway) CompleteStream(context.Context, *core.Request) (*gateway.RouteResult, error) {
+func (s *stubService) CompleteStream(context.Context, *llmtypes.Request) (*llmrouter.RouteResult, error) {
 	return s.resp, s.err
 }
 
@@ -188,13 +188,13 @@ func TestServer_AuthIntegration(t *testing.T) {
 	logBuf := &bytes.Buffer{}
 	logger := slog.New(slog.NewJSONHandler(logBuf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	stub := &stubGateway{resp: &gateway.RouteResult{
-		Response: &core.Response{
+	stub := &stubService{resp: &llmrouter.RouteResult{
+		Response: &llmtypes.Response{
 			ID:      "resp-1",
 			Object:  "chat.completion",
 			Model:   "claude-x",
-			Choices: []core.Choice{{Index: 0, Message: core.Message{Role: "assistant", Content: "ok"}}},
-			Usage:   &core.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2},
+			Choices: []llmtypes.Choice{{Index: 0, Message: llmtypes.Message{Role: "assistant", Content: "ok"}}},
+			Usage:   &llmtypes.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2},
 		},
 		Vendor:    "anthropic",
 		ModelUsed: "claude-x",
@@ -209,13 +209,13 @@ func TestServer_AuthIntegration(t *testing.T) {
 		header        string
 		wantStatus    int
 		wantClient    string
-		wantKind      core.ErrorKind
+		wantKind      llmtypes.ErrorKind
 		wantAuthError string
 	}
 	cases := []call{
-		{"no-auth", "", http.StatusUnauthorized, "", core.KindAuth, "missing"},
-		{"bad-format", "Token foo", http.StatusUnauthorized, "", core.KindAuth, "format"},
-		{"unknown-key", "Bearer wrong", http.StatusUnauthorized, "", core.KindAuth, "unknown"},
+		{"no-auth", "", http.StatusUnauthorized, "", llmtypes.KindAuth, "missing"},
+		{"bad-format", "Token foo", http.StatusUnauthorized, "", llmtypes.KindAuth, "format"},
+		{"unknown-key", "Bearer wrong", http.StatusUnauthorized, "", llmtypes.KindAuth, "unknown"},
 		{"good-key", "Bearer good-key", http.StatusOK, "alpha", "", ""},
 	}
 	body := `{"model":"claude-x","messages":[{"role":"user","content":"hi"}]}`
@@ -276,7 +276,7 @@ func TestServer_HealthzPublic(t *testing.T) {
 	// Smoke-only: probes are unauthenticated even when consumers are
 	// registered. Detailed probe-state coverage lives in probe_test.go.
 	store := writeStoreYAML(t, "alpha", "good-key")
-	handler := NewHandler(&stubGateway{}, slog.Default(), &recordingRecorder{}, HandlerConfig{})
+	handler := NewHandler(&stubService{}, slog.Default(), &recordingRecorder{}, HandlerConfig{})
 	srv := New(&config.Server{Addr: ":0"}, slog.Default(), handler, store, NewProbeState())
 	ts := httptest.NewServer(srv.Handler)
 	defer ts.Close()

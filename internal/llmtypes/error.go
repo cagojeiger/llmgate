@@ -1,4 +1,4 @@
-package core
+package llmtypes
 
 import (
 	"context"
@@ -58,7 +58,7 @@ func (e *Error) Is(target error) bool {
 
 // ErrorKindOf extracts the gateway error kind from err. It is the common
 // read-side helper for routing policy, server presentation, and audit
-// stamping so each layer does not repeat core.Error unwrapping.
+// stamping so each layer does not repeat llmtypes.Error unwrapping.
 func ErrorKindOf(err error) ErrorKind {
 	if err == nil {
 		return ""
@@ -73,7 +73,7 @@ func ErrorKindOf(err error) ErrorKind {
 	return KindUnknown
 }
 
-// StatusCodeOf returns the upstream status preserved on a core.Error,
+// StatusCodeOf returns the upstream status preserved on a llmtypes.Error,
 // or 0 when err is not provider-shaped or the upstream did not provide one.
 func StatusCodeOf(err error) int {
 	var perr *Error
@@ -83,7 +83,7 @@ func StatusCodeOf(err error) int {
 	return 0
 }
 
-// RetryAfterOf returns the retry hint preserved on a core.Error.
+// RetryAfterOf returns the retry hint preserved on a llmtypes.Error.
 func RetryAfterOf(err error) time.Duration {
 	var perr *Error
 	if errors.As(err, &perr) {

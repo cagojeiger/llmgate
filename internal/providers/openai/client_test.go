@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"llmgate/internal/core"
+	"llmgate/internal/llmtypes"
 )
 
 func TestComplete_Success(t *testing.T) {
@@ -38,7 +38,7 @@ func TestComplete_Success(t *testing.T) {
 		}
 
 		body, _ := io.ReadAll(r.Body)
-		var got core.Request
+		var got llmtypes.Request
 		if err := json.Unmarshal(body, &got); err != nil {
 			t.Fatalf("unmarshal request: %v", err)
 		}
@@ -69,9 +69,9 @@ func TestComplete_Success(t *testing.T) {
 	defer server.Close()
 
 	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
-	resp, err := c.Complete(context.Background(), &core.Request{
+	resp, err := c.Complete(context.Background(), &llmtypes.Request{
 		Model:     "deepseek-v4-flash",
-		Messages:  []core.Message{{Role: "user", Content: "ping"}},
+		Messages:  []llmtypes.Message{{Role: "user", Content: "ping"}},
 		MaxTokens: 32,
 		Extra:     map[string]json.RawMessage{"vendor_request": json.RawMessage(`"keep"`)},
 	})
@@ -110,16 +110,16 @@ func TestComplete_UpstreamErrorEnvelope(t *testing.T) {
 	defer server.Close()
 
 	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "bad-key", HTTPClient: server.Client, Name: "opencode"})
-	_, err := c.Complete(context.Background(), &core.Request{
+	_, err := c.Complete(context.Background(), &llmtypes.Request{
 		Model:    "deepseek-v4-flash",
-		Messages: []core.Message{{Role: "user", Content: "ping"}},
+		Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
 	})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
 	perr := requireProviderError(t, err)
-	if perr.ErrorKind != core.KindAuth {
-		t.Errorf("ErrorKind = %q, want %q", perr.ErrorKind, core.KindAuth)
+	if perr.ErrorKind != llmtypes.KindAuth {
+		t.Errorf("ErrorKind = %q, want %q", perr.ErrorKind, llmtypes.KindAuth)
 	}
 	if !strings.Contains(perr.Message, "invalid api key") {
 		t.Errorf("Message = %q, want substring 'invalid api key'", perr.Message)
@@ -140,16 +140,16 @@ func TestComplete_UpstreamErrorNonJSON(t *testing.T) {
 	defer server.Close()
 
 	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "k", HTTPClient: server.Client, Name: "opencode"})
-	_, err := c.Complete(context.Background(), &core.Request{
+	_, err := c.Complete(context.Background(), &llmtypes.Request{
 		Model:    "deepseek-v4-flash",
-		Messages: []core.Message{{Role: "user", Content: "ping"}},
+		Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
 	})
 	if err == nil {
 		t.Fatal("expected error")
 	}
 	perr := requireProviderError(t, err)
-	if perr.ErrorKind != core.KindUpstream {
-		t.Errorf("ErrorKind = %q, want %q", perr.ErrorKind, core.KindUpstream)
+	if perr.ErrorKind != llmtypes.KindUpstream {
+		t.Errorf("ErrorKind = %q, want %q", perr.ErrorKind, llmtypes.KindUpstream)
 	}
 	if !strings.Contains(perr.Message, "upstream gateway down") {
 		t.Errorf("Message = %q, want substring 'upstream gateway down'", perr.Message)
@@ -160,11 +160,11 @@ func TestComplete_ValidationErrors(t *testing.T) {
 	c := mustNew(t, Config{BaseURL: "http://example.invalid", APIKey: "k", Name: "opencode"})
 	cases := []struct {
 		name string
-		req  *core.Request
+		req  *llmtypes.Request
 	}{
 		{"nil", nil},
-		{"empty model", &core.Request{Messages: []core.Message{{Role: "user", Content: "x"}}}},
-		{"empty messages", &core.Request{Model: "m"}},
+		{"empty model", &llmtypes.Request{Messages: []llmtypes.Message{{Role: "user", Content: "x"}}}},
+		{"empty messages", &llmtypes.Request{Model: "m"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -173,8 +173,8 @@ func TestComplete_ValidationErrors(t *testing.T) {
 				t.Fatal("expected validation error, got nil")
 			}
 			perr := requireProviderError(t, err)
-			if perr.ErrorKind != core.KindBadRequest {
-				t.Fatalf("ErrorKind = %q, want %q", perr.ErrorKind, core.KindBadRequest)
+			if perr.ErrorKind != llmtypes.KindBadRequest {
+				t.Fatalf("ErrorKind = %q, want %q", perr.ErrorKind, llmtypes.KindBadRequest)
 			}
 		})
 	}
@@ -189,24 +189,24 @@ func TestClassify_StatusAndEnvelope(t *testing.T) {
 		name   string
 		status int
 		body   string
-		want   core.ErrorKind
+		want   llmtypes.ErrorKind
 	}{
-		{"401 auth", 401, `{"error":{"message":"bad key","type":"authentication_error"}}`, core.KindAuth},
-		{"403 auth", 403, `{"error":{"message":"forbidden"}}`, core.KindAuth},
-		{"404 maps to bad_request", 404, `{"error":{"message":"no such model"}}`, core.KindBadRequest},
-		{"408 request timeout", 408, `{"error":{"message":"server timeout"}}`, core.KindTimeout},
-		{"413 request too large", 413, `{"error":{"message":"payload too large","type":"request_too_large"}}`, core.KindBadRequest},
-		{"413 with token-limit hint becomes context_length", 413, `{"error":{"message":"prompt exceeded token limit"}}`, core.KindContextLength},
-		{"422 unprocessable", 422, `{"error":{"message":"bad fields"}}`, core.KindBadRequest},
-		{"400 with context_length hint", 400, `{"error":{"message":"context length 8000 exceeded"}}`, core.KindContextLength},
-		{"400 content_filter via type", 400, `{"error":{"message":"blocked","type":"content_filter"}}`, core.KindContentFilter},
-		{"400 content_filter via code", 400, `{"error":{"message":"blocked","type":"invalid_request_error","code":"content_filter"}}`, core.KindContentFilter},
-		{"429 rate limit", 429, `{"error":{"message":"slow down"}}`, core.KindRateLimit},
-		{"500 upstream", 500, `{"error":{"message":"internal"}}`, core.KindUpstream},
-		{"529 overload (Anthropic-style status some gateways forward)", 529, `{"error":{"message":"overloaded"}}`, core.KindUpstream},
-		{"non-string code does not break parsing", 400, `{"error":{"message":"bad","code":123}}`, core.KindBadRequest},
-		{"unparseable body falls to status mapping", 502, `<html>oops</html>`, core.KindUpstream},
-		{"unmapped 4xx remains unknown", 451, `{"error":{"message":"legal hold"}}`, core.KindUnknown},
+		{"401 auth", 401, `{"error":{"message":"bad key","type":"authentication_error"}}`, llmtypes.KindAuth},
+		{"403 auth", 403, `{"error":{"message":"forbidden"}}`, llmtypes.KindAuth},
+		{"404 maps to bad_request", 404, `{"error":{"message":"no such model"}}`, llmtypes.KindBadRequest},
+		{"408 request timeout", 408, `{"error":{"message":"server timeout"}}`, llmtypes.KindTimeout},
+		{"413 request too large", 413, `{"error":{"message":"payload too large","type":"request_too_large"}}`, llmtypes.KindBadRequest},
+		{"413 with token-limit hint becomes context_length", 413, `{"error":{"message":"prompt exceeded token limit"}}`, llmtypes.KindContextLength},
+		{"422 unprocessable", 422, `{"error":{"message":"bad fields"}}`, llmtypes.KindBadRequest},
+		{"400 with context_length hint", 400, `{"error":{"message":"context length 8000 exceeded"}}`, llmtypes.KindContextLength},
+		{"400 content_filter via type", 400, `{"error":{"message":"blocked","type":"content_filter"}}`, llmtypes.KindContentFilter},
+		{"400 content_filter via code", 400, `{"error":{"message":"blocked","type":"invalid_request_error","code":"content_filter"}}`, llmtypes.KindContentFilter},
+		{"429 rate limit", 429, `{"error":{"message":"slow down"}}`, llmtypes.KindRateLimit},
+		{"500 upstream", 500, `{"error":{"message":"internal"}}`, llmtypes.KindUpstream},
+		{"529 overload (Anthropic-style status some gateways forward)", 529, `{"error":{"message":"overloaded"}}`, llmtypes.KindUpstream},
+		{"non-string code does not break parsing", 400, `{"error":{"message":"bad","code":123}}`, llmtypes.KindBadRequest},
+		{"unparseable body falls to status mapping", 502, `<html>oops</html>`, llmtypes.KindUpstream},
+		{"unmapped 4xx remains unknown", 451, `{"error":{"message":"legal hold"}}`, llmtypes.KindUnknown},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -245,9 +245,9 @@ func TestCompleteStream_Success(t *testing.T) {
 	defer server.Close()
 
 	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
-	stream, err := c.CompleteStream(context.Background(), &core.Request{
+	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
 		Model:    "deepseek-v4-flash",
-		Messages: []core.Message{{Role: "user", Content: "ping"}},
+		Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
 	})
 	if err != nil {
 		t.Fatalf("CompleteStream returned error: %v", err)
@@ -260,7 +260,7 @@ func TestCompleteStream_Success(t *testing.T) {
 	chunks := 0
 	for {
 		event, err := stream.Recv()
-		if errors.Is(err, core.ErrStreamDone) {
+		if errors.Is(err, llmtypes.ErrStreamDone) {
 			break
 		}
 		if err != nil {
@@ -299,9 +299,9 @@ func TestCompleteStream_StreamErrorMidFlight(t *testing.T) {
 	defer server.Close()
 
 	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
-	stream, err := c.CompleteStream(context.Background(), &core.Request{
+	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
 		Model:    "deepseek-v4-flash",
-		Messages: []core.Message{{Role: "user", Content: "ping"}},
+		Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
 	})
 	if err != nil {
 		t.Fatalf("CompleteStream returned error: %v", err)
@@ -313,8 +313,8 @@ func TestCompleteStream_StreamErrorMidFlight(t *testing.T) {
 	}
 	_, err = stream.Recv()
 	perr := requireProviderError(t, err)
-	if perr.ErrorKind != core.KindUpstream {
-		t.Fatalf("ErrorKind = %q, want %q", perr.ErrorKind, core.KindUpstream)
+	if perr.ErrorKind != llmtypes.KindUpstream {
+		t.Fatalf("ErrorKind = %q, want %q", perr.ErrorKind, llmtypes.KindUpstream)
 	}
 	if !strings.Contains(perr.Message, "stream exploded") {
 		t.Fatalf("Message = %q, want stream exploded", perr.Message)
@@ -325,14 +325,14 @@ func TestParseStreamError_UsesOpenAIKindClassifier(t *testing.T) {
 	cases := []struct {
 		name string
 		body string
-		want core.ErrorKind
+		want llmtypes.ErrorKind
 	}{
-		{"auth type", `{"error":{"message":"bad key","type":"authentication_error"}}`, core.KindAuth},
-		{"rate type", `{"error":{"message":"slow","type":"rate_limit_error"}}`, core.KindRateLimit},
-		{"context code", `{"error":{"message":"too long","type":"invalid_request_error","code":"context_length_exceeded"}}`, core.KindContextLength},
-		{"content filter code", `{"error":{"message":"blocked","type":"invalid_request_error","code":"content_filter"}}`, core.KindContentFilter},
-		{"invalid type", `{"error":{"message":"bad field","type":"invalid_request_error"}}`, core.KindBadRequest},
-		{"unknown stream envelope", `{"error":{"message":"boom","type":"future_unknown"}}`, core.KindUpstream},
+		{"auth type", `{"error":{"message":"bad key","type":"authentication_error"}}`, llmtypes.KindAuth},
+		{"rate type", `{"error":{"message":"slow","type":"rate_limit_error"}}`, llmtypes.KindRateLimit},
+		{"context code", `{"error":{"message":"too long","type":"invalid_request_error","code":"context_length_exceeded"}}`, llmtypes.KindContextLength},
+		{"content filter code", `{"error":{"message":"blocked","type":"invalid_request_error","code":"content_filter"}}`, llmtypes.KindContentFilter},
+		{"invalid type", `{"error":{"message":"bad field","type":"invalid_request_error"}}`, llmtypes.KindBadRequest},
+		{"unknown stream envelope", `{"error":{"message":"boom","type":"future_unknown"}}`, llmtypes.KindUpstream},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -361,9 +361,9 @@ func TestCompleteStream_NaturalEOFWithoutDone(t *testing.T) {
 	defer server.Close()
 
 	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
-	stream, err := c.CompleteStream(context.Background(), &core.Request{
+	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
 		Model:    "deepseek-v4-flash",
-		Messages: []core.Message{{Role: "user", Content: "ping"}},
+		Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
 	})
 	if err != nil {
 		t.Fatalf("CompleteStream returned error: %v", err)
@@ -389,9 +389,9 @@ func TestStreamSummary_Success(t *testing.T) {
 	defer server.Close()
 
 	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
-	stream, err := c.CompleteStream(context.Background(), &core.Request{
+	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
 		Model:    "deepseek-v4-flash",
-		Messages: []core.Message{{Role: "user", Content: "ping"}},
+		Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
 	})
 	if err != nil {
 		t.Fatalf("CompleteStream: %v", err)
@@ -399,7 +399,7 @@ func TestStreamSummary_Success(t *testing.T) {
 	defer stream.Close()
 
 	for {
-		if _, err := stream.Recv(); errors.Is(err, core.ErrStreamDone) {
+		if _, err := stream.Recv(); errors.Is(err, llmtypes.ErrStreamDone) {
 			break
 		} else if err != nil {
 			t.Fatalf("Recv: %v", err)
@@ -439,9 +439,9 @@ func TestStreamSummary_PartialOnError(t *testing.T) {
 	defer server.Close()
 
 	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
-	stream, err := c.CompleteStream(context.Background(), &core.Request{
+	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
 		Model:    "deepseek-v4-flash",
-		Messages: []core.Message{{Role: "user", Content: "ping"}},
+		Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
 	})
 	if err != nil {
 		t.Fatalf("CompleteStream: %v", err)
@@ -486,12 +486,12 @@ func writeSSEChunk(t *testing.T, w http.ResponseWriter, payload string) {
 	time.Sleep(time.Millisecond)
 }
 
-func requireProviderError(t *testing.T, err error) *core.Error {
+func requireProviderError(t *testing.T, err error) *llmtypes.Error {
 	t.Helper()
 
-	var perr *core.Error
+	var perr *llmtypes.Error
 	if !errors.As(err, &perr) {
-		t.Fatalf("err type = %T, want *core.Error", err)
+		t.Fatalf("err type = %T, want *llmtypes.Error", err)
 	}
 	return perr
 }

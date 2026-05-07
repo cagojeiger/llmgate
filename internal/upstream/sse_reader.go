@@ -7,11 +7,11 @@ import (
 	"net/http"
 	"strings"
 
-	"llmgate/internal/core"
+	"llmgate/internal/llmtypes"
 )
 
 // StatusError carries a non-2xx HTTP response from an SSE stream-open
-// attempt. The adapter classifies Status into a core.ErrorKind via
+// attempt. The adapter classifies Status into a llmtypes.ErrorKind via
 // its vendor-specific envelope knowledge.
 type StatusError struct {
 	Status     int
@@ -62,7 +62,7 @@ func OpenSSE(client *http.Client, req *http.Request, providerName string) (*http
 //     returns io.EOF — Anthropic doesn't emit `[DONE]` and ends the
 //     stream after the final `message_stop` event.
 //   - A scanner error (mid-stream cut, body read failure) returns a
-//     typed *core.Error so callers can audit the transport fault.
+//     typed *llmtypes.Error so callers can audit the transport fault.
 type SSEReader struct {
 	scanner *bufio.Scanner
 	done    bool
@@ -114,7 +114,7 @@ func (r *SSEReader) Recv() (data []byte, err error) {
 		// before a connection drop may themselves be corrupt, so the
 		// error signal is the priority and any salvage attempt belongs
 		// to the adapter that knows how to validate the JSON shape.
-		return nil, &core.Error{ErrorKind: core.KindUpstream, Message: err.Error(), Cause: err}
+		return nil, &llmtypes.Error{ErrorKind: llmtypes.KindUpstream, Message: err.Error(), Cause: err}
 	}
 	// Natural EOF (clean stream end). If parts were buffered (e.g.
 	// upstream finished delivering `data: ...` lines but the trailing

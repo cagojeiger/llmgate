@@ -5,7 +5,7 @@ import (
 	"context"
 	"time"
 
-	"llmgate/internal/core"
+	"llmgate/internal/llmtypes"
 )
 
 // Record captures the per-request audit payload.
@@ -34,16 +34,16 @@ type Record struct {
 	ModelUsed string
 
 	StatusCode int
-	ErrorKind  core.ErrorKind
+	ErrorKind  llmtypes.ErrorKind
 	DurationMS int64
 
 	RequestBytes  int64
 	ResponseBytes int64
 
-	Usage      *core.Usage
+	Usage      *llmtypes.Usage
 	VendorCost string
 
-	Attempts []core.Attempt
+	Attempts []llmtypes.Attempt
 }
 
 // Recorder receives one Record per gateway request.

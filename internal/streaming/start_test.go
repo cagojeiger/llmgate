@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"llmgate/internal/core"
+	"llmgate/internal/llmtypes"
 )
 
 // stubbornStream simulates a misbehaving adapter: Recv blocks forever
@@ -22,7 +22,7 @@ func newStubbornStream() *stubbornStream {
 	return &stubbornStream{block: make(chan struct{})}
 }
 
-func (s *stubbornStream) Recv() (*core.Event, error) {
+func (s *stubbornStream) Recv() (*llmtypes.Event, error) {
 	<-s.block
 	return nil, io.EOF
 }
@@ -32,7 +32,7 @@ func (s *stubbornStream) Close() error {
 	return nil
 }
 
-func (s *stubbornStream) Summary() *core.Summary { return &core.Summary{} }
+func (s *stubbornStream) Summary() *llmtypes.Summary { return &llmtypes.Summary{} }
 
 func (s *stubbornStream) release() { close(s.block) }
 

@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"llmgate/internal/core"
+	"llmgate/internal/llmtypes"
 )
 
 func writeError(w http.ResponseWriter, err error) {
@@ -30,35 +30,35 @@ func errStatus(err error) int {
 // so handler call sites never have to special-case nil or wrapped errors.
 func errorPayload(err error) (int, time.Duration, []byte) {
 	status := http.StatusInternalServerError
-	kind := core.ErrorKindOf(err)
+	kind := llmtypes.ErrorKindOf(err)
 	if kind == "" {
-		kind = core.KindUnknown
+		kind = llmtypes.KindUnknown
 	}
-	message := core.MessageOf(err)
+	message := llmtypes.MessageOf(err)
 	if message == "" {
 		message = "unknown error"
 	}
 	var code any
-	retryAfter := core.RetryAfterOf(err)
+	retryAfter := llmtypes.RetryAfterOf(err)
 
 	if err != nil {
 		switch kind {
-		case core.KindAuth:
+		case llmtypes.KindAuth:
 			status = http.StatusUnauthorized
-		case core.KindRateLimit:
+		case llmtypes.KindRateLimit:
 			status = http.StatusTooManyRequests
-		case core.KindBadRequest:
+		case llmtypes.KindBadRequest:
 			status = http.StatusBadRequest
-		case core.KindContextLength:
+		case llmtypes.KindContextLength:
 			status, code = http.StatusBadRequest, "context_length_exceeded"
-		case core.KindContentFilter:
+		case llmtypes.KindContentFilter:
 			status, code = http.StatusBadRequest, "content_filter"
-		case core.KindUpstream, core.KindNetwork, core.KindTimeout, core.KindEmpty:
+		case llmtypes.KindUpstream, llmtypes.KindNetwork, llmtypes.KindTimeout, llmtypes.KindEmpty:
 			status = http.StatusBadGateway
-		case core.KindClientClosed:
+		case llmtypes.KindClientClosed:
 			status = 499
 		}
-		if core.MessageOf(err) == "" {
+		if llmtypes.MessageOf(err) == "" {
 			message = http.StatusText(status)
 		}
 	}

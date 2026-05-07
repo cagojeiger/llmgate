@@ -7,7 +7,7 @@ import (
 	"io"
 	"strings"
 
-	"llmgate/internal/core"
+	"llmgate/internal/llmtypes"
 )
 
 type anthropicRequest struct {
@@ -89,7 +89,7 @@ type anthropicUsage struct {
 	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
 }
 
-func toAnthropicRequest(req *core.Request, defaultMaxTokens int, stream bool) ([]byte, error) {
+func toAnthropicRequest(req *llmtypes.Request, defaultMaxTokens int, stream bool) ([]byte, error) {
 	var system []string
 	messages := make([]anthropicMessage, 0, len(req.Messages))
 	for _, msg := range req.Messages {
@@ -199,13 +199,13 @@ func toAnthropicRequest(req *core.Request, defaultMaxTokens int, stream bool) ([
 	return json.Marshal(raw)
 }
 
-// buildMessageContent converts one core.Message into the Anthropic
+// buildMessageContent converts one llmtypes.Message into the Anthropic
 // content shape. Plain text messages stay as a string (Anthropic accepts
 // both string and array). Assistant messages with prior tool_calls become
 // an array of [text?, tool_use*]. Tool-role messages become a single
 // tool_result block; the caller switches role to "user" since Anthropic
 // has no dedicated tool role.
-func buildMessageContent(msg core.Message) (any, error) {
+func buildMessageContent(msg llmtypes.Message) (any, error) {
 	if msg.Role == "tool" {
 		toolCallID, err := extractStringField(msg.Extra, "tool_call_id")
 		if err != nil {
@@ -450,7 +450,7 @@ func applyParallelToolCalls(choice *anthropicToolChoice, parallel *bool) *anthro
 	return &out
 }
 
-func toOpenAIResponse(in *anthropicResponse) (*core.Response, error) {
+func toOpenAIResponse(in *anthropicResponse) (*llmtypes.Response, error) {
 	if in == nil {
 		return nil, errors.New("response is nil")
 	}
@@ -478,7 +478,7 @@ func toOpenAIResponse(in *anthropicResponse) (*core.Response, error) {
 	}
 	usage := anthropicUsageToOpenAI(in.Usage)
 
-	msg := core.Message{
+	msg := llmtypes.Message{
 		Role:             "assistant",
 		Content:          text.String(),
 		ReasoningContent: reasoning.String(),
@@ -491,11 +491,11 @@ func toOpenAIResponse(in *anthropicResponse) (*core.Response, error) {
 		msg.Extra = map[string]json.RawMessage{"tool_calls": raw}
 	}
 
-	return &core.Response{
+	return &llmtypes.Response{
 		ID:     in.ID,
 		Object: "chat.completion",
 		Model:  in.Model,
-		Choices: []core.Choice{{
+		Choices: []llmtypes.Choice{{
 			Index:        0,
 			Message:      msg,
 			FinishReason: finishReason,
@@ -572,8 +572,8 @@ func mapStopReason(s string) string {
 	}
 }
 
-func anthropicUsageToOpenAI(in anthropicUsage) *core.Usage {
-	usage := &core.Usage{
+func anthropicUsageToOpenAI(in anthropicUsage) *llmtypes.Usage {
+	usage := &llmtypes.Usage{
 		PromptTokens:     in.InputTokens,
 		CompletionTokens: in.OutputTokens,
 		TotalTokens:      in.InputTokens + in.OutputTokens,
@@ -582,7 +582,7 @@ func anthropicUsageToOpenAI(in anthropicUsage) *core.Usage {
 	return usage
 }
 
-func addCacheUsageExtra(usage *core.Usage, cacheCreationTokens, cacheReadTokens int) {
+func addCacheUsageExtra(usage *llmtypes.Usage, cacheCreationTokens, cacheReadTokens int) {
 	if cacheCreationTokens <= 0 && cacheReadTokens <= 0 {
 		return
 	}

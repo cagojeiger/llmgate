@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"llmgate/internal/core"
+	"llmgate/internal/llmtypes"
 )
 
 func TestSSEReader_NormalDoneTermination(t *testing.T) {
@@ -194,12 +194,12 @@ func TestSSEReader_ScannerErrorBubblesAsUpstreamError(t *testing.T) {
 
 	// Second call: scanner now hits the underlying error.
 	_, err = reader.Recv()
-	var perr *core.Error
+	var perr *llmtypes.Error
 	if !errors.As(err, &perr) {
-		t.Fatalf("err type = %T, want *core.Error", err)
+		t.Fatalf("err type = %T, want *llmtypes.Error", err)
 	}
-	if perr.ErrorKind != core.KindUpstream {
-		t.Errorf("ErrorKind = %s, want %s", perr.ErrorKind, core.KindUpstream)
+	if perr.ErrorKind != llmtypes.KindUpstream {
+		t.Errorf("ErrorKind = %s, want %s", perr.ErrorKind, llmtypes.KindUpstream)
 	}
 }
 

@@ -1,10 +1,10 @@
-// Package gateway contains the transport-independent routing service:
+// Package llmrouter contains the transport-independent routing service:
 // model alias resolution, fallback policy, and per-process circuit-breaker
 // state. The package depends only on stdlib + provider abstractions — no
 // HTTP, no yaml, no catalog. Wiring (catalog yaml → Models / Aliases) is
-// the caller's responsibility, so Router stays a standalone service that any
+// the caller's responsibility, so Service stays standalone — any that any
 // frontend (HTTP, CLI, queue, gRPC) can drive.
-package gateway
+package llmrouter
 
 import (
 	"context"
@@ -13,24 +13,24 @@ import (
 	"strings"
 	"time"
 
-	"llmgate/internal/core"
+	"llmgate/internal/llmtypes"
 )
 
 // Models maps a model id to the provider that serves it. The id is the
 // stable identifier the caller sends in a request (or that an alias
-// resolves to). Lookup is case-insensitive — Router lowercases keys
+// resolves to). Lookup is case-insensitive — Service lowercases keys
 // internally so callers don't have to normalize.
-type Models = map[string]core.Provider
+type Models = map[string]llmtypes.Provider
 
 // Aliases maps an alias name to the ordered chain of model ids
-// Router should try in turn. A single-entry chain disables fallback
+// Service should try in turn. A single-entry chain disables fallback
 // (it acts the same as a raw model call). Lookup is case-insensitive.
 type Aliases = map[string][]string
 
-// FallbackPolicy is env-driven router tuning. CircuitFailures or
+// FallbackPolicy is env-driven Service tuning. CircuitFailures or
 // CircuitOpen <= 0 disables the breaker; CircuitJitter is symmetric
 // (0.2 means ±20%). The total request budget lives in the caller's
-// ctx (handler middleware); the gateway router owns the per-attempt non-stream
+// ctx (handler middleware); the Service owns the per-attempt non-stream
 // budget. Streaming uses the caller's ctx end-to-end — first-event
 // validation lives in the adapter via streaming.ValidateStreamStart.
 type FallbackPolicy struct {
@@ -43,17 +43,17 @@ type FallbackPolicy struct {
 }
 
 type RouteResult struct {
-	Response  *core.Response
-	Stream    core.Stream
+	Response  *llmtypes.Response
+	Stream    llmtypes.Stream
 	Vendor    string
 	ModelUsed string
-	Attempts  []core.Attempt
+	Attempts  []llmtypes.Attempt
 }
 
-// Router routes requests to Providers. Streaming fallback applies
+// Service routes requests to Providers. Streaming fallback applies
 // only before the first event reaches the client.
-type Router struct {
-	byModel  map[string]core.Provider
+type Service struct {
+	byModel  map[string]llmtypes.Provider
 	aliases  map[string][]string
 	policy   fallbackPolicy
 	log      *slog.Logger
@@ -61,32 +61,32 @@ type Router struct {
 }
 
 type fallbackPolicy struct {
-	onKinds         map[core.ErrorKind]struct{}
+	onKinds         map[llmtypes.ErrorKind]struct{}
 	completeTimeout time.Duration
 }
 
 type candidate struct {
 	model    string
-	provider core.Provider
+	provider llmtypes.Provider
 }
 
-// NewRouter builds a gateway router from already-instantiated providers.
+// NewService builds a Service from already-instantiated providers.
 // The caller is expected to have walked whatever data source it uses
 // (yaml catalog, in-memory config, …) and produced the Models map +
 // Aliases map. An empty Models map fails fast — there is nothing to
 // route to.
-func NewRouter(models Models, aliases Aliases, policy FallbackPolicy, log *slog.Logger) (*Router, error) {
+func NewService(models Models, aliases Aliases, policy FallbackPolicy, log *slog.Logger) (*Service, error) {
 	if log == nil {
 		log = slog.Default()
 	}
 	if len(models) == 0 {
-		return nil, errors.New("gateway: no models registered")
+		return nil, errors.New("llmrouter: no models registered")
 	}
 
-	byModel := make(map[string]core.Provider, len(models))
+	byModel := make(map[string]llmtypes.Provider, len(models))
 	for id, p := range models {
 		if p == nil {
-			return nil, errors.New("gateway: model " + id + " has nil provider")
+			return nil, errors.New("llmrouter: model " + id + " has nil provider")
 		}
 		byModel[strings.ToLower(id)] = p
 	}
@@ -101,14 +101,14 @@ func NewRouter(models Models, aliases Aliases, policy FallbackPolicy, log *slog.
 	}
 
 	internalPolicy := fallbackPolicy{
-		onKinds:         make(map[core.ErrorKind]struct{}, len(policy.OnKinds)),
+		onKinds:         make(map[llmtypes.ErrorKind]struct{}, len(policy.OnKinds)),
 		completeTimeout: policy.CompleteTimeout,
 	}
 	for _, k := range policy.OnKinds {
-		internalPolicy.onKinds[core.ErrorKind(strings.ToLower(k))] = struct{}{}
+		internalPolicy.onKinds[llmtypes.ErrorKind(strings.ToLower(k))] = struct{}{}
 	}
 
-	return &Router{
+	return &Service{
 		byModel:  byModel,
 		aliases:  aliasMap,
 		policy:   internalPolicy,
@@ -117,10 +117,10 @@ func NewRouter(models Models, aliases Aliases, policy FallbackPolicy, log *slog.
 	}, nil
 }
 
-func (r *Router) Complete(ctx context.Context, req *core.Request) (*RouteResult, error) {
+func (r *Service) Complete(ctx context.Context, req *llmtypes.Request) (*RouteResult, error) {
 	result := &RouteResult{}
 	if req == nil {
-		return result, &core.Error{ErrorKind: core.KindBadRequest, Message: "request is nil"}
+		return result, &llmtypes.Error{ErrorKind: llmtypes.KindBadRequest, Message: "request is nil"}
 	}
 
 	candidates, err := r.candidates(req.Model)
@@ -146,7 +146,7 @@ func (r *Router) Complete(ctx context.Context, req *core.Request) (*RouteResult,
 		dur := time.Since(start)
 		cancelAttempt()
 
-		att := core.Attempt{
+		att := llmtypes.Attempt{
 			Vendor:     candidate.provider.Name(),
 			Model:      candidate.model,
 			StartedAt:  start,
@@ -192,10 +192,10 @@ func (r *Router) Complete(ctx context.Context, req *core.Request) (*RouteResult,
 	return result, lastErr
 }
 
-func (r *Router) CompleteStream(ctx context.Context, req *core.Request) (*RouteResult, error) {
+func (r *Service) CompleteStream(ctx context.Context, req *llmtypes.Request) (*RouteResult, error) {
 	result := &RouteResult{}
 	if req == nil {
-		return result, &core.Error{ErrorKind: core.KindBadRequest, Message: "request is nil"}
+		return result, &llmtypes.Error{ErrorKind: llmtypes.KindBadRequest, Message: "request is nil"}
 	}
 
 	candidates, err := r.candidates(req.Model)
@@ -209,7 +209,7 @@ func (r *Router) CompleteStream(ctx context.Context, req *core.Request) (*RouteR
 			return result, contextError(err)
 		}
 		attemptReq := requestForCandidate(req, candidate)
-		att := core.Attempt{
+		att := llmtypes.Attempt{
 			Vendor:    candidate.provider.Name(),
 			Model:     candidate.model,
 			StartedAt: time.Now(),
@@ -236,7 +236,7 @@ func (r *Router) CompleteStream(ctx context.Context, req *core.Request) (*RouteR
 // finalizeStreamFailure stamps a failed stream attempt and decides
 // whether to fall back. Returns the error to surface (caller returns)
 // or nil (caller continues to next candidate).
-func (r *Router) finalizeStreamFailure(result *RouteResult, candidate candidate, att *core.Attempt, err error, routeCtx context.Context) error {
+func (r *Service) finalizeStreamFailure(result *RouteResult, candidate candidate, att *llmtypes.Attempt, err error, routeCtx context.Context) error {
 	adoptAttemptError(att, err)
 	att.DurationMS = time.Since(att.StartedAt).Milliseconds()
 	result.Attempts = append(result.Attempts, *att)
@@ -257,25 +257,25 @@ func (r *Router) finalizeStreamFailure(result *RouteResult, candidate candidate,
 	return nil
 }
 
-func requestForCandidate(req *core.Request, candidate candidate) core.Request {
+func requestForCandidate(req *llmtypes.Request, candidate candidate) llmtypes.Request {
 	attemptReq := *req
 	attemptReq.Model = candidate.model
 	return attemptReq
 }
 
-func adoptAttemptError(att *core.Attempt, err error) {
-	att.ErrorKind = core.ErrorKindOf(err)
-	att.StatusCode = core.StatusCodeOf(err)
+func adoptAttemptError(att *llmtypes.Attempt, err error) {
+	att.ErrorKind = llmtypes.ErrorKindOf(err)
+	att.StatusCode = llmtypes.StatusCodeOf(err)
 }
 
 func contextError(err error) error {
 	if errors.Is(err, context.DeadlineExceeded) {
-		return &core.Error{ErrorKind: core.KindTimeout, Message: err.Error(), Cause: err}
+		return &llmtypes.Error{ErrorKind: llmtypes.KindTimeout, Message: err.Error(), Cause: err}
 	}
 	return err
 }
 
-func (r *Router) candidates(model string) ([]candidate, error) {
+func (r *Service) candidates(model string) ([]candidate, error) {
 	chain, err := r.resolveChain(model)
 	if err != nil {
 		return nil, err
@@ -296,13 +296,13 @@ func (r *Router) candidates(model string) ([]candidate, error) {
 		})
 	}
 	if len(out) == 0 {
-		return nil, &core.Error{ErrorKind: core.KindUpstream, Message: "all models in chain are currently unavailable"}
+		return nil, &llmtypes.Error{ErrorKind: llmtypes.KindUpstream, Message: "all models in chain are currently unavailable"}
 	}
 	return out, nil
 }
 
 // resolveChain expands aliases; raw model ids become a one-item chain.
-func (r *Router) resolveChain(model string) ([]string, error) {
+func (r *Service) resolveChain(model string) ([]string, error) {
 	key := strings.ToLower(model)
 	if chain, ok := r.aliases[key]; ok {
 		return chain, nil
@@ -310,10 +310,10 @@ func (r *Router) resolveChain(model string) ([]string, error) {
 	if _, ok := r.byModel[key]; ok {
 		return []string{key}, nil
 	}
-	return nil, &core.Error{ErrorKind: core.KindBadRequest, Message: "unknown model: " + model}
+	return nil, &llmtypes.Error{ErrorKind: llmtypes.KindBadRequest, Message: "unknown model: " + model}
 }
 
-func (r *Router) fallbackEligible(k core.ErrorKind) bool {
+func (r *Service) fallbackEligible(k llmtypes.ErrorKind) bool {
 	if k == "" {
 		return false
 	}

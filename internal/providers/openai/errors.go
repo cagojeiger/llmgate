@@ -6,17 +6,17 @@ import (
 	"net/http"
 	"strings"
 
-	"llmgate/internal/core"
+	"llmgate/internal/llmtypes"
 	"llmgate/internal/upstream"
 )
 
 // classify maps HTTP status + upstream error envelope into a typed
-// *core.Error. Order: explicit envelope message > status-code mapping
+// *llmtypes.Error. Order: explicit envelope message > status-code mapping
 // > generic fallback. The envelope's `type` and `code` fields can refine
 // the kind when the status alone is ambiguous (most importantly,
 // `content_filter` — OpenAI gateways encode policy blocks via the
 // envelope, not via a dedicated status code).
-func (c *Client) classify(status int, body []byte, retryAfterHeader string) *core.Error {
+func (c *Client) classify(status int, body []byte, retryAfterHeader string) *llmtypes.Error {
 	env := parseErrorEnvelope(body)
 	message := env.Message
 	if message == "" {
@@ -29,7 +29,7 @@ func (c *Client) classify(status int, body []byte, retryAfterHeader string) *cor
 
 	env.Message = message
 
-	return &core.Error{
+	return &llmtypes.Error{
 		ErrorKind:  kindFromOpenAIError(status, env),
 		Provider:   c.cfg.Name,
 		Message:    message,
@@ -69,50 +69,50 @@ func parseErrorEnvelope(body []byte) errorEnvelope {
 	return out
 }
 
-func kindFromOpenAIError(status int, env errorEnvelope) core.ErrorKind {
+func kindFromOpenAIError(status int, env errorEnvelope) llmtypes.ErrorKind {
 	t := strings.ToLower(env.Type)
 	c := strings.ToLower(env.Code)
 	m := strings.ToLower(env.Message)
 
 	switch {
 	case strings.EqualFold(env.Type, "content_filter") || strings.EqualFold(env.Code, "content_filter"):
-		return core.KindContentFilter
+		return llmtypes.KindContentFilter
 	case strings.Contains(t, "auth"):
-		return core.KindAuth
+		return llmtypes.KindAuth
 	case strings.Contains(t, "rate"):
-		return core.KindRateLimit
+		return llmtypes.KindRateLimit
 	case strings.Contains(t, "context") || strings.Contains(c, "context") || strings.Contains(m, "token limit") || strings.Contains(m, "context length"):
-		return core.KindContextLength
+		return llmtypes.KindContextLength
 	case strings.Contains(t, "invalid"):
-		return core.KindBadRequest
+		return llmtypes.KindBadRequest
 	}
 
 	switch {
 	case status == 0:
-		return core.KindUpstream
+		return llmtypes.KindUpstream
 	case status == http.StatusUnauthorized, status == http.StatusForbidden:
-		return core.KindAuth
+		return llmtypes.KindAuth
 	case status == http.StatusNotFound:
-		return core.KindBadRequest
+		return llmtypes.KindBadRequest
 	case status == http.StatusRequestTimeout:
-		return core.KindTimeout
+		return llmtypes.KindTimeout
 	case status == http.StatusBadRequest,
 		status == http.StatusUnprocessableEntity,
 		status == http.StatusRequestEntityTooLarge:
-		return core.KindBadRequest
+		return llmtypes.KindBadRequest
 	case status == http.StatusTooManyRequests:
-		return core.KindRateLimit
+		return llmtypes.KindRateLimit
 	case status == 529, status >= 500 && status <= 599:
-		return core.KindUpstream
+		return llmtypes.KindUpstream
 	default:
-		return core.KindUnknown
+		return llmtypes.KindUnknown
 	}
 }
 
-func (c *Client) lowLevelError(message string, cause error) *core.Error {
+func (c *Client) lowLevelError(message string, cause error) *llmtypes.Error {
 	return upstream.LowLevelError(c.cfg.Name, message, cause)
 }
 
-func (c *Client) badRequest(message string, cause error, raw []byte) *core.Error {
+func (c *Client) badRequest(message string, cause error, raw []byte) *llmtypes.Error {
 	return upstream.BadRequest(c.cfg.Name, message, cause, raw)
 }

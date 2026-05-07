@@ -17,10 +17,10 @@ import (
 	"strings"
 	"time"
 
-	"llmgate/internal/core"
+	"llmgate/internal/llmtypes"
 )
 
-// rawBodyLimit caps the raw-body bytes preserved on *core.Error.Raw
+// rawBodyLimit caps the raw-body bytes preserved on *llmtypes.Error.Raw
 // so that audit logs never inherit megabyte-scale upstream payloads.
 const rawBodyLimit = 256
 
@@ -105,7 +105,7 @@ func ParseRetryAfter(header string) time.Duration {
 
 // FirstBytes returns up to rawBodyLimit bytes of b in a freshly-allocated
 // slice. The copy is intentional: callers store the slice on
-// *core.Error.Raw (and audit logs), and we don't want them holding
+// *llmtypes.Error.Raw (and audit logs), and we don't want them holding
 // onto the upstream body buffer beyond the request lifetime.
 func FirstBytes(b []byte) []byte {
 	if len(b) > rawBodyLimit {
@@ -117,21 +117,21 @@ func FirstBytes(b []byte) []byte {
 }
 
 // LowLevelError wraps a transport-level failure (DNS, TLS, connection
-// refused, deadline exceeded) into a *core.Error with the right
+// refused, deadline exceeded) into a *llmtypes.Error with the right
 // ErrorKind so callers don't have to sniff strings. ProviderName is stamped
 // onto the error so audit logs and fallback policy can distinguish
 // vendor sources.
-func LowLevelError(providerName, message string, cause error) *core.Error {
-	kind := core.KindNetwork
+func LowLevelError(providerName, message string, cause error) *llmtypes.Error {
+	kind := llmtypes.KindNetwork
 	if errors.Is(cause, context.DeadlineExceeded) {
-		kind = core.KindTimeout
+		kind = llmtypes.KindTimeout
 	} else {
 		var netErr net.Error
 		if errors.As(cause, &netErr) && netErr.Timeout() {
-			kind = core.KindTimeout
+			kind = llmtypes.KindTimeout
 		}
 	}
-	return &core.Error{
+	return &llmtypes.Error{
 		ErrorKind: kind,
 		Provider:  providerName,
 		Message:   message + ": " + cause.Error(),
@@ -140,11 +140,11 @@ func LowLevelError(providerName, message string, cause error) *core.Error {
 }
 
 // BadRequest wraps a request-construction or marshal failure as a
-// *core.Error with KindBadRequest. raw is trimmed via FirstBytes
+// *llmtypes.Error with KindBadRequest. raw is trimmed via FirstBytes
 // so audit logs stay bounded.
-func BadRequest(providerName, message string, cause error, raw []byte) *core.Error {
-	return &core.Error{
-		ErrorKind: core.KindBadRequest,
+func BadRequest(providerName, message string, cause error, raw []byte) *llmtypes.Error {
+	return &llmtypes.Error{
+		ErrorKind: llmtypes.KindBadRequest,
 		Provider:  providerName,
 		Message:   message + ": " + cause.Error(),
 		Cause:     cause,

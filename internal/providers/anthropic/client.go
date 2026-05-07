@@ -1,4 +1,4 @@
-// Package anthropic adapts Anthropic-compatible upstreams to core.Provider.
+// Package anthropic adapts Anthropic-compatible upstreams to llmtypes.Provider.
 package anthropic
 
 import (

@@ -1,6 +1,6 @@
 # llmgate
 
-OpenAI-wire-compatible LLM gateway. Logical model names resolve through a
+OpenAI-wire-compatible LLM llmrouter. Logical model names resolve through a
 catalog to ordered fallback chains; per-process circuit breakers suppress
 dead upstreams. Every request to `/v1/chat/completions` carries a bearer
 key registered in `consumers/`, and produces one audit record (success or
@@ -21,11 +21,11 @@ scripts/gen-consumer.sh         helper to issue one caller (raw key + sha256 yam
 internal/catalog/             vendor catalog loader (yaml -> Catalog struct)
 internal/consumers/             consumer registry loader (yaml -> Store, sha256 lookup)
 internal/config/              env-driven Server config (incl. router tuning)
-internal/core/                Provider contract + OpenAI-shaped request/response types
+internal/llmtypes/                Provider contract + OpenAI-shaped request/response types
 internal/providers/openai/    OpenAI-protocol adapter
 internal/providers/anthropic/ Anthropic-protocol adapter (response normalized to OpenAI wire,
                               tools / tool_calls / tool_use translation in both directions)
-internal/gateway/               alias→chain routing + fallback + circuit breaker
+internal/llmrouter/               alias→chain routing + fallback + circuit breaker
 internal/streaming/           stream start/close helpers shared by server and adapters
 internal/server/              chi handler, auth middleware, streamRelay, sseWriter, errors
 internal/audit/               per-request audit Record (incl. consumer_name / consumer_key_id)

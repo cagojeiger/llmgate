@@ -5,14 +5,14 @@ import (
 	"errors"
 	"io"
 
-	"llmgate/internal/core"
+	"llmgate/internal/llmtypes"
 )
 
 // ValidateStreamStart eagerly reads one event from raw to confirm the
 // stream is alive, then returns a Stream that replays that event on its
 // first Recv() call. Adapters call this at the end of CompleteStream so
 // pre-first-event failures surface as a CompleteStream error — enabling
-// dispatch-level fallback (Window-#2) without router needing its own
+// service-level fallback without the Service needing its own
 // eager-read.
 //
 // Lifecycle:
@@ -20,9 +20,9 @@ import (
 //     and the goroutine is bounded by CloseGrace.
 //   - On success: caller owns Close() of the returned stream, which
 //     forwards to raw.Close().
-func ValidateStreamStart(ctx context.Context, raw core.Stream) (core.Stream, error) {
+func ValidateStreamStart(ctx context.Context, raw llmtypes.Stream) (llmtypes.Stream, error) {
 	type result struct {
-		event *core.Event
+		event *llmtypes.Event
 		err   error
 	}
 	ch := make(chan result, 1)
@@ -35,7 +35,7 @@ func ValidateStreamStart(ctx context.Context, raw core.Stream) (core.Stream, err
 		if r.err != nil {
 			_ = raw.Close()
 			if errors.Is(r.err, io.EOF) {
-				return nil, &core.Error{ErrorKind: core.KindUpstream, Message: "stream ended before first event", Cause: r.err}
+				return nil, &llmtypes.Error{ErrorKind: llmtypes.KindUpstream, Message: "stream ended before first event", Cause: r.err}
 			}
 			return nil, r.err
 		}
@@ -59,12 +59,12 @@ func ValidateStreamStart(ctx context.Context, raw core.Stream) (core.Stream, err
 // already eager-read during validation; subsequent calls pass through
 // to the underlying stream. Close and Summary delegate.
 type replayStream struct {
-	first      *core.Event
+	first      *llmtypes.Event
 	consumed   bool
-	underlying core.Stream
+	underlying llmtypes.Stream
 }
 
-func (s *replayStream) Recv() (*core.Event, error) {
+func (s *replayStream) Recv() (*llmtypes.Event, error) {
 	if !s.consumed {
 		s.consumed = true
 		return s.first, nil
@@ -76,6 +76,6 @@ func (s *replayStream) Close() error {
 	return s.underlying.Close()
 }
 
-func (s *replayStream) Summary() *core.Summary {
+func (s *replayStream) Summary() *llmtypes.Summary {
 	return s.underlying.Summary()
 }

@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"io"
 
-	"llmgate/internal/core"
+	"llmgate/internal/llmtypes"
 	"llmgate/internal/upstream"
 )
 
-func (c *Client) Complete(ctx context.Context, req *core.Request) (*core.Response, error) {
+func (c *Client) Complete(ctx context.Context, req *llmtypes.Request) (*llmtypes.Response, error) {
 	if err := req.Validate(); err != nil {
-		return nil, core.StampProvider(err, c.cfg.Name)
+		return nil, llmtypes.StampProvider(err, c.cfg.Name)
 	}
 
 	body, err := toAnthropicRequest(req, c.cfg.DefaultMaxTokens, false)
@@ -39,13 +39,13 @@ func (c *Client) Complete(ctx context.Context, req *core.Request) (*core.Respons
 		return nil, c.classify(resp.StatusCode, raw, resp.Header.Get("Retry-After"))
 	}
 	if len(raw) == 0 {
-		return nil, &core.Error{ErrorKind: core.KindEmpty, Provider: c.cfg.Name, Message: "empty response"}
+		return nil, &llmtypes.Error{ErrorKind: llmtypes.KindEmpty, Provider: c.cfg.Name, Message: "empty response"}
 	}
 
 	var out anthropicResponse
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, &core.Error{
-			ErrorKind: core.KindUpstream,
+		return nil, &llmtypes.Error{
+			ErrorKind: llmtypes.KindUpstream,
 			Provider:  c.cfg.Name,
 			Message:   "decode response: " + err.Error(),
 			Cause:     err,
@@ -54,8 +54,8 @@ func (c *Client) Complete(ctx context.Context, req *core.Request) (*core.Respons
 	}
 	mapped, err := toOpenAIResponse(&out)
 	if err != nil {
-		return nil, &core.Error{
-			ErrorKind: core.KindUpstream,
+		return nil, &llmtypes.Error{
+			ErrorKind: llmtypes.KindUpstream,
 			Provider:  c.cfg.Name,
 			Message:   "translate response: " + err.Error(),
 			Cause:     err,

@@ -5,12 +5,12 @@ import (
 	"strings"
 	"testing"
 
-	"llmgate/internal/core"
+	"llmgate/internal/llmtypes"
 )
 
 // decodeRequestBody marshals a Request through toAnthropicRequest and
 // returns the resulting wire JSON as a generic map for assertion.
-func decodeRequestBody(t *testing.T, req *core.Request) map[string]any {
+func decodeRequestBody(t *testing.T, req *llmtypes.Request) map[string]any {
 	t.Helper()
 	body, err := toAnthropicRequest(req, 32, false)
 	if err != nil {
@@ -24,9 +24,9 @@ func decodeRequestBody(t *testing.T, req *core.Request) map[string]any {
 }
 
 func TestToAnthropicRequest_PlainText(t *testing.T) {
-	got := decodeRequestBody(t, &core.Request{
+	got := decodeRequestBody(t, &llmtypes.Request{
 		Model:    "claude-x",
-		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		Messages: []llmtypes.Message{{Role: "user", Content: "hi"}},
 	})
 	msgs := got["messages"].([]any)
 	if len(msgs) != 1 {
@@ -48,9 +48,9 @@ func TestToAnthropicRequest_PlainText(t *testing.T) {
 }
 
 func TestToAnthropicRequest_ToolsBasic(t *testing.T) {
-	got := decodeRequestBody(t, &core.Request{
+	got := decodeRequestBody(t, &llmtypes.Request{
 		Model:    "claude-x",
-		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		Messages: []llmtypes.Message{{Role: "user", Content: "hi"}},
 		Extra: map[string]json.RawMessage{
 			"tools": json.RawMessage(`[
 				{"type":"function","function":{"name":"get_time","description":"return current time","parameters":{"type":"object","properties":{"tz":{"type":"string"}},"required":["tz"]}}}
@@ -81,9 +81,9 @@ func TestToAnthropicRequest_ToolsBasic(t *testing.T) {
 }
 
 func TestToAnthropicRequest_ToolsEmptyParametersDefaultsToObject(t *testing.T) {
-	got := decodeRequestBody(t, &core.Request{
+	got := decodeRequestBody(t, &llmtypes.Request{
 		Model:    "claude-x",
-		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		Messages: []llmtypes.Message{{Role: "user", Content: "hi"}},
 		Extra: map[string]json.RawMessage{
 			"tools": json.RawMessage(`[{"type":"function","function":{"name":"ping"}}]`),
 		},
@@ -100,9 +100,9 @@ func TestToAnthropicRequest_ToolsEmptyParametersDefaultsToObject(t *testing.T) {
 }
 
 func TestToAnthropicRequest_ToolsRejectsNonObjectSchema(t *testing.T) {
-	_, err := toAnthropicRequest(&core.Request{
+	_, err := toAnthropicRequest(&llmtypes.Request{
 		Model:    "claude-x",
-		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		Messages: []llmtypes.Message{{Role: "user", Content: "hi"}},
 		Extra: map[string]json.RawMessage{
 			"tools": json.RawMessage(`[{"type":"function","function":{"name":"odd","parameters":{"type":"string"}}}]`),
 		},
@@ -113,9 +113,9 @@ func TestToAnthropicRequest_ToolsRejectsNonObjectSchema(t *testing.T) {
 }
 
 func TestToAnthropicRequest_ToolsRejectsUnsupportedType(t *testing.T) {
-	_, err := toAnthropicRequest(&core.Request{
+	_, err := toAnthropicRequest(&llmtypes.Request{
 		Model:    "claude-x",
-		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		Messages: []llmtypes.Message{{Role: "user", Content: "hi"}},
 		Extra: map[string]json.RawMessage{
 			"tools": json.RawMessage(`[{"type":"web_search"}]`),
 		},
@@ -144,9 +144,9 @@ func TestToAnthropicRequest_ToolChoiceVariants(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.label, func(t *testing.T) {
-			body, err := toAnthropicRequest(&core.Request{
+			body, err := toAnthropicRequest(&llmtypes.Request{
 				Model:    "claude-x",
-				Messages: []core.Message{{Role: "user", Content: "hi"}},
+				Messages: []llmtypes.Message{{Role: "user", Content: "hi"}},
 				Extra: map[string]json.RawMessage{
 					"tools":       json.RawMessage(`[{"type":"function","function":{"name":"pick"}}]`),
 					"tool_choice": json.RawMessage(tc.raw),
@@ -183,9 +183,9 @@ func TestToAnthropicRequest_ToolChoiceVariants(t *testing.T) {
 }
 
 func TestToAnthropicRequest_ParallelToolCallsFalse(t *testing.T) {
-	got := decodeRequestBody(t, &core.Request{
+	got := decodeRequestBody(t, &llmtypes.Request{
 		Model:    "claude-x",
-		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		Messages: []llmtypes.Message{{Role: "user", Content: "hi"}},
 		Extra: map[string]json.RawMessage{
 			"tools":               json.RawMessage(`[{"type":"function","function":{"name":"pick"}}]`),
 			"parallel_tool_calls": json.RawMessage(`false`),
@@ -204,9 +204,9 @@ func TestToAnthropicRequest_ParallelToolCallsFalse(t *testing.T) {
 }
 
 func TestToAnthropicRequest_ParallelToolCallsTrueLeavesUnset(t *testing.T) {
-	got := decodeRequestBody(t, &core.Request{
+	got := decodeRequestBody(t, &llmtypes.Request{
 		Model:    "claude-x",
-		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		Messages: []llmtypes.Message{{Role: "user", Content: "hi"}},
 		Extra: map[string]json.RawMessage{
 			"tools":               json.RawMessage(`[{"type":"function","function":{"name":"pick"}}]`),
 			"parallel_tool_calls": json.RawMessage(`true`),
@@ -218,9 +218,9 @@ func TestToAnthropicRequest_ParallelToolCallsTrueLeavesUnset(t *testing.T) {
 }
 
 func TestToAnthropicRequest_AssistantWithToolCalls(t *testing.T) {
-	got := decodeRequestBody(t, &core.Request{
+	got := decodeRequestBody(t, &llmtypes.Request{
 		Model: "claude-x",
-		Messages: []core.Message{
+		Messages: []llmtypes.Message{
 			{Role: "user", Content: "what time?"},
 			{
 				Role:    "assistant",
@@ -258,9 +258,9 @@ func TestToAnthropicRequest_AssistantWithToolCalls(t *testing.T) {
 }
 
 func TestToAnthropicRequest_AssistantToolCallsWithEmptyArgs(t *testing.T) {
-	got := decodeRequestBody(t, &core.Request{
+	got := decodeRequestBody(t, &llmtypes.Request{
 		Model: "claude-x",
-		Messages: []core.Message{
+		Messages: []llmtypes.Message{
 			{Role: "user", Content: "go"},
 			{
 				Role: "assistant",
@@ -296,9 +296,9 @@ func TestToAnthropicRequest_ToolCallArgs_TrailingContentRejected(t *testing.T) {
 	}
 	for label, tc := range cases {
 		t.Run(label, func(t *testing.T) {
-			_, err := toAnthropicRequest(&core.Request{
+			_, err := toAnthropicRequest(&llmtypes.Request{
 				Model: "claude-x",
-				Messages: []core.Message{
+				Messages: []llmtypes.Message{
 					{Role: "user", Content: "go"},
 					{
 						Role: "assistant",
@@ -327,9 +327,9 @@ func TestToAnthropicRequest_ToolCallArgs_LargeIntegerPreserved(t *testing.T) {
 	// json.Unmarshal would round-trip it through float64 and emit
 	// 1.234567890123457e+18 on re-marshal. UseNumber must keep the
 	// literal intact on the Anthropic-wire body.
-	body, err := toAnthropicRequest(&core.Request{
+	body, err := toAnthropicRequest(&llmtypes.Request{
 		Model: "claude-x",
-		Messages: []core.Message{
+		Messages: []llmtypes.Message{
 			{Role: "user", Content: "go"},
 			{
 				Role: "assistant",
@@ -348,9 +348,9 @@ func TestToAnthropicRequest_ToolCallArgs_LargeIntegerPreserved(t *testing.T) {
 }
 
 func TestToAnthropicRequest_ToolMessage(t *testing.T) {
-	got := decodeRequestBody(t, &core.Request{
+	got := decodeRequestBody(t, &llmtypes.Request{
 		Model: "claude-x",
-		Messages: []core.Message{
+		Messages: []llmtypes.Message{
 			{Role: "user", Content: "go"},
 			{Role: "assistant", Content: "calling", Extra: map[string]json.RawMessage{
 				"tool_calls": json.RawMessage(`[{"id":"call-1","type":"function","function":{"name":"f","arguments":"{}"}}]`),
@@ -376,9 +376,9 @@ func TestToAnthropicRequest_ToolMessage(t *testing.T) {
 }
 
 func TestToAnthropicRequest_ToolMessageMissingID(t *testing.T) {
-	_, err := toAnthropicRequest(&core.Request{
+	_, err := toAnthropicRequest(&llmtypes.Request{
 		Model: "claude-x",
-		Messages: []core.Message{
+		Messages: []llmtypes.Message{
 			{Role: "user", Content: "go"},
 			{Role: "tool", Content: "12:34Z"},
 		},
@@ -389,9 +389,9 @@ func TestToAnthropicRequest_ToolMessageMissingID(t *testing.T) {
 }
 
 func TestToAnthropicRequest_PreservesUnrelatedExtra(t *testing.T) {
-	got := decodeRequestBody(t, &core.Request{
+	got := decodeRequestBody(t, &llmtypes.Request{
 		Model:    "claude-x",
-		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		Messages: []llmtypes.Message{{Role: "user", Content: "hi"}},
 		Extra: map[string]json.RawMessage{
 			"vendor_request": json.RawMessage(`"keep"`),
 			"tools":          json.RawMessage(`[{"type":"function","function":{"name":"pick"}}]`),
@@ -409,7 +409,7 @@ func TestToAnthropicRequest_PreservesUnrelatedExtra(t *testing.T) {
 // that are *string in anthropicResponse.
 func strPtr(s string) *string { return &s }
 
-func decodeToolCalls(t *testing.T, msg core.Message) []map[string]any {
+func decodeToolCalls(t *testing.T, msg llmtypes.Message) []map[string]any {
 	t.Helper()
 	raw, ok := msg.Extra["tool_calls"]
 	if !ok {
@@ -602,9 +602,9 @@ func TestToAnthropicRequest_DropsConsumedExtraOnError_None(t *testing.T) {
 	// tool_choice=none must drop tools AND tool_choice from the wire even
 	// though Extra had them — verifying the Extra-merge does not leak the
 	// original OpenAI-shaped values back.
-	got := decodeRequestBody(t, &core.Request{
+	got := decodeRequestBody(t, &llmtypes.Request{
 		Model:    "claude-x",
-		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		Messages: []llmtypes.Message{{Role: "user", Content: "hi"}},
 		Extra: map[string]json.RawMessage{
 			"tools":       json.RawMessage(`[{"type":"function","function":{"name":"pick"}}]`),
 			"tool_choice": json.RawMessage(`"none"`),

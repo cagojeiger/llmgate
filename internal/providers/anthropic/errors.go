@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"strings"
 
-	"llmgate/internal/core"
+	"llmgate/internal/llmtypes"
 	"llmgate/internal/upstream"
 )
 
-func (c *Client) classify(status int, body []byte, retryAfterHeader string) *core.Error {
+func (c *Client) classify(status int, body []byte, retryAfterHeader string) *llmtypes.Error {
 	message, errorType := envelopeMessage(body)
 	if message == "" {
 		if len(body) > 0 {
@@ -20,31 +20,31 @@ func (c *Client) classify(status int, body []byte, retryAfterHeader string) *cor
 		}
 	}
 
-	kind := core.KindUnknown
+	kind := llmtypes.KindUnknown
 	switch {
 	case status == http.StatusUnauthorized, status == http.StatusForbidden:
-		kind = core.KindAuth
+		kind = llmtypes.KindAuth
 	case status == http.StatusTooManyRequests:
-		kind = core.KindRateLimit
+		kind = llmtypes.KindRateLimit
 	case status == 529, status >= 500 && status <= 599:
-		kind = core.KindUpstream
+		kind = llmtypes.KindUpstream
 	case status == http.StatusBadRequest, status == http.StatusUnprocessableEntity:
-		kind = core.KindBadRequest
+		kind = llmtypes.KindBadRequest
 		if looksLikeContextLength(message) {
-			kind = core.KindContextLength
+			kind = llmtypes.KindContextLength
 		}
 	}
-	if kind == core.KindUnknown && errorType != "" {
+	if kind == llmtypes.KindUnknown && errorType != "" {
 		kind = kindFromAnthropicErrorType(errorType)
 	}
 	// content_filter overrides status-based classification — the envelope
 	// is the authoritative signal, matching the OpenAI adapter's
 	// isContentFilter behavior.
 	if isAnthropicContentFilter(errorType) {
-		kind = core.KindContentFilter
+		kind = llmtypes.KindContentFilter
 	}
 
-	return &core.Error{
+	return &llmtypes.Error{
 		ErrorKind:  kind,
 		Provider:   c.cfg.Name,
 		Message:    message,
@@ -62,29 +62,29 @@ func isAnthropicContentFilter(errorType string) bool {
 	return false
 }
 
-func kindFromAnthropicErrorType(errorType string) core.ErrorKind {
+func kindFromAnthropicErrorType(errorType string) llmtypes.ErrorKind {
 	switch strings.ToLower(errorType) {
 	case "authentication_error", "permission_error":
-		return core.KindAuth
+		return llmtypes.KindAuth
 	case "invalid_request_error", "not_found_error", "request_too_large":
-		return core.KindBadRequest
+		return llmtypes.KindBadRequest
 	case "rate_limit_error":
-		return core.KindRateLimit
+		return llmtypes.KindRateLimit
 	case "content_filter", "content_filter_error":
-		return core.KindContentFilter
+		return llmtypes.KindContentFilter
 	case "overloaded_error", "api_error":
-		return core.KindUpstream
+		return llmtypes.KindUpstream
 	default:
-		return core.KindUpstream
+		return llmtypes.KindUpstream
 	}
 }
 
-func errorFromStreamEvent(payload []byte, providerName string) *core.Error {
+func errorFromStreamEvent(payload []byte, providerName string) *llmtypes.Error {
 	message, errorType := envelopeMessage(payload)
 	if message == "" {
 		message = "upstream stream error"
 	}
-	return &core.Error{
+	return &llmtypes.Error{
 		ErrorKind: kindFromAnthropicErrorType(errorType),
 		Provider:  providerName,
 		Message:   message,
@@ -118,11 +118,11 @@ func envelopeMessage(body []byte) (string, string) {
 	return openAIEnv.Error.Message, openAIEnv.Error.Type
 }
 
-func (c *Client) lowLevelError(message string, cause error) *core.Error {
+func (c *Client) lowLevelError(message string, cause error) *llmtypes.Error {
 	return upstream.LowLevelError(c.cfg.Name, message, cause)
 }
 
-func (c *Client) badRequest(message string, cause error, raw []byte) *core.Error {
+func (c *Client) badRequest(message string, cause error, raw []byte) *llmtypes.Error {
 	return upstream.BadRequest(c.cfg.Name, message, cause, raw)
 }
 

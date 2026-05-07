@@ -13,24 +13,24 @@ import (
 	"time"
 
 	"llmgate/internal/audit"
-	"llmgate/internal/core"
-	"llmgate/internal/gateway"
+	"llmgate/internal/llmtypes"
+	"llmgate/internal/llmrouter"
 	"llmgate/internal/streaming"
 )
 
 func TestHandler_SingleAttempt_RecordPopulated(t *testing.T) {
 	rec, recorder := newCaptureRecorder()
-	r := &fakeGateway{
+	r := &fakeService{
 		vendor: "opencode",
-		buildResult: func(req *core.Request) *gateway.RouteResult {
-			return &gateway.RouteResult{
-				Response: &core.Response{
+		buildResult: func(req *llmtypes.Request) *llmrouter.RouteResult {
+			return &llmrouter.RouteResult{
+				Response: &llmtypes.Response{
 					Model:   req.Model,
-					Choices: []core.Choice{{Index: 0, Message: core.Message{Role: "assistant", Content: "ok"}}},
+					Choices: []llmtypes.Choice{{Index: 0, Message: llmtypes.Message{Role: "assistant", Content: "ok"}}},
 				},
 				Vendor:    "opencode",
 				ModelUsed: req.Model,
-				Attempts: []core.Attempt{
+				Attempts: []llmtypes.Attempt{
 					{Vendor: "opencode", Model: req.Model, StatusCode: 200, StartedAt: time.Now()},
 				},
 			}
@@ -63,18 +63,18 @@ func TestHandler_SingleAttempt_RecordPopulated(t *testing.T) {
 
 func TestHandler_FallbackChain_AttemptsRecorded(t *testing.T) {
 	rec, recorder := newCaptureRecorder()
-	r := &fakeGateway{
+	r := &fakeService{
 		vendor: "opencode",
-		buildResult: func(req *core.Request) *gateway.RouteResult {
-			return &gateway.RouteResult{
-				Response: &core.Response{
+		buildResult: func(req *llmtypes.Request) *llmrouter.RouteResult {
+			return &llmrouter.RouteResult{
+				Response: &llmtypes.Response{
 					Model:   "deepseek-v4-flash",
-					Choices: []core.Choice{{Index: 0, Message: core.Message{Role: "assistant", Content: "ok"}}},
+					Choices: []llmtypes.Choice{{Index: 0, Message: llmtypes.Message{Role: "assistant", Content: "ok"}}},
 				},
 				Vendor:    "opencode",
 				ModelUsed: "deepseek-v4-flash",
-				Attempts: []core.Attempt{
-					{Vendor: "opencode", Model: "deepseek-v4-pro", ErrorKind: core.KindRateLimit, StatusCode: 429, StartedAt: time.Now()},
+				Attempts: []llmtypes.Attempt{
+					{Vendor: "opencode", Model: "deepseek-v4-pro", ErrorKind: llmtypes.KindRateLimit, StatusCode: 429, StartedAt: time.Now()},
 					{Vendor: "opencode", Model: "deepseek-v4-flash", StatusCode: 200, StartedAt: time.Now()},
 				},
 			}
@@ -100,7 +100,7 @@ func TestHandler_FallbackChain_AttemptsRecorded(t *testing.T) {
 	if len(got.Attempts) != 2 {
 		t.Fatalf("len(Attempts) = %d, want 2", len(got.Attempts))
 	}
-	if got.Attempts[0].ErrorKind != core.KindRateLimit {
+	if got.Attempts[0].ErrorKind != llmtypes.KindRateLimit {
 		t.Errorf("attempts[0].ErrorKind = %q, want rate_limit", got.Attempts[0].ErrorKind)
 	}
 }
@@ -108,21 +108,21 @@ func TestHandler_FallbackChain_AttemptsRecorded(t *testing.T) {
 func TestAdoptError_ProviderErrorMapsKindAndStatus(t *testing.T) {
 	cases := []struct {
 		name       string
-		kind       core.ErrorKind
+		kind       llmtypes.ErrorKind
 		wantStatus int
 	}{
-		{"auth", core.KindAuth, http.StatusUnauthorized},
-		{"rate_limit", core.KindRateLimit, http.StatusTooManyRequests},
-		{"bad_request", core.KindBadRequest, http.StatusBadRequest},
-		{"context_length", core.KindContextLength, http.StatusBadRequest},
-		{"upstream", core.KindUpstream, http.StatusBadGateway},
-		{"timeout", core.KindTimeout, http.StatusBadGateway},
-		{"unknown", core.KindUnknown, http.StatusInternalServerError},
+		{"auth", llmtypes.KindAuth, http.StatusUnauthorized},
+		{"rate_limit", llmtypes.KindRateLimit, http.StatusTooManyRequests},
+		{"bad_request", llmtypes.KindBadRequest, http.StatusBadRequest},
+		{"context_length", llmtypes.KindContextLength, http.StatusBadRequest},
+		{"upstream", llmtypes.KindUpstream, http.StatusBadGateway},
+		{"timeout", llmtypes.KindTimeout, http.StatusBadGateway},
+		{"unknown", llmtypes.KindUnknown, http.StatusInternalServerError},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := &audit.Record{}
-			adoptError(rec, &core.Error{ErrorKind: tc.kind, Message: "x"})
+			adoptError(rec, &llmtypes.Error{ErrorKind: tc.kind, Message: "x"})
 			if rec.ErrorKind != tc.kind {
 				t.Errorf("ErrorKind = %q, want %q", rec.ErrorKind, tc.kind)
 			}
@@ -136,7 +136,7 @@ func TestAdoptError_ProviderErrorMapsKindAndStatus(t *testing.T) {
 func TestAdoptError_NonProviderError_Falls500Unknown(t *testing.T) {
 	rec := &audit.Record{}
 	adoptError(rec, io.ErrUnexpectedEOF)
-	if rec.ErrorKind != core.KindUnknown {
+	if rec.ErrorKind != llmtypes.KindUnknown {
 		t.Errorf("ErrorKind = %q, want unknown", rec.ErrorKind)
 	}
 	if rec.StatusCode != http.StatusInternalServerError {
@@ -148,12 +148,12 @@ func TestAdoptStreamSummary_FinalizesAttemptAndRecord(t *testing.T) {
 	started := time.Unix(1700000000, 0)
 	now := started.Add(250 * time.Millisecond)
 	rec := &audit.Record{
-		Attempts: []core.Attempt{
+		Attempts: []llmtypes.Attempt{
 			{Vendor: "v", Model: "m", StartedAt: started},
 		},
 	}
-	sum := &core.Summary{
-		Usage:      &core.Usage{PromptTokens: 5, CompletionTokens: 7, TotalTokens: 12},
+	sum := &llmtypes.Summary{
+		Usage:      &llmtypes.Usage{PromptTokens: 5, CompletionTokens: 7, TotalTokens: 12},
 		VendorCost: `"0.001"`,
 	}
 
@@ -184,15 +184,15 @@ func TestAdoptStreamSummary_PropagatesRecvErrorKindToAttempt(t *testing.T) {
 	started := time.Unix(1700000000, 0)
 	now := started.Add(100 * time.Millisecond)
 	rec := &audit.Record{
-		ErrorKind: core.KindUpstream,
-		Attempts: []core.Attempt{
+		ErrorKind: llmtypes.KindUpstream,
+		Attempts: []llmtypes.Attempt{
 			{Vendor: "v", Model: "m", StartedAt: started},
 		},
 	}
 
 	adoptStreamSummary(rec, nil, now)
 
-	if rec.Attempts[0].ErrorKind != core.KindUpstream {
+	if rec.Attempts[0].ErrorKind != llmtypes.KindUpstream {
 		t.Errorf("attempt ErrorKind = %q, want upstream", rec.Attempts[0].ErrorKind)
 	}
 	if rec.Attempts[0].DurationMS != 100 {
@@ -203,21 +203,21 @@ func TestAdoptStreamSummary_PropagatesRecvErrorKindToAttempt(t *testing.T) {
 func TestHandler_Stream_NormalEOF(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
 	streamObj := &fakeStream{
-		events: []*core.Event{
-			{Choices: []core.ChoiceDelta{{Delta: core.Delta{Content: "hello"}}}},
-			{Choices: []core.ChoiceDelta{{Delta: core.Delta{Content: " world"}}}},
+		events: []*llmtypes.Event{
+			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: "hello"}}}},
+			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: " world"}}}},
 		},
-		summary: &core.Summary{
-			Usage: &core.Usage{PromptTokens: 3, CompletionTokens: 2, TotalTokens: 5},
+		summary: &llmtypes.Summary{
+			Usage: &llmtypes.Usage{PromptTokens: 3, CompletionTokens: 2, TotalTokens: 5},
 		},
 	}
-	r := &fakeGateway{
-		buildStreamResult: func(req *core.Request) (*gateway.RouteResult, error) {
-			return &gateway.RouteResult{
+	r := &fakeService{
+		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
+			return &llmrouter.RouteResult{
 				Stream:    streamObj,
 				Vendor:    "opencode",
 				ModelUsed: req.Model,
-				Attempts: []core.Attempt{
+				Attempts: []llmtypes.Attempt{
 					{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()},
 				},
 			}, nil
@@ -270,19 +270,19 @@ func TestHandler_Stream_NormalEOF(t *testing.T) {
 func TestHandler_Stream_RecvError_PropagatesErrorKind(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
 	streamObj := &fakeStream{
-		events: []*core.Event{
-			{Choices: []core.ChoiceDelta{{Delta: core.Delta{Content: "partial"}}}},
+		events: []*llmtypes.Event{
+			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: "partial"}}}},
 		},
-		recvErr: &core.Error{ErrorKind: core.KindUpstream, Message: "boom mid-stream"},
-		summary: &core.Summary{},
+		recvErr: &llmtypes.Error{ErrorKind: llmtypes.KindUpstream, Message: "boom mid-stream"},
+		summary: &llmtypes.Summary{},
 	}
-	r := &fakeGateway{
-		buildStreamResult: func(req *core.Request) (*gateway.RouteResult, error) {
-			return &gateway.RouteResult{
+	r := &fakeService{
+		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
+			return &llmrouter.RouteResult{
 				Stream:    streamObj,
 				Vendor:    "opencode",
 				ModelUsed: req.Model,
-				Attempts: []core.Attempt{
+				Attempts: []llmtypes.Attempt{
 					{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()},
 				},
 			}, nil
@@ -312,10 +312,10 @@ func TestHandler_Stream_RecvError_PropagatesErrorKind(t *testing.T) {
 	}
 
 	got := captured.last(t)
-	if got.ErrorKind != core.KindUpstream {
+	if got.ErrorKind != llmtypes.KindUpstream {
 		t.Errorf("rec.ErrorKind = %q, want upstream", got.ErrorKind)
 	}
-	if len(got.Attempts) != 1 || got.Attempts[0].ErrorKind != core.KindUpstream {
+	if len(got.Attempts) != 1 || got.Attempts[0].ErrorKind != llmtypes.KindUpstream {
 		t.Errorf("Attempts[0].ErrorKind not propagated: %+v", got.Attempts)
 	}
 }
@@ -324,15 +324,15 @@ func TestHandler_Stream_IdleTimeoutSendsError(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
 	streamObj := &fakeStream{
 		recvDelay: 50 * time.Millisecond,
-		summary:   &core.Summary{},
+		summary:   &llmtypes.Summary{},
 	}
-	r := &fakeGateway{
-		buildStreamResult: func(req *core.Request) (*gateway.RouteResult, error) {
-			return &gateway.RouteResult{
+	r := &fakeService{
+		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
+			return &llmrouter.RouteResult{
 				Stream:    streamObj,
 				Vendor:    "opencode",
 				ModelUsed: req.Model,
-				Attempts: []core.Attempt{
+				Attempts: []llmtypes.Attempt{
 					{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()},
 				},
 			}, nil
@@ -359,10 +359,10 @@ func TestHandler_Stream_IdleTimeoutSendsError(t *testing.T) {
 	}
 
 	got := captured.last(t)
-	if got.ErrorKind != core.KindTimeout {
+	if got.ErrorKind != llmtypes.KindTimeout {
 		t.Errorf("rec.ErrorKind = %q, want timeout", got.ErrorKind)
 	}
-	if len(got.Attempts) != 1 || got.Attempts[0].ErrorKind != core.KindTimeout {
+	if len(got.Attempts) != 1 || got.Attempts[0].ErrorKind != llmtypes.KindTimeout {
 		t.Errorf("Attempts[0].ErrorKind not propagated: %+v", got.Attempts)
 	}
 	if streamObj.closedCount() == 0 {
@@ -374,15 +374,15 @@ func TestHandler_Stream_RequestTimeoutSendsError(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
 	streamObj := &fakeStream{
 		recvDelay: 50 * time.Millisecond,
-		summary:   &core.Summary{},
+		summary:   &llmtypes.Summary{},
 	}
-	r := &fakeGateway{
-		buildStreamResult: func(req *core.Request) (*gateway.RouteResult, error) {
-			return &gateway.RouteResult{
+	r := &fakeService{
+		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
+			return &llmrouter.RouteResult{
 				Stream:    streamObj,
 				Vendor:    "opencode",
 				ModelUsed: req.Model,
-				Attempts: []core.Attempt{
+				Attempts: []llmtypes.Attempt{
 					{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()},
 				},
 			}, nil
@@ -409,10 +409,10 @@ func TestHandler_Stream_RequestTimeoutSendsError(t *testing.T) {
 	}
 
 	got := captured.last(t)
-	if got.ErrorKind != core.KindTimeout {
+	if got.ErrorKind != llmtypes.KindTimeout {
 		t.Errorf("rec.ErrorKind = %q, want timeout", got.ErrorKind)
 	}
-	if len(got.Attempts) != 1 || got.Attempts[0].ErrorKind != core.KindTimeout {
+	if len(got.Attempts) != 1 || got.Attempts[0].ErrorKind != llmtypes.KindTimeout {
 		t.Errorf("Attempts[0].ErrorKind not propagated: %+v", got.Attempts)
 	}
 }
@@ -421,15 +421,15 @@ func TestHandler_Stream_ContextCanceledRecordsClientClosed(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
 	streamObj := &fakeStream{
 		recvDelay: 50 * time.Millisecond,
-		summary:   &core.Summary{},
+		summary:   &llmtypes.Summary{},
 	}
-	r := &fakeGateway{
-		buildStreamResult: func(req *core.Request) (*gateway.RouteResult, error) {
-			return &gateway.RouteResult{
+	r := &fakeService{
+		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
+			return &llmrouter.RouteResult{
 				Stream:    streamObj,
 				Vendor:    "opencode",
 				ModelUsed: req.Model,
-				Attempts: []core.Attempt{
+				Attempts: []llmtypes.Attempt{
 					{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()},
 				},
 			}, nil
@@ -447,7 +447,7 @@ func TestHandler_Stream_ContextCanceledRecordsClientClosed(t *testing.T) {
 	h.ServeHTTP(w, req)
 
 	got := captured.last(t)
-	if got.ErrorKind != core.KindClientClosed {
+	if got.ErrorKind != llmtypes.KindClientClosed {
 		t.Fatalf("ErrorKind = %q, want client_closed", got.ErrorKind)
 	}
 	if streamObj.closedCount() == 0 {
@@ -462,20 +462,20 @@ func TestHandler_Stream_ContextCanceledRecordsClientClosed(t *testing.T) {
 func TestHandler_Stream_ClientDisconnect_MidStream(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
 	streamObj := &fakeStream{
-		events: []*core.Event{
-			{Choices: []core.ChoiceDelta{{Delta: core.Delta{Content: "one"}}}},
-			{Choices: []core.ChoiceDelta{{Delta: core.Delta{Content: " two"}}}},
-			{Choices: []core.ChoiceDelta{{Delta: core.Delta{Content: " three"}}}},
+		events: []*llmtypes.Event{
+			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: "one"}}}},
+			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: " two"}}}},
+			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: " three"}}}},
 		},
-		summary: &core.Summary{},
+		summary: &llmtypes.Summary{},
 	}
-	r := &fakeGateway{
-		buildStreamResult: func(req *core.Request) (*gateway.RouteResult, error) {
-			return &gateway.RouteResult{
+	r := &fakeService{
+		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
+			return &llmrouter.RouteResult{
 				Stream:    streamObj,
 				Vendor:    "opencode",
 				ModelUsed: req.Model,
-				Attempts: []core.Attempt{
+				Attempts: []llmtypes.Attempt{
 					{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()},
 				},
 			}, nil
@@ -490,7 +490,7 @@ func TestHandler_Stream_ClientDisconnect_MidStream(t *testing.T) {
 	h.ServeHTTP(w, req)
 
 	got := captured.last(t)
-	if got.ErrorKind != core.KindClientClosed {
+	if got.ErrorKind != llmtypes.KindClientClosed {
 		t.Fatalf("ErrorKind = %q, want client_closed", got.ErrorKind)
 	}
 	// Loop runs two Recvs: events[0] sends OK, events[1] send fails, handler
@@ -510,18 +510,18 @@ func TestHandler_Stream_ClientDisconnect_MidStream(t *testing.T) {
 func TestHandler_Stream_ClientDisconnect_OnDone(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
 	streamObj := &fakeStream{
-		events: []*core.Event{
-			{Choices: []core.ChoiceDelta{{Delta: core.Delta{Content: "only"}}}},
+		events: []*llmtypes.Event{
+			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: "only"}}}},
 		},
-		summary: &core.Summary{},
+		summary: &llmtypes.Summary{},
 	}
-	r := &fakeGateway{
-		buildStreamResult: func(req *core.Request) (*gateway.RouteResult, error) {
-			return &gateway.RouteResult{
+	r := &fakeService{
+		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
+			return &llmrouter.RouteResult{
 				Stream:    streamObj,
 				Vendor:    "opencode",
 				ModelUsed: req.Model,
-				Attempts: []core.Attempt{
+				Attempts: []llmtypes.Attempt{
 					{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()},
 				},
 			}, nil
@@ -536,7 +536,7 @@ func TestHandler_Stream_ClientDisconnect_OnDone(t *testing.T) {
 	h.ServeHTTP(w, req)
 
 	got := captured.last(t)
-	if got.ErrorKind != core.KindClientClosed {
+	if got.ErrorKind != llmtypes.KindClientClosed {
 		t.Errorf("ErrorKind = %q, want client_closed (SendDone failed)", got.ErrorKind)
 	}
 }
@@ -547,19 +547,19 @@ func TestHandler_Stream_ClientDisconnect_OnDone(t *testing.T) {
 func TestHandler_Stream_ClientDisconnect_OnFirstEvent(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
 	streamObj := &fakeStream{
-		events: []*core.Event{
-			{Choices: []core.ChoiceDelta{{Delta: core.Delta{Content: "first"}}}},
-			{Choices: []core.ChoiceDelta{{Delta: core.Delta{Content: "later"}}}},
+		events: []*llmtypes.Event{
+			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: "first"}}}},
+			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: "later"}}}},
 		},
-		summary: &core.Summary{},
+		summary: &llmtypes.Summary{},
 	}
-	r := &fakeGateway{
-		buildStreamResult: func(req *core.Request) (*gateway.RouteResult, error) {
-			return &gateway.RouteResult{
+	r := &fakeService{
+		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
+			return &llmrouter.RouteResult{
 				Stream:    streamObj,
 				Vendor:    "opencode",
 				ModelUsed: req.Model,
-				Attempts: []core.Attempt{
+				Attempts: []llmtypes.Attempt{
 					{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()},
 				},
 			}, nil
@@ -573,7 +573,7 @@ func TestHandler_Stream_ClientDisconnect_OnFirstEvent(t *testing.T) {
 	h.ServeHTTP(w, req)
 
 	got := captured.last(t)
-	if got.ErrorKind != core.KindClientClosed {
+	if got.ErrorKind != llmtypes.KindClientClosed {
 		t.Fatalf("ErrorKind = %q, want client_closed", got.ErrorKind)
 	}
 	if streamObj.cursor != 1 {
@@ -586,16 +586,16 @@ func TestHandler_Stream_ClientDisconnect_OnFirstEvent(t *testing.T) {
 // (already on the wire), but ErrorKind reveals the terminal state.
 func TestHandler_NonStream_ClientDisconnect(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
-	r := &fakeGateway{
-		buildResult: func(req *core.Request) *gateway.RouteResult {
-			return &gateway.RouteResult{
-				Response: &core.Response{
+	r := &fakeService{
+		buildResult: func(req *llmtypes.Request) *llmrouter.RouteResult {
+			return &llmrouter.RouteResult{
+				Response: &llmtypes.Response{
 					Model:   req.Model,
-					Choices: []core.Choice{{Index: 0, Message: core.Message{Role: "assistant", Content: "ok"}}},
+					Choices: []llmtypes.Choice{{Index: 0, Message: llmtypes.Message{Role: "assistant", Content: "ok"}}},
 				},
 				Vendor:    "opencode",
 				ModelUsed: req.Model,
-				Attempts: []core.Attempt{
+				Attempts: []llmtypes.Attempt{
 					{Vendor: "opencode", Model: req.Model, StatusCode: 200, StartedAt: time.Now()},
 				},
 			}
@@ -609,7 +609,7 @@ func TestHandler_NonStream_ClientDisconnect(t *testing.T) {
 	h.ServeHTTP(w, req)
 
 	got := captured.last(t)
-	if got.ErrorKind != core.KindClientClosed {
+	if got.ErrorKind != llmtypes.KindClientClosed {
 		t.Errorf("ErrorKind = %q, want client_closed", got.ErrorKind)
 	}
 	if got.StatusCode != http.StatusOK {
@@ -645,17 +645,17 @@ func (d *disconnectAfterNWriter) WriteHeader(statusCode int) { d.rec.WriteHeader
 
 func (d *disconnectAfterNWriter) Flush() {}
 
-func TestHandler_Stream_PreStreamGatewayError(t *testing.T) {
+func TestHandler_Stream_PreStreamServiceError(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
-	r := &fakeGateway{
-		buildStreamResult: func(req *core.Request) (*gateway.RouteResult, error) {
-			return &gateway.RouteResult{
+	r := &fakeService{
+		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
+			return &llmrouter.RouteResult{
 				Vendor:    "opencode",
 				ModelUsed: req.Model,
-				Attempts: []core.Attempt{
-					{Vendor: "opencode", Model: req.Model, ErrorKind: core.KindAuth, StatusCode: 401, StartedAt: time.Now()},
+				Attempts: []llmtypes.Attempt{
+					{Vendor: "opencode", Model: req.Model, ErrorKind: llmtypes.KindAuth, StatusCode: 401, StartedAt: time.Now()},
 				},
-			}, &core.Error{ErrorKind: core.KindAuth, Message: "no key"}
+			}, &llmtypes.Error{ErrorKind: llmtypes.KindAuth, Message: "no key"}
 		},
 	}
 	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
@@ -676,36 +676,36 @@ func TestHandler_Stream_PreStreamGatewayError(t *testing.T) {
 	}
 
 	got := captured.last(t)
-	if got.ErrorKind != core.KindAuth {
+	if got.ErrorKind != llmtypes.KindAuth {
 		t.Errorf("rec.ErrorKind = %q, want auth", got.ErrorKind)
 	}
 	if got.StatusCode != http.StatusUnauthorized {
 		t.Errorf("rec.StatusCode = %d, want 401", got.StatusCode)
 	}
-	if len(got.Attempts) != 1 || got.Attempts[0].ErrorKind != core.KindAuth {
+	if len(got.Attempts) != 1 || got.Attempts[0].ErrorKind != llmtypes.KindAuth {
 		t.Errorf("Attempts[0] = %+v, want auth attempt", got.Attempts)
 	}
 }
 
-// fakeGateway implements ChatGateway for handler tests. buildResult /
+// fakeService implements ChatService for handler tests. buildResult /
 // buildStreamResult let each test case shape the RouteResult —
 // including pre-populated Attempts — so we exercise the audit-copy
-// path without spinning up a real Router.
-type fakeGateway struct {
+// path without spinning up a real Service.
+type fakeService struct {
 	vendor            string
-	buildResult       func(req *core.Request) *gateway.RouteResult
-	buildStreamResult func(req *core.Request) (*gateway.RouteResult, error)
+	buildResult       func(req *llmtypes.Request) *llmrouter.RouteResult
+	buildStreamResult func(req *llmtypes.Request) (*llmrouter.RouteResult, error)
 }
 
-func (f *fakeGateway) Complete(_ context.Context, req *core.Request) (*gateway.RouteResult, error) {
+func (f *fakeService) Complete(_ context.Context, req *llmtypes.Request) (*llmrouter.RouteResult, error) {
 	return f.buildResult(req), nil
 }
 
-func (f *fakeGateway) CompleteStream(_ context.Context, req *core.Request) (*gateway.RouteResult, error) {
+func (f *fakeService) CompleteStream(_ context.Context, req *llmtypes.Request) (*llmrouter.RouteResult, error) {
 	if f.buildStreamResult != nil {
 		return f.buildStreamResult(req)
 	}
-	return &gateway.RouteResult{}, &core.Error{ErrorKind: core.KindUpstream, Message: "stream not implemented in this fake"}
+	return &llmrouter.RouteResult{}, &llmtypes.Error{ErrorKind: llmtypes.KindUpstream, Message: "stream not implemented in this fake"}
 }
 
 // fakeStream returns events in order, then optionally yields recvErr
@@ -714,15 +714,15 @@ type fakeStream struct {
 	mu        sync.Mutex
 	closeOnce sync.Once
 	done      chan struct{}
-	events    []*core.Event
+	events    []*llmtypes.Event
 	cursor    int
 	recvErr   error
 	recvDelay time.Duration
-	summary   *core.Summary
+	summary   *llmtypes.Summary
 	closed    int
 }
 
-func (s *fakeStream) Recv() (*core.Event, error) {
+func (s *fakeStream) Recv() (*llmtypes.Event, error) {
 	if s.recvDelay > 0 {
 		select {
 		case <-time.After(s.recvDelay):
@@ -750,7 +750,7 @@ func (s *fakeStream) Close() error {
 	return nil
 }
 
-func (s *fakeStream) Summary() *core.Summary { return s.summary }
+func (s *fakeStream) Summary() *llmtypes.Summary { return s.summary }
 
 func (s *fakeStream) doneChan() chan struct{} {
 	s.mu.Lock()
@@ -807,7 +807,7 @@ func newStubbornStream() *stubbornStream {
 	return &stubbornStream{block: make(chan struct{})}
 }
 
-func (s *stubbornStream) Recv() (*core.Event, error) {
+func (s *stubbornStream) Recv() (*llmtypes.Event, error) {
 	<-s.block
 	return nil, io.EOF
 }
@@ -817,7 +817,7 @@ func (s *stubbornStream) Close() error {
 	return nil
 }
 
-func (s *stubbornStream) Summary() *core.Summary { return &core.Summary{} }
+func (s *stubbornStream) Summary() *llmtypes.Summary { return &llmtypes.Summary{} }
 
 func (s *stubbornStream) release() { close(s.block) }
 
@@ -863,9 +863,9 @@ func TestRecvWithIdleTimeout_BoundedDrainOnIdleTimeout(t *testing.T) {
 	if elapsed > 500*time.Millisecond {
 		t.Fatalf("recvWithIdleTimeout returned in %v, want < 500ms", elapsed)
 	}
-	var perr *core.Error
-	if !errors.As(err, &perr) || perr.ErrorKind != core.KindTimeout {
-		t.Errorf("err = %v, want KindTimeout core.Error", err)
+	var perr *llmtypes.Error
+	if !errors.As(err, &perr) || perr.ErrorKind != llmtypes.KindTimeout {
+		t.Errorf("err = %v, want KindTimeout llmtypes.Error", err)
 	}
 	if s.closeCalled == 0 {
 		t.Errorf("Stream.Close() not invoked on idle timeout")

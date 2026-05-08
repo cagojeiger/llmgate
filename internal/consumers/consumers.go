@@ -39,11 +39,11 @@ import (
 )
 
 const (
-	defaultDir   = "./consumers"
-	hashPrefix   = "sha256:"
-	hashHexLen   = 64
-	keyIDLen     = 8
-	maxNameLen   = 64
+	defaultDir     = "./consumers"
+	hashPrefix     = "sha256:"
+	hashHexLen     = 64
+	keyIDLen       = 8
+	maxNameLen     = 64
 	envConsumerDir = "LLMGATE_CONSUMERS"
 )
 
@@ -56,15 +56,15 @@ var nameRule = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,` + fmt.Sprint(maxNameL
 // identifier (audit ties facts to this string). KeyHashes are the active
 // sha256 hashes of bearer tokens; multiple entries support rotation.
 type Consumer struct {
-	Name       string   `yaml:"name"`
-	KeyHashes  []string `yaml:"key_hashes"`
+	Name      string   `yaml:"name"`
+	KeyHashes []string `yaml:"key_hashes"`
 }
 
 // Store is the runtime view of the consumers directory: an O(1) hash → consumer
 // map for auth lookups, plus a name → consumer map for completeness.
 type Store struct {
-	byHash  map[string]*Consumer
-	byName  map[string]*Consumer
+	byHash map[string]*Consumer
+	byName map[string]*Consumer
 }
 
 // LoadDir reads every *.yaml / *.yml file under dir and builds a Store.

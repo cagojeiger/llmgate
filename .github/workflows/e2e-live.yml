@@ -1,0 +1,36 @@
+name: e2e (live upstream)
+
+# Manual / nightly only — costs vendor credits and is non-deterministic.
+# Set LLMGATE_OPENCODE_API_KEY as a repo secret first. ADR 006.
+on:
+  workflow_dispatch:
+  schedule:
+    # Sunday 09:00 UTC — once a week as a wire-drift sentinel.
+    - cron: '0 9 * * 0'
+
+permissions:
+  contents: read
+
+jobs:
+  e2e-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - uses: astral-sh/setup-uv@v3
+
+      - name: make e2e
+        env:
+          LLMGATE_OPENCODE_API_KEY: ${{ secrets.LLMGATE_OPENCODE_API_KEY }}
+        run: |
+          if [ -z "$LLMGATE_OPENCODE_API_KEY" ]; then
+            echo "::error::LLMGATE_OPENCODE_API_KEY secret is not set on this repo"
+            exit 1
+          fi
+          make e2e

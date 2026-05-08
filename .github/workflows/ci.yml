@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: go (fmt + vet + test -race)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: gofmt
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then
+            echo "$out"
+            echo "::error::gofmt found unformatted files; run 'gofmt -w .'"
+            exit 1
+          fi
+
+      - run: go vet ./...
+
+      - run: go test -race ./...
+
+  e2e-mock:
+    name: e2e cassette (no vendor)
+    runs-on: ubuntu-latest
+    needs: go
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - uses: astral-sh/setup-uv@v3
+
+      # The cassette upstream is local; no real vendor key needed.
+      # conftest.py sets a dummy LLMGATE_OPENCODE_API_KEY when MODE=cassette,
+      # so factory boot stays happy even though no real call goes out.
+      - run: make e2e-mock

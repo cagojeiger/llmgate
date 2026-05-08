@@ -8,19 +8,21 @@ on:
 permissions:
   contents: read
 
+# Four parallel jobs — total wall-clock = max(slowest), not the sum.
+# Each job is independent so a fmt failure doesn't block seeing test
+# results, and vice versa. Branch protection should require all four.
+
 jobs:
-  go:
-    name: go (fmt + vet + test -race)
+  fmt:
+    name: gofmt
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23'
           cache: true
-
-      - name: gofmt
+      - name: gofmt -l
         run: |
           out=$(gofmt -l .)
           if [ -n "$out" ]; then
@@ -29,25 +31,38 @@ jobs:
             exit 1
           fi
 
-      - run: go vet ./...
-
-      - run: go test -race ./...
-
-  e2e-mock:
-    name: e2e cassette (no vendor)
+  vet:
+    name: go vet
     runs-on: ubuntu-latest
-    needs: go
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23'
           cache: true
+      - run: go vet ./...
 
+  test:
+    name: go test -race
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+      - run: go test -race ./...
+
+  e2e-mock:
+    name: e2e cassette
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
       - uses: astral-sh/setup-uv@v3
-
       # The cassette upstream is local; no real vendor key needed.
-      # conftest.py sets a dummy LLMGATE_OPENCODE_API_KEY when MODE=cassette,
-      # so factory boot stays happy even though no real call goes out.
+      # conftest sets a dummy LLMGATE_OPENCODE_API_KEY when MODE=cassette.
       - run: make e2e-mock

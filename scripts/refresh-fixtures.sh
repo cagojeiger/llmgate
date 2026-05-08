@@ -16,7 +16,7 @@ fi
 CATALOG_DIR="catalog/models"
 FIXTURES_DIR="tests/e2e/fixtures/models"
 RECORD_PROMPT="Count 1 to 5, one number per line."
-RECORD_MAX_TOKENS=128
+RECORD_MAX_TOKENS=2048
 
 mode="${1:---status}"
 mkdir -p "$FIXTURES_DIR"

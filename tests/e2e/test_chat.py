@@ -1,9 +1,4 @@
-"""End-to-end tests for /v1/chat/completions through the gateway.
-
-These hit the real OpenCode upstream — costs tokens. Keep prompts short
-and max_tokens reasonable. The point of these tests is regression: each
-covers a class of bug we've already hit or could hit.
-"""
+"""Scenario-level e2e tests. Matrix coverage lives in test_all_models.py."""
 
 from __future__ import annotations
 
@@ -14,7 +9,7 @@ from openai import OpenAI
 
 from conftest import (
     assert_streaming_progressive,
-    discover_models_by_protocol,
+    discover_catalog_models,
     field,
     raw_consumer_key,
 )
@@ -22,25 +17,16 @@ from conftest import (
 
 pytestmark = pytest.mark.timeout(120)
 
-# Pick the primary model per protocol from the catalog. Adding a new
-# yaml under catalog/models/ + recording its fixture flows through here
-# on the next test run — no edit in this file required. ADR 006.
-OPENAI_MODELS = discover_models_by_protocol("openai")
-ANTHROPIC_MODELS = discover_models_by_protocol("anthropic")
-if not OPENAI_MODELS:
-    pytest.skip("no openai-protocol models in catalog", allow_module_level=True)
-if not ANTHROPIC_MODELS:
-    pytest.skip("no anthropic-protocol models in catalog", allow_module_level=True)
-
-MODEL = OPENAI_MODELS[0]
-ANTHROPIC_MODEL = ANTHROPIC_MODELS[0]
+_openai = discover_catalog_models("openai")
+_anthropic = discover_catalog_models("anthropic")
+if not _openai or not _anthropic:
+    pytest.skip("openai/anthropic protocol model missing from catalog", allow_module_level=True)
+MODEL = _openai[0]
+ANTHROPIC_MODEL = _anthropic[0]
 
 
 @pytest.fixture
 def client(gate_base_url: str) -> OpenAI:
-    # The gate validates the bearer token against consumers/ — a registered
-    # raw key is required (no auth-bypass mode). Pull the documented key
-    # from consumers/example.yaml so rotated keys flow through automatically.
     return OpenAI(base_url=f"{gate_base_url}/v1", api_key=raw_consumer_key())
 
 
@@ -54,40 +40,8 @@ def test_chat_non_stream(client: OpenAI) -> None:
     msg = resp.choices[0].message
     content = (msg.content or "").strip()
     reasoning = (field(msg, "reasoning_content") or "").strip()
-    # DeepSeek is a reasoning model; on tight budgets content can be empty
-    # while reasoning_content carries the thinking. Either is proof the
-    # request reached upstream and a response came back through the gate.
+    # Reasoning models can put output in reasoning_content instead.
     assert content or reasoning, f"both content and reasoning_content empty: {resp}"
-    assert resp.usage is not None
-    assert resp.usage.total_tokens > 0
-
-
-@pytest.mark.parametrize("model", OPENAI_MODELS[1:4])
-def test_chat_non_stream_other_models(client: OpenAI, model: str) -> None:
-    resp = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": "say hi"}],
-        max_tokens=64,
-    )
-    assert resp.choices, f"no choices from {model}: {resp}"
-    msg = resp.choices[0].message
-    text = (msg.content or "").strip() or (field(msg, "reasoning_content") or "").strip()
-    assert text, f"{model}: empty content and reasoning"
-
-
-@pytest.mark.parametrize("model", ANTHROPIC_MODELS)
-def test_chat_anthropic_models_non_stream(client: OpenAI, model: str) -> None:
-    # minimax can be a reasoning model — give enough budget that the
-    # reply doesn't get truncated mid-thinking.
-    resp = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": "say hi"}],
-        max_tokens=256,
-    )
-    assert resp.choices, f"no choices from {model}: {resp}"
-    msg = resp.choices[0].message
-    text = (msg.content or "").strip() or (field(msg, "reasoning_content") or "").strip()
-    assert text, f"{model}: empty content and reasoning"
     assert resp.usage is not None
     assert resp.usage.total_tokens > 0
 
@@ -134,12 +88,7 @@ def test_chat_system_message_extraction(client: OpenAI) -> None:
 
 
 def test_non_stream_preserves_vendor_fields(client: OpenAI) -> None:
-    """Regression: cost / prompt_cache_*_tokens must survive the typed gate.
-
-    These are vendor-specific fields (OpenCode + DeepSeek) that we don't
-    typed-model. They have to ride through Extra map[string]json.RawMessage
-    on Response and Usage.
-    """
+    """Vendor extras (cost, prompt_cache_*) must ride through Response.Extra."""
     resp = client.chat.completions.create(
         model=MODEL,
         messages=[{"role": "user", "content": "say hi"}],
@@ -155,11 +104,7 @@ def test_non_stream_preserves_vendor_fields(client: OpenAI) -> None:
 
 
 def test_chat_stream(client: OpenAI) -> None:
-    """Regression: stream deltas must carry content / reasoning_content.
-
-    This is the bug we hit when ChoiceDelta was flat instead of nesting a
-    Delta. If this test passes, the wire format and our typed model agree.
-    """
+    """Stream deltas carry content/reasoning_content (ChoiceDelta/Delta nesting)."""
     request_start = time.monotonic()
     timestamps: list[float] = []
     chunks_with_payload = 0
@@ -199,11 +144,7 @@ def test_chat_stream(client: OpenAI) -> None:
 
 
 def test_unregistered_client_key_is_rejected(gate_base_url: str) -> None:
-    """Audit-always property: an unregistered bearer token gets 401.
-
-    The gate validates Authorization against consumers/ — there is no
-    bypass mode. ADR 003.
-    """
+    """Unregistered bearer token gets 401 (no bypass mode). ADR 003."""
     import openai as openai_pkg
 
     dummy = OpenAI(base_url=f"{gate_base_url}/v1", api_key="dummy-client-key")

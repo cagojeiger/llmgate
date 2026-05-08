@@ -1,22 +1,12 @@
-"""Pytest configuration for llmgate e2e tests.
+"""Pytest configuration for llmgate e2e.
 
-Two modes, selected by ``LLMGATE_E2E_MODE``:
+Two modes via ``LLMGATE_E2E_MODE``:
 
-  live      — boots the gate against the real upstream defined in
-              catalog/. Costs vendor credits; default for ``make e2e``.
-  cassette  — boots the gate against a local cassette HTTP server that
-              replays canned responses from tests/e2e/fixtures/. Free,
-              deterministic. Default for ``make e2e-mock``. ADR 006.
+  live      — real upstream from .env (default; ``make e2e``)
+  cassette  — replays tests/e2e/fixtures via cassette.py (``make e2e-mock``)
 
-In both modes the gate binary is built once per session, bound to :8080,
-polled on /healthz, and terminated on session end. Set
-``LLMGATE_E2E_EXTERNAL=1`` to skip subprocess management and reuse a gate
-already running externally (CI / supervisor mode); only meaningful in
-live mode.
-
-Tests that require a real upstream (streaming, tool calls, vendor-side
-behavior the cassette doesn't simulate yet) are tagged
-``@pytest.mark.live_only`` and auto-skipped in cassette mode.
+Set ``LLMGATE_E2E_EXTERNAL=1`` to reuse a gate already running on :8080.
+``@pytest.mark.live_only`` auto-skips in cassette mode. ADR 006.
 """
 
 from __future__ import annotations
@@ -63,8 +53,7 @@ def pytest_collection_modifyitems(
 
 def _tail(path: Path, n_chars: int = 2000) -> str:
     try:
-        text = path.read_text(errors="replace")
-        return text[-n_chars:]
+        return path.read_text(errors="replace")[-n_chars:]
     except FileNotFoundError:
         return "(no log)"
 
@@ -84,7 +73,7 @@ def _wait_healthz(
             if r.status_code == 200:
                 return
             last_err = f"status={r.status_code}"
-        except Exception as exc:  # connection refused etc. — expected during boot
+        except Exception as exc:
             last_err = repr(exc)
         time.sleep(0.2)
 
@@ -122,21 +111,13 @@ def _ensure_port_free(port: int) -> None:
         sock.bind(("127.0.0.1", port))
     except OSError:
         sock.close()
-        pytest.fail(
-            f"port {port} already in use; free it or set LLMGATE_E2E_EXTERNAL=1"
-        )
+        pytest.fail(f"port {port} already in use; free it or set LLMGATE_E2E_EXTERNAL=1")
     finally:
         sock.close()
 
 
 def _materialize_cassette_catalog(dst_root: Path, upstream_url: str) -> Path:
-    """Copy catalog/ into dst_root, rewriting every ``base_url:`` to upstream_url.
-
-    The cassette server emulates the upstream wire surface (OpenAI on
-    /chat/completions, Anthropic on /messages) so every catalog model can
-    point at the same base URL — the gateway picks the right path per
-    Protocol field on its own.
-    """
+    """Copy catalog/ into dst_root, rewriting every base_url: to upstream_url."""
     src = REPO_ROOT / "catalog"
     dst = dst_root / "catalog"
     if dst.exists():
@@ -167,13 +148,10 @@ def gate_base_url(tmp_path_factory) -> Iterator[str]:
     upstream_server: Optional[object] = None
     if mode == "cassette":
         upstream_server, upstream_port = cassette.start(FIXTURES_DIR)
-        upstream_url = f"http://127.0.0.1:{upstream_port}"
         env["LLMGATE_CATALOG"] = str(
-            _materialize_cassette_catalog(work_dir, upstream_url)
+            _materialize_cassette_catalog(work_dir, f"http://127.0.0.1:{upstream_port}")
         )
-        # Vendor key isn't actually used by the cassette upstream — the
-        # gate factory still requires the env to exist for every model in
-        # the catalog. A dummy value is fine.
+        # gate factory requires the env to exist; cassette doesn't validate it.
         env.setdefault("LLMGATE_OPENCODE_API_KEY", "dummy-cassette-key")
     elif mode == "live":
         load_dotenv(REPO_ROOT / ".env")
@@ -183,11 +161,9 @@ def gate_base_url(tmp_path_factory) -> Iterator[str]:
     else:
         pytest.fail(f"unknown LLMGATE_E2E_MODE: {mode}")
 
-    stdout_path = work_dir / "gate.stdout.log"
     stderr_path = work_dir / "gate.stderr.log"
-    out = open(stdout_path, "wb")
+    out = open(work_dir / "gate.stdout.log", "wb")
     err = open(stderr_path, "wb")
-
     proc = subprocess.Popen(
         [str(bin_path)],
         cwd=str(REPO_ROOT),
@@ -196,7 +172,6 @@ def gate_base_url(tmp_path_factory) -> Iterator[str]:
         stderr=err,
         start_new_session=True,
     )
-
     try:
         _wait_healthz(GATE_BASE_URL, timeout=10, proc=proc, stderr_path=stderr_path)
         yield GATE_BASE_URL
@@ -220,12 +195,7 @@ def assert_streaming_progressive(
     label: str,
     min_chunks_for_gap: int = 5,
 ) -> None:
-    """Assert SSE stream is genuinely progressive (not silently batched).
-
-    A gap > 50ms between *some* pair of consecutive chunks proves the
-    server isn't holding the response and flushing all at once. Short
-    streams (< min_chunks_for_gap chunks) skip this check.
-    """
+    """SSE stream is progressive (>50ms gap somewhere). Skipped for short streams."""
     n = len(timestamps)
     assert n >= 2, f"{label}: chunk count {n} < 2"
     if n >= min_chunks_for_gap:
@@ -238,45 +208,20 @@ def assert_streaming_progressive(
 
 
 def field(obj, name):
-    """Read a possibly-vendor-extension field from an openai SDK Pydantic model."""
+    """Read a vendor-extension field from an openai SDK Pydantic model."""
     val = getattr(obj, name, None)
     if val is not None:
         return val
-    extra = getattr(obj, "model_extra", None) or {}
-    return extra.get(name)
-
-
-def discover_models_by_protocol(protocol: str) -> list[str]:
-    """Catalog model ids whose ``protocol:`` field matches.
-
-    Lets test files pick a primary model + matrix without hardcoding ids.
-    Adding a new yaml under catalog/models/ flows through here on the next
-    test run — no edit required.
-    """
-    id_pat = re.compile(r"^id:\s*(\S+)", re.MULTILINE)
-    proto_pat = re.compile(r"^protocol:\s*(\S+)", re.MULTILINE)
-    out: list[str] = []
-    for path in sorted((REPO_ROOT / "catalog" / "models").glob("*.yaml")):
-        text = path.read_text()
-        m_proto = proto_pat.search(text)
-        if m_proto and m_proto.group(1) == protocol:
-            m_id = id_pat.search(text)
-            if m_id:
-                out.append(m_id.group(1))
-    return out
+    return (getattr(obj, "model_extra", None) or {}).get(name)
 
 
 def cassette_has_fixture(model: str) -> bool:
-    """Whether a cassette fixture set exists for this model id."""
     return (FIXTURES_DIR / "models" / model / "chat-completion.json").exists()
 
 
 @pytest.fixture(autouse=True)
 def _skip_if_no_cassette_fixture(request: pytest.FixtureRequest) -> None:
-    """Auto-skip a parametrized test in cassette mode when its model has
-    no fixture. Lets `test_all_models` keep using the catalog as the
-    matrix without hard-failing for catalog rows we haven't recorded yet.
-    """
+    """In cassette mode, skip parametrized tests whose ``model`` has no fixture."""
     if os.environ.get("LLMGATE_E2E_MODE", "live").lower() != "cassette":
         return
     callspec = getattr(request.node, "callspec", None)
@@ -287,37 +232,33 @@ def _skip_if_no_cassette_fixture(request: pytest.FixtureRequest) -> None:
         pytest.skip(f"cassette: no fixture for {model}")
 
 
-def discover_catalog_models() -> list[str]:
-    """Read every catalog/models/*.yaml and return their declared ids, sorted.
+def discover_catalog_models(protocol: str | None = None) -> list[str]:
+    """Catalog model ids (sorted), optionally filtered by ``protocol:``.
 
-    Avoids a PyYAML dependency by extracting the top-level ``id:`` line per
-    file. Tests use this so adding a model under catalog/ automatically
-    enrolls it in the matrix, with no test-file edit required.
+    Avoids a PyYAML dep by regex-extracting top-level fields. Adding a yaml
+    under catalog/models/ flows into the matrix on the next run.
     """
-    models_dir = REPO_ROOT / "catalog" / "models"
-    pattern = re.compile(r"^id:\s*(\S+)", re.MULTILINE)
+    id_pat = re.compile(r"^id:\s*(\S+)", re.MULTILINE)
+    proto_pat = re.compile(r"^protocol:\s*(\S+)", re.MULTILINE)
     ids: list[str] = []
-    for path in sorted(models_dir.glob("*.yaml")):
-        match = pattern.search(path.read_text())
-        if match:
-            ids.append(match.group(1))
+    for path in sorted((REPO_ROOT / "catalog" / "models").glob("*.yaml")):
+        text = path.read_text()
+        if protocol is not None:
+            m_proto = proto_pat.search(text)
+            if not m_proto or m_proto.group(1) != protocol:
+                continue
+        m_id = id_pat.search(text)
+        if m_id:
+            ids.append(m_id.group(1))
     return ids
 
 
 def raw_consumer_key(consumer: str = "example", index: int = 1) -> str:
-    """Extract a documented raw client key from consumers/<consumer>.yaml.
-
-    consumers/*.yaml stores sha256 hashes only; the matching raw keys are
-    documented in the file's comment block (``# raw key #1: ...``) for
-    test fixtures. Tests use this helper so refreshed yaml comments and
-    rotated keys flow through without test edits.
-    """
+    """Read raw client key from the ``# raw key #N: ...`` comment in consumers/<name>.yaml."""
     path = REPO_ROOT / "consumers" / f"{consumer}.yaml"
-    text = path.read_text()
-    match = re.search(rf"raw key #{index}:\s*(\S+)", text)
+    match = re.search(rf"raw key #{index}:\s*(\S+)", path.read_text())
     if not match:
         raise RuntimeError(
-            f"{path}: missing '# raw key #{index}: ...' comment — "
-            "fixtures need a documented raw key alongside the sha256 hash"
+            f"{path}: missing '# raw key #{index}: ...' comment alongside the sha256 hash"
         )
     return match.group(1)

@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # Node 20 actions deprecation — opt into Node 24 until checkout/setup-go ship v6+.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   e2e-live:
     runs-on: ubuntu-latest
@@ -25,7 +29,9 @@ jobs:
 
       - uses: astral-sh/setup-uv@v3
 
-      - name: make e2e
+      - name: Run pytest (live)
+        id: e2e
+        continue-on-error: true
         env:
           LLMGATE_OPENCODE_API_KEY: ${{ secrets.LLMGATE_OPENCODE_API_KEY }}
         run: |
@@ -33,16 +39,81 @@ jobs:
             echo "::error::LLMGATE_OPENCODE_API_KEY secret is not set on this repo"
             exit 1
           fi
-          make e2e
+          cd tests/e2e
+          uv run pytest --junit-xml=results.xml
+
+      - name: Summarize results
+        id: summary
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import os, xml.etree.ElementTree as ET
+          out = open(os.environ['GITHUB_OUTPUT'], 'a')
+          step = open(os.environ['GITHUB_STEP_SUMMARY'], 'a')
+          try:
+              root = ET.parse('tests/e2e/results.xml').getroot()
+          except FileNotFoundError:
+              out.write("status=failure\n")
+              out.write("summary=pytest did not produce a report (build/setup failure)\n")
+              out.write("failed_list=\n")
+              step.write("## e2e-live\n\nNo pytest report — see job log.\n")
+              raise SystemExit(0)
+
+          ts = root.find('testsuite') if root.tag == 'testsuites' else root
+          total = int(ts.get('tests', 0))
+          failures = int(ts.get('failures', 0))
+          errors = int(ts.get('errors', 0))
+          skipped = int(ts.get('skipped', 0))
+          duration = float(ts.get('time', 0))
+          passed = total - failures - errors - skipped
+          status = "success" if (failures == 0 and errors == 0) else "failure"
+
+          failed_names = []
+          for tc in ts.iter('testcase'):
+              if any(child.tag in ('failure', 'error') for child in tc):
+                  cls = tc.get('classname', '').rsplit('.', 1)[-1]
+                  name = tc.get('name', '?')
+                  failed_names.append(f"{cls}::{name}" if cls else name)
+
+          summary = f"{passed} passed, {failures + errors} failed, {skipped} skipped (total {total}, {duration:.0f}s)"
+          out.write(f"status={status}\n")
+          out.write(f"summary={summary}\n")
+          out.write("failed_list<<EOF\n")
+          for n in failed_names[:20]:
+              out.write(f"• {n}\n")
+          if len(failed_names) > 20:
+              out.write(f"• ... and {len(failed_names) - 20} more\n")
+          out.write("EOF\n")
+
+          step.write(f"## e2e-live ({status})\n\n{summary}\n")
+          if failed_names:
+              step.write("\n### Failed\n")
+              for n in failed_names:
+                  step.write(f"- `{n}`\n")
+          PY
 
       - name: Notify Slack
         if: always() && env.SLACK_WEBHOOK_URL != ''
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          STATUS: ${{ job.status }}
+          STATUS: ${{ steps.summary.outputs.status }}
+          SUMMARY: ${{ steps.summary.outputs.summary }}
+          FAILED_LIST: ${{ steps.summary.outputs.failed_list }}
+          TRIGGER: ${{ github.event_name }}
+          ACTOR: ${{ github.actor }}
+          BRANCH: ${{ github.ref_name }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           icon=":white_check_mark:"; [ "$STATUS" != "success" ] && icon=":x:"
-          curl -fsS -X POST -H 'Content-Type: application/json' \
-            --data "{\"text\":\"${icon} llmgate e2e-live (${STATUS}) — ${RUN_URL}\"}" \
-            "$SLACK_WEBHOOK_URL"
+          NL=$'\n'
+          text="${icon} *llmgate e2e-live* — ${STATUS}${NL}• trigger: ${TRIGGER} by ${ACTOR} (${BRANCH})${NL}• ${SUMMARY}"
+          if [ -n "$FAILED_LIST" ] && [ "$STATUS" != "success" ]; then
+            text="${text}${NL}*failed:*${NL}${FAILED_LIST}"
+          fi
+          text="${text}${NL}${RUN_URL}"
+          jq -nc --arg t "$text" '{text:$t}' \
+            | curl -fsS -X POST -H 'Content-Type: application/json' --data @- "$SLACK_WEBHOOK_URL"
+
+      - name: Fail job if pytest failed
+        if: always() && steps.summary.outputs.status != 'success'
+        run: exit 1

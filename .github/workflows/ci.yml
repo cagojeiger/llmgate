@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # Node 20 actions deprecation — opt into Node 24 until checkout/setup-go ship v6+.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 # Four parallel jobs — total wall-clock = max(slowest), not the sum.
 # Each job is independent so a fmt failure doesn't block seeing test
 # results, and vice versa. Branch protection should require all four.

@@ -1,0 +1,64 @@
+name: refresh cassette fixtures
+
+# Manual / monthly — calls real upstream, opens PR with new fixtures.
+# Set LLMGATE_OPENCODE_API_KEY and SLACK_WEBHOOK_URL as repo secrets. ADR 006.
+on:
+  workflow_dispatch:
+  schedule:
+    # 25th of every month, 09:00 UTC — refreshes before the e2e-live run on the 2nd.
+    - cron: '0 9 25 * *'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Record fresh fixtures
+        env:
+          LLMGATE_OPENCODE_API_KEY: ${{ secrets.LLMGATE_OPENCODE_API_KEY }}
+        run: |
+          if [ -z "$LLMGATE_OPENCODE_API_KEY" ]; then
+            echo "::error::LLMGATE_OPENCODE_API_KEY secret is not set on this repo"
+            exit 1
+          fi
+          # Drop existing fixtures so --record re-captures every model.
+          rm -rf tests/e2e/fixtures/models
+          ./scripts/refresh-fixtures.sh --record
+
+      - name: Open PR
+        id: pr
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: chore/refresh-cassette-fixtures
+          delete-branch: true
+          commit-message: "chore: refresh cassette fixtures"
+          title: "chore: refresh cassette fixtures"
+          body: |
+            Monthly cassette fixture refresh.
+
+            - Re-recorded `tests/e2e/fixtures/models/*` against live upstream.
+            - Triggered by `${{ github.event_name }}`.
+            - Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            Verify locally with `make e2e-mock` before merging.
+          add-paths: tests/e2e/fixtures/**
+
+      - name: Notify Slack
+        if: always() && env.SLACK_WEBHOOK_URL != ''
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          STATUS: ${{ job.status }}
+          PR_URL: ${{ steps.pr.outputs.pull-request-url }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          icon=":white_check_mark:"; [ "$STATUS" != "success" ] && icon=":x:"
+          link="${PR_URL:-$RUN_URL}"
+          curl -fsS -X POST -H 'Content-Type: application/json' \
+            --data "{\"text\":\"${icon} llmgate refresh-fixtures (${STATUS}) — ${link}\"}" \
+            "$SLACK_WEBHOOK_URL"

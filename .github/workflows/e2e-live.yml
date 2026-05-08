@@ -1,12 +1,12 @@
 name: e2e (live upstream)
 
-# Manual / nightly only — costs vendor credits and is non-deterministic.
-# Set LLMGATE_OPENCODE_API_KEY as a repo secret first. ADR 006.
+# Manual / monthly only — costs vendor credits and is non-deterministic.
+# Set LLMGATE_OPENCODE_API_KEY and SLACK_WEBHOOK_URL as repo secrets. ADR 006.
 on:
   workflow_dispatch:
   schedule:
-    # Sunday 09:00 UTC — once a week as a wire-drift sentinel.
-    - cron: '0 9 * * 0'
+    # 2nd of every month, 09:00 UTC — wire-drift sentinel.
+    - cron: '0 9 2 * *'
 
 permissions:
   contents: read
@@ -34,3 +34,15 @@ jobs:
             exit 1
           fi
           make e2e
+
+      - name: Notify Slack
+        if: always() && env.SLACK_WEBHOOK_URL != ''
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          STATUS: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          icon=":white_check_mark:"; [ "$STATUS" != "success" ] && icon=":x:"
+          curl -fsS -X POST -H 'Content-Type: application/json' \
+            --data "{\"text\":\"${icon} llmgate e2e-live (${STATUS}) — ${RUN_URL}\"}" \
+            "$SLACK_WEBHOOK_URL"

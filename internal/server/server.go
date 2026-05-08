@@ -8,8 +8,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 
-	"llmgate/internal/consumers"
 	"llmgate/internal/config"
+	"llmgate/internal/consumers"
 )
 
 func New(cfg *config.Server, log *slog.Logger, h *Handler, store *consumers.Store, probe *ProbeState) *http.Server {

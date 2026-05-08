@@ -1,18 +1,5 @@
-"""Auto-discovered model matrix: every catalog model × non-stream / stream / function-call.
-
-Run against a docker-compose-managed gate:
-
-    docker compose up -d --build
-    cd tests/e2e
-    LLMGATE_E2E_EXTERNAL=1 uv run pytest test_all_models.py -v
-    docker compose down
-
-Models come from catalog/models/*.yaml (auto-discovered) and the client key
-comes from consumers/example.yaml's documented raw key — adding a model to
-the catalog enrolls it in the matrix automatically. Function-calling tests
-mark themselves as expected-to-fail when an upstream model lacks tool
-support; the goal of the matrix is to surface that fact, not to gate CI.
-"""
+"""Auto-discovered matrix: every catalog model × non-stream / stream / function-call.
+Function-call is live_only (cassette V1 doesn't cover multi-turn tool calls)."""
 
 from __future__ import annotations
 
@@ -85,6 +72,7 @@ def test_stream(client: OpenAI, model: str) -> None:
     assert finish_reason in ("stop", "length"), f"{model}: finish_reason={finish_reason}"
 
 
+@pytest.mark.live_only
 @pytest.mark.parametrize("model", MODELS)
 def test_function_call(client: OpenAI, model: str) -> None:
     resp = client.chat.completions.create(

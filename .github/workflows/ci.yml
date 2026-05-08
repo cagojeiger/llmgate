@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Four parallel jobs — total wall-clock = max(slowest), not the sum.
+# Each job is independent so a fmt failure doesn't block seeing test
+# results, and vice versa. Branch protection should require all four.
+
+jobs:
+  fmt:
+    name: gofmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.23'
+          cache: true
+      - name: gofmt -l
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then
+            echo "$out"
+            echo "::error::gofmt found unformatted files; run 'gofmt -w .'"
+            exit 1
+          fi
+
+  vet:
+    name: go vet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.23'
+          cache: true
+      - run: go vet ./...
+
+  test:
+    name: go test -race
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.23'
+          cache: true
+      - run: go test -race ./...
+
+  e2e-mock:
+    name: e2e cassette
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.23'
+          cache: true
+      - uses: astral-sh/setup-uv@v8.1.0
+      # The cassette upstream is local; no real vendor key needed.
+      # conftest sets a dummy LLMGATE_OPENCODE_API_KEY when MODE=cassette.
+      - run: make e2e-mock

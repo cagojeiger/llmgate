@@ -173,11 +173,11 @@ func TestLoadDir_EmptyKeyHashes(t *testing.T) {
 
 func TestLoadDir_BadHashFormat(t *testing.T) {
 	cases := map[string]string{
-		"missing-prefix": sha256Hex("k"),                         // no "sha256:" prefix
-		"wrong-prefix":   "md5:" + sha256Hex("k"),                // unknown algo
-		"short-hex":      hashPrefix + "abcd",                    // too short
+		"missing-prefix": sha256Hex("k"),                               // no "sha256:" prefix
+		"wrong-prefix":   "md5:" + sha256Hex("k"),                      // unknown algo
+		"short-hex":      hashPrefix + "abcd",                          // too short
 		"upper-hex":      hashPrefix + strings.ToUpper(sha256Hex("k")), // uppercase hex
-		"non-hex":        hashPrefix + strings.Repeat("z", 64),   // non-hex chars
+		"non-hex":        hashPrefix + strings.Repeat("z", 64),         // non-hex chars
 	}
 	for label, hashStr := range cases {
 		t.Run(label, func(t *testing.T) {
@@ -232,8 +232,8 @@ func TestLoadDir_DuplicateHashWithinClient(t *testing.T) {
 func TestLoadDir_IgnoresNonYamlFiles(t *testing.T) {
 	// .example template should not break boot.
 	dir := writeClientDir(t, map[string]string{
-		"alpha.yaml":   "name: alpha\nkey_hashes:\n  - " + sha256Hash("k") + "\n",
-		"README.md":    "Operator notes — not a consumer.",
+		"alpha.yaml":     "name: alpha\nkey_hashes:\n  - " + sha256Hash("k") + "\n",
+		"README.md":      "Operator notes — not a consumer.",
 		"sample.example": "name: sample\nkey_hashes: []\n",
 	})
 	store, err := LoadDir(dir)

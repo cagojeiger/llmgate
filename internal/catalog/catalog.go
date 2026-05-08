@@ -53,12 +53,12 @@ type Catalog struct {
 // needs to route one upstream call. Operator-facing context (description,
 // modality, pricing) lives in yaml comments or in external systems — not here.
 type Model struct {
-	ID         string             `yaml:"id"`
-	Vendor     string             `yaml:"vendor"`
-	Protocol   llmtypes.Protocol  `yaml:"protocol"` // see llmtypes.AllProtocols
-	BaseURL    string             `yaml:"base_url"`
-	AuthEnv    string             `yaml:"auth_env"`    // env var *name*; empty defaults to LLMGATE_<VENDOR>_API_KEY
-	AuthScheme string             `yaml:"auth_scheme"` // bearer | x-api-key
+	ID         string            `yaml:"id"`
+	Vendor     string            `yaml:"vendor"`
+	Protocol   llmtypes.Protocol `yaml:"protocol"` // see llmtypes.AllProtocols
+	BaseURL    string            `yaml:"base_url"`
+	AuthEnv    string            `yaml:"auth_env"`    // env var *name*; empty defaults to LLMGATE_<VENDOR>_API_KEY
+	AuthScheme string            `yaml:"auth_scheme"` // bearer | x-api-key
 }
 
 // Alias maps a logical name (e.g. "smart") to an ordered list of concrete

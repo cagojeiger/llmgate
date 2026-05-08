@@ -34,3 +34,7 @@ V1 에서 다음을 *지원하지 않는다*. 디폴트는 거절 — 외부 요
 | **k8s · CRD 인지 / 게이트웨이 안 operator** | *환경 의존* 이 게이트웨이 정체성에 새로 들어옴. operator 가 필요해지면 *외부* 컴포넌트가 yaml 굴림 — 게이트웨이는 mount path 만 본다 |
 
 "이 정도면 가벼우니" 의 누적 압력 — 항목이 늘면 본 문서 갱신으로 응답.
+
+## e2e 테스트 모드
+
+vendor 의존을 PR 검증 경로 밖으로 빼는 결정은 [ADR 006](adr/006-cassette-e2e.md). `make e2e-mock` 은 무료 / 결정론, `make e2e` 는 실 vendor 호출 (nightly/manual).

@@ -1,0 +1,125 @@
+name: refresh cassette fixtures
+
+# Manual / monthly — calls real upstream, opens PR with new fixtures.
+# Set LLMGATE_OPENCODE_API_KEY and SLACK_WEBHOOK_URL as repo secrets. ADR 006.
+on:
+  workflow_dispatch:
+  schedule:
+    # 25th of every month, 09:00 UTC — refreshes before the e2e-live run on the 2nd.
+    - cron: '0 9 25 * *'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Record fresh fixtures
+        env:
+          LLMGATE_OPENCODE_API_KEY: ${{ secrets.LLMGATE_OPENCODE_API_KEY }}
+        run: |
+          if [ -z "$LLMGATE_OPENCODE_API_KEY" ]; then
+            echo "::error::LLMGATE_OPENCODE_API_KEY secret is not set on this repo"
+            exit 1
+          fi
+          # Drop existing fixtures so --record re-captures every model.
+          rm -rf tests/e2e/fixtures/models
+          ./scripts/refresh-fixtures.sh --record
+
+      - name: Compute fixture diff
+        id: diff
+        run: |
+          python3 - <<'PY'
+          import os, subprocess
+          run = lambda *a: subprocess.run(a, capture_output=True, text=True, check=True).stdout
+
+          def model_ids(lines):
+              ids = set()
+              prefix = "tests/e2e/fixtures/models/"
+              for ln in lines.splitlines():
+                  ln = ln.strip()
+                  if ln.startswith(prefix):
+                      ids.add(ln[len(prefix):].split("/", 1)[0])
+              return sorted(ids)
+
+          added = model_ids(run("git", "ls-files", "--others", "--exclude-standard", "tests/e2e/fixtures/models/"))
+          modified = model_ids(run("git", "diff", "--name-only", "--diff-filter=M", "tests/e2e/fixtures/models/"))
+          deleted = model_ids(run("git", "diff", "--name-only", "--diff-filter=D", "tests/e2e/fixtures/models/"))
+          # Models recreated identically show up in 'deleted' from the rm step until the
+          # final write matches HEAD; treat any id that has a working-tree dir as kept.
+          deleted = [d for d in deleted if not os.path.isdir(f"tests/e2e/fixtures/models/{d}")]
+
+          changed_count = len(added) + len(modified) + len(deleted)
+          out = open(os.environ["GITHUB_OUTPUT"], "a")
+          out.write("added<<EOF\n");    out.write("\n".join(added) + ("\n" if added else ""));    out.write("EOF\n")
+          out.write("modified<<EOF\n"); out.write("\n".join(modified) + ("\n" if modified else "")); out.write("EOF\n")
+          out.write("deleted<<EOF\n");  out.write("\n".join(deleted) + ("\n" if deleted else ""));  out.write("EOF\n")
+          out.write(f"changed_count={changed_count}\n")
+
+          step = open(os.environ["GITHUB_STEP_SUMMARY"], "a")
+          step.write(f"## Cassette refresh ({changed_count} models changed)\n\n")
+          for label, ids in (("Added", added), ("Updated", modified), ("Removed", deleted)):
+              if ids:
+                  step.write(f"### {label}\n")
+                  for i in ids:
+                      step.write(f"- `{i}`\n")
+                  step.write("\n")
+          if changed_count == 0:
+              step.write("No diff vs HEAD.\n")
+          PY
+
+      - name: Open PR
+        id: pr
+        if: steps.diff.outputs.changed_count != '0'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          branch: chore/refresh-cassette-fixtures
+          delete-branch: true
+          commit-message: "chore: refresh cassette fixtures"
+          title: "chore: refresh cassette fixtures"
+          body: |
+            Monthly cassette fixture refresh (`${{ github.event_name }}`).
+
+            **Added:**
+            ${{ steps.diff.outputs.added }}
+            **Updated:**
+            ${{ steps.diff.outputs.modified }}
+            **Removed:**
+            ${{ steps.diff.outputs.deleted }}
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            Verify locally with `make e2e-mock` before merging.
+          add-paths: tests/e2e/fixtures/**
+
+      - name: Notify Slack
+        if: always() && env.SLACK_WEBHOOK_URL != ''
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          STATUS: ${{ job.status }}
+          TRIGGER: ${{ github.event_name }}
+          ACTOR: ${{ github.actor }}
+          ADDED: ${{ steps.diff.outputs.added }}
+          MODIFIED: ${{ steps.diff.outputs.modified }}
+          DELETED: ${{ steps.diff.outputs.deleted }}
+          CHANGED_COUNT: ${{ steps.diff.outputs.changed_count }}
+          PR_URL: ${{ steps.pr.outputs.pull-request-url }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          icon=":white_check_mark:"; [ "$STATUS" != "success" ] && icon=":x:"
+          NL=$'\n'
+          summary="${CHANGED_COUNT:-0} models changed"
+          [ "${CHANGED_COUNT:-0}" = "0" ] && summary="no fixture diff vs HEAD"
+          text="${icon} *llmgate refresh-fixtures* — ${STATUS}${NL}• trigger: ${TRIGGER} by ${ACTOR}${NL}• ${summary}"
+          [ -n "$ADDED" ]    && text="${text}${NL}*added:*${NL}${ADDED}"
+          [ -n "$MODIFIED" ] && text="${text}${NL}*updated:*${NL}${MODIFIED}"
+          [ -n "$DELETED" ]  && text="${text}${NL}*removed:*${NL}${DELETED}"
+          link="${PR_URL:-$RUN_URL}"
+          text="${text}${NL}${link}"
+          jq -nc --arg t "$text" '{text:$t}' \
+            | curl -fsS -X POST -H 'Content-Type: application/json' --data @- "$SLACK_WEBHOOK_URL"

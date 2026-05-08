@@ -1,9 +1,4 @@
-"""End-to-end tests for /v1/chat/completions through the gateway.
-
-These hit the real OpenCode upstream — costs tokens. Keep prompts short
-and max_tokens reasonable. The point of these tests is regression: each
-covers a class of bug we've already hit or could hit.
-"""
+"""Scenario-level e2e tests. Matrix coverage lives in test_all_models.py."""
 
 from __future__ import annotations
 
@@ -12,20 +7,27 @@ import time
 import pytest
 from openai import OpenAI
 
-from conftest import assert_streaming_progressive, field
+from conftest import (
+    assert_streaming_progressive,
+    discover_catalog_models,
+    field,
+    raw_consumer_key,
+)
 
 
 pytestmark = pytest.mark.timeout(120)
 
-MODEL = "deepseek-v4-flash"
+_openai = discover_catalog_models("openai")
+_anthropic = discover_catalog_models("anthropic")
+if not _openai or not _anthropic:
+    pytest.skip("openai/anthropic protocol model missing from catalog", allow_module_level=True)
+MODEL = _openai[0]
+ANTHROPIC_MODEL = _anthropic[0]
 
 
 @pytest.fixture
 def client(gate_base_url: str) -> OpenAI:
-    # api_key value is irrelevant — the gate strips client Authorization
-    # and injects its own OpenCode key. We pass a non-empty string so the
-    # SDK is satisfied during construction.
-    return OpenAI(base_url=f"{gate_base_url}/v1", api_key="dummy-client-key")
+    return OpenAI(base_url=f"{gate_base_url}/v1", api_key=raw_consumer_key())
 
 
 def test_chat_non_stream(client: OpenAI) -> None:
@@ -38,40 +40,8 @@ def test_chat_non_stream(client: OpenAI) -> None:
     msg = resp.choices[0].message
     content = (msg.content or "").strip()
     reasoning = (field(msg, "reasoning_content") or "").strip()
-    # DeepSeek is a reasoning model; on tight budgets content can be empty
-    # while reasoning_content carries the thinking. Either is proof the
-    # request reached upstream and a response came back through the gate.
+    # Reasoning models can put output in reasoning_content instead.
     assert content or reasoning, f"both content and reasoning_content empty: {resp}"
-    assert resp.usage is not None
-    assert resp.usage.total_tokens > 0
-
-
-@pytest.mark.parametrize("model", ["kimi-k2.6", "glm-5.1", "mimo-v2.5-pro"])
-def test_chat_non_stream_other_models(client: OpenAI, model: str) -> None:
-    resp = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": "say hi"}],
-        max_tokens=64,
-    )
-    assert resp.choices, f"no choices from {model}: {resp}"
-    msg = resp.choices[0].message
-    text = (msg.content or "").strip() or (field(msg, "reasoning_content") or "").strip()
-    assert text, f"{model}: empty content and reasoning"
-
-
-@pytest.mark.parametrize("model", ["minimax-m2.5", "minimax-m2.7"])
-def test_chat_anthropic_models_non_stream(client: OpenAI, model: str) -> None:
-    # minimax can be a reasoning model — give enough budget that the
-    # reply doesn't get truncated mid-thinking.
-    resp = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": "say hi"}],
-        max_tokens=256,
-    )
-    assert resp.choices, f"no choices from {model}: {resp}"
-    msg = resp.choices[0].message
-    text = (msg.content or "").strip() or (field(msg, "reasoning_content") or "").strip()
-    assert text, f"{model}: empty content and reasoning"
     assert resp.usage is not None
     assert resp.usage.total_tokens > 0
 
@@ -81,7 +51,7 @@ def test_chat_anthropic_stream(client: OpenAI) -> None:
     finish_reason: str | None = None
 
     stream = client.chat.completions.create(
-        model="minimax-m2.5",
+        model=ANTHROPIC_MODEL,
         messages=[{"role": "user", "content": "Count 1 to 3, one per line."}],
         stream=True,
         max_tokens=128,
@@ -104,7 +74,7 @@ def test_chat_anthropic_stream(client: OpenAI) -> None:
 
 def test_chat_system_message_extraction(client: OpenAI) -> None:
     resp = client.chat.completions.create(
-        model="minimax-m2.5",
+        model=ANTHROPIC_MODEL,
         messages=[
             {"role": "system", "content": "Answer in one short sentence."},
             {"role": "user", "content": "Say hello."},
@@ -118,12 +88,7 @@ def test_chat_system_message_extraction(client: OpenAI) -> None:
 
 
 def test_non_stream_preserves_vendor_fields(client: OpenAI) -> None:
-    """Regression: cost / prompt_cache_*_tokens must survive the typed gate.
-
-    These are vendor-specific fields (OpenCode + DeepSeek) that we don't
-    typed-model. They have to ride through Extra map[string]json.RawMessage
-    on Response and Usage.
-    """
+    """Vendor extras (cost, prompt_cache_*) must ride through Response.Extra."""
     resp = client.chat.completions.create(
         model=MODEL,
         messages=[{"role": "user", "content": "say hi"}],
@@ -139,11 +104,7 @@ def test_non_stream_preserves_vendor_fields(client: OpenAI) -> None:
 
 
 def test_chat_stream(client: OpenAI) -> None:
-    """Regression: stream deltas must carry content / reasoning_content.
-
-    This is the bug we hit when ChoiceDelta was flat instead of nesting a
-    Delta. If this test passes, the wire format and our typed model agree.
-    """
+    """Stream deltas carry content/reasoning_content (ChoiceDelta/Delta nesting)."""
     request_start = time.monotonic()
     timestamps: list[float] = []
     chunks_with_payload = 0
@@ -182,19 +143,17 @@ def test_chat_stream(client: OpenAI) -> None:
     assert_streaming_progressive(timestamps, label="chat-stream")
 
 
-def test_client_authorization_header_is_stripped(client: OpenAI) -> None:
-    """The gate must drop client Authorization and inject its own OpenCode key.
+def test_unregistered_client_key_is_rejected(gate_base_url: str) -> None:
+    """Unregistered bearer token gets 401 (no bypass mode). ADR 003."""
+    import openai as openai_pkg
 
-    We can't directly observe the upstream request, but we can assert the
-    call SUCCEEDS even though the SDK sent ``Authorization: Bearer dummy``.
-    If the gate were forwarding our dummy key, upstream would 401.
-    """
-    resp = client.chat.completions.create(
-        model=MODEL,
-        messages=[{"role": "user", "content": "hi"}],
-        max_tokens=64,
-    )
-    assert resp.choices, f"call failed despite dummy client key — auth not replaced: {resp}"
+    dummy = OpenAI(base_url=f"{gate_base_url}/v1", api_key="dummy-client-key")
+    with pytest.raises(openai_pkg.AuthenticationError):
+        dummy.chat.completions.create(
+            model=MODEL,
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=64,
+        )
 
 
 def test_unknown_model_fails(client: OpenAI) -> None:

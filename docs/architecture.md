@@ -17,7 +17,7 @@ OpenAI SDK 와이어 호환 게이트웨이. 모델은 *기본 등록 단위*, *
 | [request.md](request.md) | 요청 생애주기 + 스트리밍 폴백 경계 |
 | [logs.md](logs.md) | access / audit 두 로그 갈래와 키 스키마 |
 | [identity.md](identity.md) | 상태 위치 + 의도적 미지원 (V1 거절 목록) |
-| [adr/](adr/) | Accepted 결정 기록 (5개) |
+| [adr/](adr/) | Accepted 결정 기록 (6개) |
 
 ## 시스템 지도
 

@@ -39,7 +39,7 @@ def test_nonstream(client: OpenAI, model: str) -> None:
     resp = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": "Reply with just one word: pong"}],
-        max_tokens=128,
+        max_tokens=2048,
     )
     assert resp.choices, f"{model}: no choices in response"
     msg = resp.choices[0].message
@@ -55,7 +55,7 @@ def test_stream(client: OpenAI, model: str) -> None:
         model=model,
         messages=[{"role": "user", "content": "Count 1 to 3, one per line."}],
         stream=True,
-        max_tokens=128,
+        max_tokens=2048,
     )
     for chunk in stream:
         if not chunk.choices:
@@ -80,7 +80,7 @@ def test_function_call(client: OpenAI, model: str) -> None:
         messages=[{"role": "user", "content": "What's the weather in Seoul? Use the tool."}],
         tools=[WEATHER_TOOL],
         tool_choice="auto",
-        max_tokens=256,
+        max_tokens=2048,
     )
     assert resp.choices, f"{model}: no choices in response"
     msg = resp.choices[0].message

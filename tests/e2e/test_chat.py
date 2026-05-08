@@ -34,7 +34,7 @@ def test_chat_non_stream(client: OpenAI) -> None:
     resp = client.chat.completions.create(
         model=MODEL,
         messages=[{"role": "user", "content": "Reply with just one word: pong"}],
-        max_tokens=512,
+        max_tokens=2048,
     )
     assert resp.choices, f"no choices: {resp}"
     msg = resp.choices[0].message
@@ -54,7 +54,7 @@ def test_chat_anthropic_stream(client: OpenAI) -> None:
         model=ANTHROPIC_MODEL,
         messages=[{"role": "user", "content": "Count 1 to 3, one per line."}],
         stream=True,
-        max_tokens=128,
+        max_tokens=2048,
     )
     for chunk in stream:
         if not chunk.choices:
@@ -79,7 +79,7 @@ def test_chat_system_message_extraction(client: OpenAI) -> None:
             {"role": "system", "content": "Answer in one short sentence."},
             {"role": "user", "content": "Say hello."},
         ],
-        max_tokens=64,
+        max_tokens=2048,
     )
     assert resp.choices, f"no choices: {resp}"
     msg = resp.choices[0].message
@@ -92,7 +92,7 @@ def test_non_stream_preserves_vendor_fields(client: OpenAI) -> None:
     resp = client.chat.completions.create(
         model=MODEL,
         messages=[{"role": "user", "content": "say hi"}],
-        max_tokens=128,
+        max_tokens=2048,
     )
     cost = field(resp, "cost")
     assert cost is not None, f"vendor 'cost' missing from response: {resp}"
@@ -114,7 +114,7 @@ def test_chat_stream(client: OpenAI) -> None:
         model=MODEL,
         messages=[{"role": "user", "content": "Count 1 to 5, one per line."}],
         stream=True,
-        max_tokens=512,
+        max_tokens=2048,
     )
     for chunk in stream:
         timestamps.append(time.monotonic())
@@ -152,7 +152,7 @@ def test_unregistered_client_key_is_rejected(gate_base_url: str) -> None:
         dummy.chat.completions.create(
             model=MODEL,
             messages=[{"role": "user", "content": "hi"}],
-            max_tokens=64,
+            max_tokens=2048,
         )
 
 
@@ -163,5 +163,5 @@ def test_unknown_model_fails(client: OpenAI) -> None:
         client.chat.completions.create(
             model="nonexistent-model-123",
             messages=[{"role": "user", "content": "hi"}],
-            max_tokens=32,
+            max_tokens=2048,
         )

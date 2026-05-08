@@ -61,9 +61,9 @@ func run() error {
 	}
 	logger.Info("consumers loaded", slog.Int("consumers", consumerStore.Len()))
 
-	factories := map[string]providerFactory{
-		"openai":    openaiFactory,
-		"anthropic": anthropicFactory,
+	factories := map[llmtypes.Protocol]providerFactory{
+		llmtypes.ProtocolOpenAI:    openaiFactory,
+		llmtypes.ProtocolAnthropic: anthropicFactory,
 	}
 	models, aliases, err := buildRouterInputs(cat, factories)
 	if err != nil {
@@ -140,7 +140,7 @@ type providerFactory func(*catalog.Model) (llmtypes.Provider, error)
 // alias name → ordered chain of model ids. The Service itself stays
 // catalog-agnostic; this helper is the single point that bridges the
 // yaml shape into the service.
-func buildRouterInputs(cat *catalog.Catalog, factories map[string]providerFactory) (llmrouter.Models, llmrouter.Aliases, error) {
+func buildRouterInputs(cat *catalog.Catalog, factories map[llmtypes.Protocol]providerFactory) (llmrouter.Models, llmrouter.Aliases, error) {
 	models := make(llmrouter.Models, len(cat.Models))
 	for id, m := range cat.Models {
 		f, ok := factories[m.Protocol]

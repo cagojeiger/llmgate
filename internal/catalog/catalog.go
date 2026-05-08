@@ -36,6 +36,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"llmgate/internal/llmtypes"
 )
 
 const defaultDir = "./catalog"
@@ -51,12 +53,12 @@ type Catalog struct {
 // needs to route one upstream call. Operator-facing context (description,
 // modality, pricing) lives in yaml comments or in external systems — not here.
 type Model struct {
-	ID         string `yaml:"id"`
-	Vendor     string `yaml:"vendor"`
-	Protocol   string `yaml:"protocol"` // openai | anthropic
-	BaseURL    string `yaml:"base_url"`
-	AuthEnv    string `yaml:"auth_env"`    // env var *name*; value is read by the factory at adapter construction
-	AuthScheme string `yaml:"auth_scheme"` // bearer | x-api-key
+	ID         string             `yaml:"id"`
+	Vendor     string             `yaml:"vendor"`
+	Protocol   llmtypes.Protocol  `yaml:"protocol"` // see llmtypes.AllProtocols
+	BaseURL    string             `yaml:"base_url"`
+	AuthEnv    string             `yaml:"auth_env"`    // env var *name*; empty defaults to LLMGATE_<VENDOR>_API_KEY
+	AuthScheme string             `yaml:"auth_scheme"` // bearer | x-api-key
 }
 
 // Alias maps a logical name (e.g. "smart") to an ordered list of concrete
@@ -169,12 +171,11 @@ func validateModel(m *Model) error {
 	if m.Vendor == "" {
 		return fmt.Errorf("model %q: vendor is required", m.ID)
 	}
-	switch m.Protocol {
-	case "openai", "anthropic":
-	case "":
+	if m.Protocol == "" {
 		return fmt.Errorf("model %q: protocol is required", m.ID)
-	default:
-		return fmt.Errorf("model %q: protocol %q must be openai|anthropic", m.ID, m.Protocol)
+	}
+	if !m.Protocol.Valid() {
+		return fmt.Errorf("model %q: protocol %q must be one of %s", m.ID, m.Protocol, llmtypes.JoinProtocols("|"))
 	}
 	if m.BaseURL == "" {
 		return fmt.Errorf("model %q: base_url is required", m.ID)
@@ -189,9 +190,8 @@ func validateModel(m *Model) error {
 	if u.Host == "" {
 		return fmt.Errorf("model %q: base_url %q is missing host", m.ID, m.BaseURL)
 	}
-	if m.AuthEnv == "" {
-		return fmt.Errorf("model %q: auth_env is required", m.ID)
-	}
+	// auth_env is optional — main.go defaults to LLMGATE_<VENDOR>_API_KEY
+	// when omitted, so most yaml files do not need to repeat it.
 	switch m.AuthScheme {
 	case "bearer", "x-api-key":
 	case "":

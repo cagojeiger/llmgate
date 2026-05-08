@@ -221,18 +221,23 @@ auth_scheme: bearer
 	}
 }
 
-func TestLoadDir_MissingRequiredField(t *testing.T) {
+// auth_env is optional in yaml — main.go falls back to LLMGATE_<VENDOR>_API_KEY
+// when it's omitted. The catalog loader must accept models without it.
+func TestLoadDir_AuthEnvOptional(t *testing.T) {
 	dir := writeCatalogDir(t,
-		map[string]string{"bad.yaml": `id: bad
+		map[string]string{"ok.yaml": `id: ok
 vendor: x
 protocol: openai
 base_url: https://example.test/v1
 auth_scheme: bearer
-`}, // missing auth_env
+`},
 		nil)
-	_, err := LoadDir(dir)
-	if err == nil || !strings.Contains(err.Error(), "auth_env") {
-		t.Fatalf("error = %v, want missing auth_env error", err)
+	cat, err := LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir error = %v, want nil (auth_env should be optional)", err)
+	}
+	if got := cat.Models["ok"].AuthEnv; got != "" {
+		t.Fatalf("AuthEnv = %q, want empty", got)
 	}
 }
 

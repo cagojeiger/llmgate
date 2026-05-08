@@ -12,16 +12,12 @@ permissions:
   contents: write
   pull-requests: write
 
-env:
-  # Node 20 actions deprecation — opt into Node 24 until checkout/setup-go ship v6+.
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-
 jobs:
   refresh:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Record fresh fixtures
         env:
@@ -80,7 +76,7 @@ jobs:
       - name: Open PR
         id: pr
         if: steps.diff.outputs.changed_count != '0'
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v8
         with:
           branch: chore/refresh-cassette-fixtures
           delete-branch: true

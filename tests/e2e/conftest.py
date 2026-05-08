@@ -163,3 +163,42 @@ def field(obj, name):
         return val
     extra = getattr(obj, "model_extra", None) or {}
     return extra.get(name)
+
+
+import re
+
+
+def discover_catalog_models() -> list[str]:
+    """Read every catalog/models/*.yaml and return their declared ids, sorted.
+
+    Avoids a PyYAML dependency by extracting the top-level ``id:`` line per
+    file. Tests use this so adding a model under catalog/ automatically
+    enrolls it in the matrix, with no test-file edit required.
+    """
+    models_dir = REPO_ROOT / "catalog" / "models"
+    pattern = re.compile(r"^id:\s*(\S+)", re.MULTILINE)
+    ids: list[str] = []
+    for path in sorted(models_dir.glob("*.yaml")):
+        match = pattern.search(path.read_text())
+        if match:
+            ids.append(match.group(1))
+    return ids
+
+
+def raw_consumer_key(consumer: str = "example", index: int = 1) -> str:
+    """Extract a documented raw client key from consumers/<consumer>.yaml.
+
+    consumers/*.yaml stores sha256 hashes only; the matching raw keys are
+    documented in the file's comment block (``# raw key #1: ...``) for
+    test fixtures. Tests use this helper so refreshed yaml comments and
+    rotated keys flow through without test edits.
+    """
+    path = REPO_ROOT / "consumers" / f"{consumer}.yaml"
+    text = path.read_text()
+    match = re.search(rf"raw key #{index}:\s*(\S+)", text)
+    if not match:
+        raise RuntimeError(
+            f"{path}: missing '# raw key #{index}: ...' comment — "
+            "fixtures need a documented raw key alongside the sha256 hash"
+        )
+    return match.group(1)

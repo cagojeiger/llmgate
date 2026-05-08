@@ -6,13 +6,12 @@ import (
 	"io"
 	"log/slog"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"llmgate/internal/catalog"
 	"llmgate/internal/llmtypes"
-	"llmgate/internal/streaming"
+	"llmgate/internal/providers/fake"
 )
 
 // testPolicy mirrors the production defaults so the Service behaves the
@@ -49,7 +48,7 @@ func TestService_NilProviderFailsFast(t *testing.T) {
 
 func TestService_Both(t *testing.T) {
 	cat := stubCatalog(t)
-	models := buildTestModels(t, cat, &fakeProvider{name: "openai"}, &fakeProvider{name: "anthropic"})
+	models := buildTestModels(t, cat, fake.NewProvider("openai"), fake.NewProvider("anthropic"))
 	aliases := buildTestAliases(cat)
 	svc, err := NewService(models, aliases, testPolicy, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
@@ -62,7 +61,7 @@ func TestService_Both(t *testing.T) {
 
 func TestService_UnknownModel(t *testing.T) {
 	cat := stubCatalog(t)
-	models := buildTestModels(t, cat, &fakeProvider{name: "openai"}, &fakeProvider{name: "anthropic"})
+	models := buildTestModels(t, cat, fake.NewProvider("openai"), fake.NewProvider("anthropic"))
 	aliases := buildTestAliases(cat)
 	svc, err := NewService(models, aliases, testPolicy, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
@@ -86,8 +85,8 @@ func TestService_UnknownModel(t *testing.T) {
 }
 
 func TestService_Dispatch(t *testing.T) {
-	openAI := &fakeProvider{name: "openai"}
-	anthropic := &fakeProvider{name: "anthropic"}
+	openAI := fake.NewProvider("openai")
+	anthropic := fake.NewProvider("anthropic")
 	cat := stubCatalog(t)
 	models := buildTestModels(t, cat, openAI, anthropic)
 	aliases := buildTestAliases(cat)
@@ -100,11 +99,11 @@ func TestService_Dispatch(t *testing.T) {
 	if _, err := svc.Complete(context.Background(), req); err != nil {
 		t.Fatalf("Complete() error = %v", err)
 	}
-	if openAI.completeCalls != 1 || openAI.lastCompleteReq.Model != "kimi-k2.6" {
-		t.Fatalf("openai Complete calls = %d, model = %q, want 1 / kimi-k2.6", openAI.completeCalls, openAI.lastCompleteReq.Model)
+	if openAI.CompleteCalls() != 1 || openAI.LastCompleteRequest().Model != "kimi-k2.6" {
+		t.Fatalf("openai Complete calls = %d, model = %q, want 1 / kimi-k2.6", openAI.CompleteCalls(), openAI.LastCompleteRequest().Model)
 	}
-	if anthropic.completeCalls != 0 {
-		t.Fatalf("anthropic Complete calls = %d, want 0", anthropic.completeCalls)
+	if anthropic.CompleteCalls() != 0 {
+		t.Fatalf("anthropic Complete calls = %d, want 0", anthropic.CompleteCalls())
 	}
 
 	streamReq := &llmtypes.Request{Model: "minimax-m2.5", Messages: []llmtypes.Message{{Role: "user", Content: "hi"}}}
@@ -118,13 +117,13 @@ func TestService_Dispatch(t *testing.T) {
 	if len(streamRes.Attempts) != 1 || streamRes.Attempts[0].Model != "minimax-m2.5" {
 		t.Fatalf("stream attempts = %+v, want one minimax-m2.5", streamRes.Attempts)
 	}
-	if anthropic.streamCalls != 1 || anthropic.lastStreamReq.Model != "minimax-m2.5" {
-		t.Fatalf("anthropic stream calls = %d, model = %q, want 1 / minimax-m2.5", anthropic.streamCalls, anthropic.lastStreamReq.Model)
+	if anthropic.StreamCalls() != 1 || anthropic.LastStreamRequest().Model != "minimax-m2.5" {
+		t.Fatalf("anthropic stream calls = %d, model = %q, want 1 / minimax-m2.5", anthropic.StreamCalls(), anthropic.LastStreamRequest().Model)
 	}
 }
 
 func TestService_AliasFallback_PrimarySucceeds(t *testing.T) {
-	openAI := &fakeProvider{name: "openai"}
+	openAI := fake.NewProvider("openai")
 	svc := mustService(t, fallbackCatalog(t), openAI, nil)
 
 	result, err := svc.Complete(context.Background(), &llmtypes.Request{Model: "coder", Messages: []llmtypes.Message{{Role: "user", Content: "hi"}}})
@@ -137,8 +136,8 @@ func TestService_AliasFallback_PrimarySucceeds(t *testing.T) {
 	if result.Vendor != "openai" || result.ModelUsed != "deepseek-v4-pro" {
 		t.Errorf("Vendor/ModelUsed = %q/%q, want openai/deepseek-v4-pro", result.Vendor, result.ModelUsed)
 	}
-	if openAI.completeCalls != 1 {
-		t.Errorf("completeCalls = %d, want 1 (no fallback needed)", openAI.completeCalls)
+	if openAI.CompleteCalls() != 1 {
+		t.Errorf("completeCalls = %d, want 1 (no fallback needed)", openAI.CompleteCalls())
 	}
 	if len(result.Attempts) != 1 {
 		t.Fatalf("attempts = %d, want 1", len(result.Attempts))
@@ -150,10 +149,10 @@ func TestService_AliasFallback_PrimarySucceeds(t *testing.T) {
 
 func TestService_AliasFallback_RetriesOnEligibleError(t *testing.T) {
 	// Primary fails with KindRateLimit (eligible) → next chain entry tried.
-	openAI := &fakeProvider{name: "openai"}
-	openAI.errors = map[string]*llmtypes.Error{
-		"deepseek-v4-pro": {ErrorKind: llmtypes.KindRateLimit, Message: "throttled", StatusCode: 429},
-	}
+	openAI := fake.NewProvider("openai", fake.WithCompleteErrorOnModel(
+		"deepseek-v4-pro",
+		&llmtypes.Error{ErrorKind: llmtypes.KindRateLimit, Message: "throttled", StatusCode: 429},
+	))
 	svc := mustService(t, fallbackCatalog(t), openAI, nil)
 
 	result, err := svc.Complete(context.Background(), &llmtypes.Request{Model: "coder", Messages: []llmtypes.Message{{Role: "user", Content: "hi"}}})
@@ -178,10 +177,10 @@ func TestService_AliasFallback_RetriesOnEligibleError(t *testing.T) {
 }
 
 func TestService_StreamAliasFallback_RetriesOnEligiblePreStreamError(t *testing.T) {
-	openAI := &fakeProvider{name: "openai"}
-	openAI.streamErrors = map[string]*llmtypes.Error{
-		"deepseek-v4-pro": {ErrorKind: llmtypes.KindRateLimit, Message: "stream throttled", StatusCode: 429},
-	}
+	openAI := fake.NewProvider("openai", fake.WithStreamErrorOnModel(
+		"deepseek-v4-pro",
+		&llmtypes.Error{ErrorKind: llmtypes.KindRateLimit, Message: "stream throttled", StatusCode: 429},
+	))
 	svc := mustService(t, fallbackCatalog(t), openAI, nil)
 
 	result, err := svc.CompleteStream(context.Background(), &llmtypes.Request{Model: "coder", Messages: []llmtypes.Message{{Role: "user", Content: "hi"}}})
@@ -194,8 +193,8 @@ func TestService_StreamAliasFallback_RetriesOnEligiblePreStreamError(t *testing.
 	if result.ModelUsed != "deepseek-v4-flash" {
 		t.Errorf("ModelUsed = %q, want deepseek-v4-flash", result.ModelUsed)
 	}
-	if openAI.streamCalls != 2 || openAI.lastStreamReq.Model != "deepseek-v4-flash" {
-		t.Fatalf("stream calls/model = %d/%q, want 2/deepseek-v4-flash", openAI.streamCalls, openAI.lastStreamReq.Model)
+	if openAI.StreamCalls() != 2 || openAI.LastStreamRequest().Model != "deepseek-v4-flash" {
+		t.Fatalf("stream calls/model = %d/%q, want 2/deepseek-v4-flash", openAI.StreamCalls(), openAI.LastStreamRequest().Model)
 	}
 	if len(result.Attempts) != 2 {
 		t.Fatalf("attempts = %d, want 2", len(result.Attempts))
@@ -210,10 +209,10 @@ func TestService_StreamAliasFallback_RetriesOnEligiblePreStreamError(t *testing.
 
 func TestService_AliasFallback_BadRequestStopsImmediately(t *testing.T) {
 	// Primary fails with KindBadRequest (not eligible) → return immediately.
-	openAI := &fakeProvider{name: "openai"}
-	openAI.errors = map[string]*llmtypes.Error{
-		"deepseek-v4-pro": {ErrorKind: llmtypes.KindBadRequest, Message: "malformed"},
-	}
+	openAI := fake.NewProvider("openai", fake.WithCompleteErrorOnModel(
+		"deepseek-v4-pro",
+		&llmtypes.Error{ErrorKind: llmtypes.KindBadRequest, Message: "malformed"},
+	))
 	svc := mustService(t, fallbackCatalog(t), openAI, nil)
 
 	result, err := svc.Complete(context.Background(), &llmtypes.Request{Model: "coder", Messages: []llmtypes.Message{{Role: "user", Content: "hi"}}})
@@ -224,8 +223,8 @@ func TestService_AliasFallback_BadRequestStopsImmediately(t *testing.T) {
 	if !errors.As(err, &perr) || perr.ErrorKind != llmtypes.KindBadRequest {
 		t.Fatalf("err = %v, want KindBadRequest", err)
 	}
-	if openAI.completeCalls != 1 {
-		t.Errorf("completeCalls = %d, want 1 (no fallback for non-eligible)", openAI.completeCalls)
+	if openAI.CompleteCalls() != 1 {
+		t.Errorf("completeCalls = %d, want 1 (no fallback for non-eligible)", openAI.CompleteCalls())
 	}
 	if len(result.Attempts) != 1 {
 		t.Fatalf("attempts = %d, want 1", len(result.Attempts))
@@ -233,10 +232,10 @@ func TestService_AliasFallback_BadRequestStopsImmediately(t *testing.T) {
 }
 
 func TestService_StreamAliasFallback_BadRequestStopsImmediately(t *testing.T) {
-	openAI := &fakeProvider{name: "openai"}
-	openAI.streamErrors = map[string]*llmtypes.Error{
-		"deepseek-v4-pro": {ErrorKind: llmtypes.KindBadRequest, Message: "malformed stream"},
-	}
+	openAI := fake.NewProvider("openai", fake.WithStreamErrorOnModel(
+		"deepseek-v4-pro",
+		&llmtypes.Error{ErrorKind: llmtypes.KindBadRequest, Message: "malformed stream"},
+	))
 	svc := mustService(t, fallbackCatalog(t), openAI, nil)
 
 	result, err := svc.CompleteStream(context.Background(), &llmtypes.Request{Model: "coder", Messages: []llmtypes.Message{{Role: "user", Content: "hi"}}})
@@ -247,8 +246,8 @@ func TestService_StreamAliasFallback_BadRequestStopsImmediately(t *testing.T) {
 	if !errors.As(err, &perr) || perr.ErrorKind != llmtypes.KindBadRequest {
 		t.Fatalf("err = %v, want KindBadRequest", err)
 	}
-	if openAI.streamCalls != 1 {
-		t.Errorf("streamCalls = %d, want 1 (no fallback for non-eligible)", openAI.streamCalls)
+	if openAI.StreamCalls() != 1 {
+		t.Errorf("streamCalls = %d, want 1 (no fallback for non-eligible)", openAI.StreamCalls())
 	}
 	if len(result.Attempts) != 1 || result.Attempts[0].ErrorKind != llmtypes.KindBadRequest {
 		t.Fatalf("attempts = %+v, want one bad_request attempt", result.Attempts)
@@ -256,8 +255,9 @@ func TestService_StreamAliasFallback_BadRequestStopsImmediately(t *testing.T) {
 }
 
 func TestService_AliasFallback_AllExhausted(t *testing.T) {
-	openAI := &fakeProvider{name: "openai"}
-	openAI.errorAll = &llmtypes.Error{ErrorKind: llmtypes.KindUpstream, Message: "boom", StatusCode: 502}
+	openAI := fake.NewProvider("openai", fake.WithCompleteError(
+		&llmtypes.Error{ErrorKind: llmtypes.KindUpstream, Message: "boom", StatusCode: 502},
+	))
 	svc := mustService(t, fallbackCatalog(t), openAI, nil)
 
 	result, err := svc.Complete(context.Background(), &llmtypes.Request{Model: "coder", Messages: []llmtypes.Message{{Role: "user", Content: "hi"}}})
@@ -275,10 +275,10 @@ func TestService_AliasFallback_AllExhausted(t *testing.T) {
 }
 
 func TestService_StreamSkipsOpenCircuitModel(t *testing.T) {
-	openAI := &fakeProvider{name: "openai"}
-	openAI.errors = map[string]*llmtypes.Error{
-		"deepseek-v4-pro": {ErrorKind: llmtypes.KindUpstream, Message: "boom"},
-	}
+	openAI := fake.NewProvider("openai", fake.WithCompleteErrorOnModel(
+		"deepseek-v4-pro",
+		&llmtypes.Error{ErrorKind: llmtypes.KindUpstream, Message: "boom"},
+	))
 	svc := mustService(t, fallbackCatalog(t), openAI, nil)
 
 	for i := 0; i < 3; i++ {
@@ -295,8 +295,8 @@ func TestService_StreamSkipsOpenCircuitModel(t *testing.T) {
 	if result.ModelUsed != "deepseek-v4-flash" {
 		t.Fatalf("ModelUsed = %q, want deepseek-v4-flash (primary circuit open)", result.ModelUsed)
 	}
-	if openAI.streamCalls != 1 || openAI.lastStreamReq.Model != "deepseek-v4-flash" {
-		t.Fatalf("stream calls/model = %d/%q, want 1/deepseek-v4-flash", openAI.streamCalls, openAI.lastStreamReq.Model)
+	if openAI.StreamCalls() != 1 || openAI.LastStreamRequest().Model != "deepseek-v4-flash" {
+		t.Fatalf("stream calls/model = %d/%q, want 1/deepseek-v4-flash", openAI.StreamCalls(), openAI.LastStreamRequest().Model)
 	}
 	if len(result.Attempts) != 1 || result.Attempts[0].Model != "deepseek-v4-flash" {
 		t.Fatalf("attempts = %+v, want one flash attempt", result.Attempts)
@@ -304,10 +304,10 @@ func TestService_StreamSkipsOpenCircuitModel(t *testing.T) {
 }
 
 func TestService_StreamPreStreamFailuresOpenCircuit(t *testing.T) {
-	openAI := &fakeProvider{name: "openai"}
-	openAI.streamErrors = map[string]*llmtypes.Error{
-		"deepseek-v4-pro": {ErrorKind: llmtypes.KindUpstream, Message: "stream setup failed"},
-	}
+	openAI := fake.NewProvider("openai", fake.WithStreamErrorOnModel(
+		"deepseek-v4-pro",
+		&llmtypes.Error{ErrorKind: llmtypes.KindUpstream, Message: "stream setup failed"},
+	))
 	svc := mustService(t, fallbackCatalog(t), openAI, nil)
 
 	for i := 0; i < 3; i++ {
@@ -319,16 +319,16 @@ func TestService_StreamPreStreamFailuresOpenCircuit(t *testing.T) {
 			t.Fatalf("run %d ModelUsed = %q, want deepseek-v4-flash", i, result.ModelUsed)
 		}
 	}
-	if openAI.streamCalls != 6 {
-		t.Fatalf("after 3 runs streamCalls = %d, want 6", openAI.streamCalls)
+	if openAI.StreamCalls() != 6 {
+		t.Fatalf("after 3 runs streamCalls = %d, want 6", openAI.StreamCalls())
 	}
 
-	beforeSkip := openAI.streamCalls
+	beforeSkip := openAI.StreamCalls()
 	result, err := svc.CompleteStream(context.Background(), &llmtypes.Request{Model: "coder", Messages: []llmtypes.Message{{Role: "user", Content: "x"}}})
 	if err != nil {
 		t.Fatalf("fourth CompleteStream: %v", err)
 	}
-	if added := openAI.streamCalls - beforeSkip; added != 1 {
+	if added := openAI.StreamCalls() - beforeSkip; added != 1 {
 		t.Fatalf("fourth run added %d stream calls, want 1 (primary skipped)", added)
 	}
 	if result.ModelUsed != "deepseek-v4-flash" {
@@ -337,12 +337,7 @@ func TestService_StreamPreStreamFailuresOpenCircuit(t *testing.T) {
 }
 
 func TestService_StreamEmptyFirstEventFallsBack(t *testing.T) {
-	openAI := &fakeProvider{
-		name: "openai",
-		streamEmptyEOF: map[string]bool{
-			"deepseek-v4-pro": true,
-		},
-	}
+	openAI := fake.NewProvider("openai", fake.WithStreamEmptyEOFOnModel("deepseek-v4-pro"))
 	svc := mustService(t, fallbackCatalog(t), openAI, nil)
 
 	result, err := svc.CompleteStream(context.Background(), &llmtypes.Request{Model: "coder", Messages: []llmtypes.Message{{Role: "user", Content: "x"}}})
@@ -364,10 +359,10 @@ func TestService_CircuitOpensAfterRepeatedFailures(t *testing.T) {
 	// Only the primary fails — secondary always succeeds. Three failed
 	// runs trip the breaker on the primary; the fourth call must skip
 	// the primary and hit secondary directly.
-	openAI := &fakeProvider{name: "openai"}
-	openAI.errors = map[string]*llmtypes.Error{
-		"deepseek-v4-pro": {ErrorKind: llmtypes.KindUpstream, Message: "boom"},
-	}
+	openAI := fake.NewProvider("openai", fake.WithCompleteErrorOnModel(
+		"deepseek-v4-pro",
+		&llmtypes.Error{ErrorKind: llmtypes.KindUpstream, Message: "boom"},
+	))
 	svc := mustService(t, fallbackCatalog(t), openAI, nil)
 
 	for i := 0; i < 3; i++ {
@@ -377,26 +372,21 @@ func TestService_CircuitOpensAfterRepeatedFailures(t *testing.T) {
 		}
 	}
 	// 3 runs × 2 calls (pro fail + flash success) = 6 calls.
-	if openAI.completeCalls != 6 {
-		t.Fatalf("after 3 runs completeCalls = %d, want 6", openAI.completeCalls)
+	if openAI.CompleteCalls() != 6 {
+		t.Fatalf("after 3 runs completeCalls = %d, want 6", openAI.CompleteCalls())
 	}
 
 	// Fourth run: primary breaker is open → only flash is called (1 call).
-	beforeSkip := openAI.completeCalls
+	beforeSkip := openAI.CompleteCalls()
 	_, _ = svc.Complete(context.Background(), &llmtypes.Request{Model: "coder", Messages: []llmtypes.Message{{Role: "user", Content: "x"}}})
-	added := openAI.completeCalls - beforeSkip
+	added := openAI.CompleteCalls() - beforeSkip
 	if added != 1 {
 		t.Errorf("fourth run added %d calls, want 1 (primary skipped)", added)
 	}
 }
 
 func TestService_CompleteTimeoutFallsBack(t *testing.T) {
-	openAI := &fakeProvider{
-		name: "openai",
-		completeDelays: map[string]time.Duration{
-			"deepseek-v4-pro": 50 * time.Millisecond,
-		},
-	}
+	openAI := fake.NewProvider("openai", fake.WithCompleteDelay("deepseek-v4-pro", 50*time.Millisecond))
 	policy := testPolicy
 	policy.CompleteTimeout = time.Millisecond
 	svc := mustServiceWithPolicy(t, fallbackCatalog(t), openAI, nil, policy)
@@ -417,12 +407,7 @@ func TestService_CompleteTimeoutFallsBack(t *testing.T) {
 }
 
 func TestService_RequestTimeoutStopsChain(t *testing.T) {
-	openAI := &fakeProvider{
-		name: "openai",
-		completeDelays: map[string]time.Duration{
-			"deepseek-v4-pro": 50 * time.Millisecond,
-		},
-	}
+	openAI := fake.NewProvider("openai", fake.WithCompleteDelay("deepseek-v4-pro", 50*time.Millisecond))
 	policy := testPolicy
 	policy.CompleteTimeout = time.Minute
 	svc := mustServiceWithPolicy(t, fallbackCatalog(t), openAI, nil, policy)
@@ -439,8 +424,8 @@ func TestService_RequestTimeoutStopsChain(t *testing.T) {
 	if !errors.As(err, &perr) || perr.ErrorKind != llmtypes.KindTimeout {
 		t.Fatalf("err = %v, want provider timeout", err)
 	}
-	if openAI.completeCalls != 1 {
-		t.Fatalf("completeCalls = %d, want 1 (request budget exhausted before fallback)", openAI.completeCalls)
+	if openAI.CompleteCalls() != 1 {
+		t.Fatalf("completeCalls = %d, want 1 (request budget exhausted before fallback)", openAI.CompleteCalls())
 	}
 	if len(result.Attempts) != 1 || result.Attempts[0].ErrorKind != llmtypes.KindTimeout {
 		t.Fatalf("attempts = %+v, want one timeout attempt", result.Attempts)
@@ -448,7 +433,7 @@ func TestService_RequestTimeoutStopsChain(t *testing.T) {
 }
 
 func TestService_RawModelStillWorks(t *testing.T) {
-	openAI := &fakeProvider{name: "openai"}
+	openAI := fake.NewProvider("openai")
 	svc := mustService(t, fallbackCatalog(t), openAI, nil)
 
 	result, err := svc.Complete(context.Background(), &llmtypes.Request{Model: "kimi-k2.6", Messages: []llmtypes.Message{{Role: "user", Content: "hi"}}})
@@ -480,12 +465,12 @@ func mustServiceWithPolicy(t *testing.T, cat *catalog.Catalog, openAI llmtypes.P
 // picking the openai or anthropic provider per the catalog model's
 // Protocol field. Tests use this in place of the production
 // buildRouterInputs (which lives in cmd/llmgate). nil anth gets a
-// stub fakeProvider so tests that only care about the openai side
+// stub fake provider so tests that only care about the openai side
 // don't have to construct one.
 func buildTestModels(t *testing.T, cat *catalog.Catalog, openAI, anth llmtypes.Provider) Models {
 	t.Helper()
 	if anth == nil {
-		anth = &fakeProvider{name: "anthropic"}
+		anth = fake.NewProvider("anthropic")
 	}
 	m := make(Models, len(cat.Models))
 	for id, mc := range cat.Models {
@@ -554,120 +539,3 @@ func stubCatalog(t *testing.T) *catalog.Catalog {
 	return cat
 }
 
-type fakeProvider struct {
-	name            string
-	completeCalls   int
-	streamCalls     int
-	lastCompleteReq *llmtypes.Request
-	lastStreamReq   *llmtypes.Request
-
-	// per-model and global error simulation. Per-model takes precedence.
-	errors           map[string]*llmtypes.Error
-	errorAll         *llmtypes.Error
-	streamErrors     map[string]*llmtypes.Error
-	streamErrorAll   *llmtypes.Error
-	completeDelays   map[string]time.Duration
-	streamDelays     map[string]time.Duration
-	streamRecvDelays map[string]time.Duration
-	streamEmptyEOF   map[string]bool
-}
-
-func (p *fakeProvider) Name() string { return p.name }
-
-func (p *fakeProvider) Complete(ctx context.Context, req *llmtypes.Request) (*llmtypes.Response, error) {
-	p.completeCalls++
-	p.lastCompleteReq = req
-	if p.completeDelays != nil {
-		if d := p.completeDelays[req.Model]; d > 0 {
-			select {
-			case <-time.After(d):
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-		}
-	}
-	if p.errors != nil {
-		if e, ok := p.errors[req.Model]; ok {
-			return nil, e
-		}
-	}
-	if p.errorAll != nil {
-		return nil, p.errorAll
-	}
-	return &llmtypes.Response{Model: req.Model, Choices: []llmtypes.Choice{{Index: 0, Message: llmtypes.Message{Role: "assistant", Content: "ok"}}}}, nil
-}
-
-func (p *fakeProvider) CompleteStream(ctx context.Context, req *llmtypes.Request) (llmtypes.Stream, error) {
-	p.streamCalls++
-	p.lastStreamReq = req
-	if p.streamDelays != nil {
-		if d := p.streamDelays[req.Model]; d > 0 {
-			select {
-			case <-time.After(d):
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-		}
-	}
-	if p.streamErrors != nil {
-		if e, ok := p.streamErrors[req.Model]; ok {
-			return nil, e
-		}
-	}
-	if p.streamErrorAll != nil {
-		return nil, p.streamErrorAll
-	}
-	events := []*llmtypes.Event{
-		{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: "ok"}}}},
-	}
-	if p.streamEmptyEOF[req.Model] {
-		events = nil
-	}
-	raw := &fakeStream{
-		events:    events,
-		recvDelay: p.streamRecvDelays[req.Model],
-	}
-	return streaming.ValidateStreamStart(ctx, raw)
-}
-
-type fakeStream struct {
-	mu        sync.Mutex
-	closeOnce sync.Once
-	done      chan struct{}
-	events    []*llmtypes.Event
-	cursor    int
-	recvDelay time.Duration
-}
-
-func (s *fakeStream) Recv() (*llmtypes.Event, error) {
-	if s.recvDelay > 0 {
-		select {
-		case <-time.After(s.recvDelay):
-		case <-s.doneChan():
-			return nil, llmtypes.ErrStreamDone
-		}
-	}
-	if s.cursor < len(s.events) {
-		event := s.events[s.cursor]
-		s.cursor++
-		return event, nil
-	}
-	return nil, llmtypes.ErrStreamDone
-}
-
-func (s *fakeStream) Close() error {
-	done := s.doneChan()
-	s.closeOnce.Do(func() { close(done) })
-	return nil
-}
-
-func (s *fakeStream) Summary() *llmtypes.Summary { return &llmtypes.Summary{} }
-
-func (s *fakeStream) doneChan() chan struct{} {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.done == nil {
-		s.done = make(chan struct{})
-	}
-	return s.done
-}

@@ -15,6 +15,7 @@ import (
 	"llmgate/internal/audit"
 	"llmgate/internal/llmtypes"
 	"llmgate/internal/llmrouter"
+	"llmgate/internal/providers/fake"
 	"llmgate/internal/streaming"
 )
 
@@ -202,15 +203,15 @@ func TestAdoptStreamSummary_PropagatesRecvErrorKindToAttempt(t *testing.T) {
 
 func TestHandler_Stream_NormalEOF(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
-	streamObj := &fakeStream{
-		events: []*llmtypes.Event{
+	streamObj := fake.NewStream(
+		fake.WithEvents([]*llmtypes.Event{
 			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: "hello"}}}},
 			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: " world"}}}},
-		},
-		summary: &llmtypes.Summary{
+		}),
+		fake.WithSummary(&llmtypes.Summary{
 			Usage: &llmtypes.Usage{PromptTokens: 3, CompletionTokens: 2, TotalTokens: 5},
-		},
-	}
+		}),
+	)
 	r := &fakeService{
 		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
 			return &llmrouter.RouteResult{
@@ -242,7 +243,7 @@ func TestHandler_Stream_NormalEOF(t *testing.T) {
 	if !strings.HasSuffix(w.Body.String(), "data: [DONE]\n\n") {
 		t.Errorf("body must end with [DONE] frame: %q", w.Body.String())
 	}
-	if got := streamObj.closedCount(); got != 1 {
+	if got := streamObj.Closed(); got != 1 {
 		t.Errorf("Stream.Close() calls = %d, want 1", got)
 	}
 
@@ -269,13 +270,13 @@ func TestHandler_Stream_NormalEOF(t *testing.T) {
 
 func TestHandler_Stream_RecvError_PropagatesErrorKind(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
-	streamObj := &fakeStream{
-		events: []*llmtypes.Event{
+	streamObj := fake.NewStream(
+		fake.WithEvents([]*llmtypes.Event{
 			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: "partial"}}}},
-		},
-		recvErr: &llmtypes.Error{ErrorKind: llmtypes.KindUpstream, Message: "boom mid-stream"},
-		summary: &llmtypes.Summary{},
-	}
+		}),
+		fake.WithRecvErr(&llmtypes.Error{ErrorKind: llmtypes.KindUpstream, Message: "boom mid-stream"}),
+		fake.WithSummary(&llmtypes.Summary{}),
+	)
 	r := &fakeService{
 		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
 			return &llmrouter.RouteResult{
@@ -322,10 +323,10 @@ func TestHandler_Stream_RecvError_PropagatesErrorKind(t *testing.T) {
 
 func TestHandler_Stream_IdleTimeoutSendsError(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
-	streamObj := &fakeStream{
-		recvDelay: 50 * time.Millisecond,
-		summary:   &llmtypes.Summary{},
-	}
+	streamObj := fake.NewStream(
+		fake.WithRecvDelay(50*time.Millisecond),
+		fake.WithSummary(&llmtypes.Summary{}),
+	)
 	r := &fakeService{
 		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
 			return &llmrouter.RouteResult{
@@ -365,17 +366,17 @@ func TestHandler_Stream_IdleTimeoutSendsError(t *testing.T) {
 	if len(got.Attempts) != 1 || got.Attempts[0].ErrorKind != llmtypes.KindTimeout {
 		t.Errorf("Attempts[0].ErrorKind not propagated: %+v", got.Attempts)
 	}
-	if streamObj.closedCount() == 0 {
+	if streamObj.Closed() == 0 {
 		t.Errorf("Stream.Close() calls = 0, want at least 1")
 	}
 }
 
 func TestHandler_Stream_RequestTimeoutSendsError(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
-	streamObj := &fakeStream{
-		recvDelay: 50 * time.Millisecond,
-		summary:   &llmtypes.Summary{},
-	}
+	streamObj := fake.NewStream(
+		fake.WithRecvDelay(50*time.Millisecond),
+		fake.WithSummary(&llmtypes.Summary{}),
+	)
 	r := &fakeService{
 		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
 			return &llmrouter.RouteResult{
@@ -419,10 +420,10 @@ func TestHandler_Stream_RequestTimeoutSendsError(t *testing.T) {
 
 func TestHandler_Stream_ContextCanceledRecordsClientClosed(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
-	streamObj := &fakeStream{
-		recvDelay: 50 * time.Millisecond,
-		summary:   &llmtypes.Summary{},
-	}
+	streamObj := fake.NewStream(
+		fake.WithRecvDelay(50*time.Millisecond),
+		fake.WithSummary(&llmtypes.Summary{}),
+	)
 	r := &fakeService{
 		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
 			return &llmrouter.RouteResult{
@@ -450,7 +451,7 @@ func TestHandler_Stream_ContextCanceledRecordsClientClosed(t *testing.T) {
 	if got.ErrorKind != llmtypes.KindClientClosed {
 		t.Fatalf("ErrorKind = %q, want client_closed", got.ErrorKind)
 	}
-	if streamObj.closedCount() == 0 {
+	if streamObj.Closed() == 0 {
 		t.Errorf("Stream.Close() calls = 0, want at least 1")
 	}
 }
@@ -461,14 +462,14 @@ func TestHandler_Stream_ContextCanceledRecordsClientClosed(t *testing.T) {
 // upstream stream — leaving later events un-consumed.
 func TestHandler_Stream_ClientDisconnect_MidStream(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
-	streamObj := &fakeStream{
-		events: []*llmtypes.Event{
+	streamObj := fake.NewStream(
+		fake.WithEvents([]*llmtypes.Event{
 			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: "one"}}}},
 			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: " two"}}}},
 			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: " three"}}}},
-		},
-		summary: &llmtypes.Summary{},
-	}
+		}),
+		fake.WithSummary(&llmtypes.Summary{}),
+	)
 	r := &fakeService{
 		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
 			return &llmrouter.RouteResult{
@@ -495,10 +496,10 @@ func TestHandler_Stream_ClientDisconnect_MidStream(t *testing.T) {
 	}
 	// Loop runs two Recvs: events[0] sends OK, events[1] send fails, handler
 	// bails. events[2] must remain unread.
-	if streamObj.cursor != 2 {
-		t.Errorf("stream cursor = %d, want 2 (two Recv calls before bail-out)", streamObj.cursor)
+	if streamObj.Cursor() != 2 {
+		t.Errorf("stream cursor = %d, want 2 (two Recv calls before bail-out)", streamObj.Cursor())
 	}
-	if streamObj.closedCount() == 0 {
+	if streamObj.Closed() == 0 {
 		t.Errorf("Stream.Close() not called (defer must run)")
 	}
 }
@@ -509,12 +510,12 @@ func TestHandler_Stream_ClientDisconnect_MidStream(t *testing.T) {
 // complete even though upstream finished cleanly.
 func TestHandler_Stream_ClientDisconnect_OnDone(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
-	streamObj := &fakeStream{
-		events: []*llmtypes.Event{
+	streamObj := fake.NewStream(
+		fake.WithEvents([]*llmtypes.Event{
 			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: "only"}}}},
-		},
-		summary: &llmtypes.Summary{},
-	}
+		}),
+		fake.WithSummary(&llmtypes.Summary{}),
+	)
 	r := &fakeService{
 		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
 			return &llmrouter.RouteResult{
@@ -546,13 +547,13 @@ func TestHandler_Stream_ClientDisconnect_OnDone(t *testing.T) {
 // just the first event.
 func TestHandler_Stream_ClientDisconnect_OnFirstEvent(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
-	streamObj := &fakeStream{
-		events: []*llmtypes.Event{
+	streamObj := fake.NewStream(
+		fake.WithEvents([]*llmtypes.Event{
 			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: "first"}}}},
 			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: "later"}}}},
-		},
-		summary: &llmtypes.Summary{},
-	}
+		}),
+		fake.WithSummary(&llmtypes.Summary{}),
+	)
 	r := &fakeService{
 		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
 			return &llmrouter.RouteResult{
@@ -576,8 +577,8 @@ func TestHandler_Stream_ClientDisconnect_OnFirstEvent(t *testing.T) {
 	if got.ErrorKind != llmtypes.KindClientClosed {
 		t.Fatalf("ErrorKind = %q, want client_closed", got.ErrorKind)
 	}
-	if streamObj.cursor != 1 {
-		t.Errorf("stream cursor = %d, want 1 (one Recv before first Send fails)", streamObj.cursor)
+	if streamObj.Cursor() != 1 {
+		t.Errorf("stream cursor = %d, want 1 (one Recv before first Send fails)", streamObj.Cursor())
 	}
 }
 
@@ -706,65 +707,6 @@ func (f *fakeService) CompleteStream(_ context.Context, req *llmtypes.Request) (
 		return f.buildStreamResult(req)
 	}
 	return &llmrouter.RouteResult{}, &llmtypes.Error{ErrorKind: llmtypes.KindUpstream, Message: "stream not implemented in this fake"}
-}
-
-// fakeStream returns events in order, then optionally yields recvErr
-// on the next Recv (or io.EOF if recvErr is nil).
-type fakeStream struct {
-	mu        sync.Mutex
-	closeOnce sync.Once
-	done      chan struct{}
-	events    []*llmtypes.Event
-	cursor    int
-	recvErr   error
-	recvDelay time.Duration
-	summary   *llmtypes.Summary
-	closed    int
-}
-
-func (s *fakeStream) Recv() (*llmtypes.Event, error) {
-	if s.recvDelay > 0 {
-		select {
-		case <-time.After(s.recvDelay):
-		case <-s.doneChan():
-			return nil, io.EOF
-		}
-	}
-	if s.cursor < len(s.events) {
-		e := s.events[s.cursor]
-		s.cursor++
-		return e, nil
-	}
-	if s.recvErr != nil {
-		return nil, s.recvErr
-	}
-	return nil, io.EOF
-}
-
-func (s *fakeStream) Close() error {
-	done := s.doneChan()
-	s.closeOnce.Do(func() { close(done) })
-	s.mu.Lock()
-	s.closed++
-	s.mu.Unlock()
-	return nil
-}
-
-func (s *fakeStream) Summary() *llmtypes.Summary { return s.summary }
-
-func (s *fakeStream) doneChan() chan struct{} {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.done == nil {
-		s.done = make(chan struct{})
-	}
-	return s.done
-}
-
-func (s *fakeStream) closedCount() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.closed
 }
 
 type captureRecorder struct {

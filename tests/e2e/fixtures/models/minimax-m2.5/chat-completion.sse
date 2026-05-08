@@ -1,5 +1,5 @@
 event: message_start
-data: {"type":"message_start","message":{"id":"064c9c64734d86024d68a3a21099388f","type":"message","role":"assistant","content":[],"model":"MiniMax-M2.7","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":15,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},"service_tier":"standard"}}
+data: {"type":"message_start","message":{"id":"064cbedd0bb77aa28357f8d45436e46a","type":"message","role":"assistant","content":[],"model":"MiniMax-M2.7","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":15,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},"service_tier":"standard"}}
 
 event: ping
 data: {"type":"ping"}
@@ -8,10 +8,13 @@ event: content_block_start
 data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}
 
 event: content_block_delta
-data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"The user asks: \"Count 1 to 5, one number per line.\"\n\nWe just need to output:\n\n1\n2\n3\n4\n5\n\nThat's simple. There's no policy violation. Provide as is.\n"}}
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"The user says: \"Count 1 to 5, one number per line.\" So they want an output of numbers 1,2,3,4,5 each on a separate line.\n\nWe should respond with that. There's no conflict with policies. It's a simple request. So we comply by outputting:\n\n1\n2\n3\n4\n5\n\nProbably ensure each on its own line. No extra text. We can just output as requested.\n\nThus the answer"}}
 
 event: content_block_delta
-data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"5bc030b8ab735c60183dc02cc9e13a04aec701eba83e30ae01f6a38b592f0e70"}}
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":": \"1\", \"2\", \"3\", \"4\", \"5\" each on new line. Probably no additional explanation.\n"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"aebe86b20d52e8e106c32f4d39c1698191f2736ba65899347ca33725e09184cc"}}
 
 event: content_block_stop
 data: {"type":"content_block_stop","index":0}
@@ -26,7 +29,7 @@ event: content_block_stop
 data: {"type":"content_block_stop","index":1}
 
 event: message_delta
-data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":18,"output_tokens":57,"cache_creation_input_tokens":0,"cache_read_input_tokens":32}}
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":18,"output_tokens":133,"cache_creation_input_tokens":0,"cache_read_input_tokens":32}}
 
 event: message_stop
 data: {"type":"message_stop"}

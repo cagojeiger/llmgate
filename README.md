@@ -118,6 +118,25 @@ settings, `LLMGATE_REQUEST_TIMEOUT`, `LLMGATE_COMPLETE_TIMEOUT`,
 `LLMGATE_STREAM_IDLE_TIMEOUT`) lives in env, not yaml. Hot-reload is not
 supported — change the catalog and restart.
 
+## Adding a model
+
+```bash
+# 1. yaml — gateway + e2e matrix both pick this up automatically
+cat > catalog/models/<id>.yaml <<EOF
+id: <id>
+vendor: <vendor>
+protocol: openai      # or anthropic
+base_url: https://...
+auth_scheme: bearer   # or x-api-key
+EOF
+
+# 2. capture cassette fixture (one real upstream call)
+./scripts/refresh-fixtures.sh --record
+
+# 3. verify
+make e2e-mock
+```
+
 ## Probes & graceful shutdown
 
 Three HTTP probes, all unauthenticated:

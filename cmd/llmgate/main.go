@@ -25,7 +25,19 @@ import (
 	"llmgate/internal/server"
 )
 
+// version is set by the linker at build time via
+// `-ldflags "-X main.version=<vX.Y.Z>"`. Defaults to "dev" for plain
+// `go run` / `go build` so unset binaries are easy to spot.
+var version = "dev"
+
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "--version", "-v":
+			fmt.Println("llmgate", version)
+			return
+		}
+	}
 	if err := run(); err != nil {
 		slog.Error("llmgate failed", slog.String("err", err.Error()))
 		os.Exit(1)

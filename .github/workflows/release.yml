@@ -1,0 +1,89 @@
+name: release
+
+# Triggers when VERSION lands on main. To release: open a PR titled
+# `chore: release vX.Y.Z` that bumps VERSION, merge — this workflow
+# builds the multi-arch image, pushes to GHCR, tags, and publishes
+# a GitHub Release. CLAUDE.md has the full procedure.
+on:
+  push:
+    branches: [main]
+    paths: [VERSION]
+
+permissions:
+  contents: write   # tag + GitHub Release
+  packages: write   # GHCR push
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ${{ github.repository }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Read VERSION
+        id: ver
+        run: |
+          version=$(tr -d '[:space:]' < VERSION)
+          if [ -z "$version" ]; then
+            echo "::error::VERSION file is empty"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Guard against duplicate tag
+        run: |
+          tag="${{ steps.ver.outputs.tag }}"
+          if git rev-parse "$tag" >/dev/null 2>&1; then
+            echo "::error::tag $tag already exists; bump VERSION before merging"
+            exit 1
+          fi
+
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VERSION=${{ steps.ver.outputs.version }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ steps.ver.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE }}:latest
+
+      - name: Tag and create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${{ steps.ver.outputs.tag }}"
+          git tag "$tag"
+          git push origin "$tag"
+          gh release create "$tag" --title "$tag" --generate-notes
+
+      - name: Notify Slack
+        if: always() && env.SLACK_WEBHOOK_URL != ''
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          STATUS: ${{ job.status }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          IMAGE_REF: ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ steps.ver.outputs.version }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          icon=":white_check_mark:"; [ "$STATUS" != "success" ] && icon=":x:"
+          NL=$'\n'
+          text="${icon} *llmgate release* — v${VERSION} (${STATUS})${NL}image: ${IMAGE_REF}${NL}${RUN_URL}"
+          jq -nc --arg t "$text" '{text:$t}' \
+            | curl -fsS -X POST -H 'Content-Type: application/json' --data @- "$SLACK_WEBHOOK_URL"

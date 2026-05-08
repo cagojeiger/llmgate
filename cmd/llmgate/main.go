@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -186,10 +187,17 @@ func anthropicFactory(m *catalog.Model) (llmtypes.Provider, error) {
 }
 
 // readAuthKey resolves the credential env var named by the catalog model.
+// When auth_env is omitted in yaml, it defaults to LLMGATE_<VENDOR>_API_KEY
+// (vendor uppercased) so most catalog files do not need to repeat the env
+// var name. An explicit auth_env always wins.
 func readAuthKey(m *catalog.Model) (string, error) {
-	v := os.Getenv(m.AuthEnv)
+	envKey := m.AuthEnv
+	if envKey == "" {
+		envKey = "LLMGATE_" + strings.ToUpper(m.Vendor) + "_API_KEY"
+	}
+	v := os.Getenv(envKey)
 	if v == "" {
-		return "", fmt.Errorf("model %q: env %s is unset", m.ID, m.AuthEnv)
+		return "", fmt.Errorf("model %q: env %s is unset", m.ID, envKey)
 	}
 	return v, nil
 }

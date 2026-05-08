@@ -1,0 +1,63 @@
+name: e2e
+
+# Matrix run against the real upstream — costs tokens. Manual button +
+# weekly schedule keep the spend bounded; never on every push. Requires
+# the LLMGATE_OPENCODE_API_KEY repository secret.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Monday 09:00 UTC — once a week, off-hours for most contributors.
+    - cron: "0 9 * * 1"
+
+jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compose .env
+        run: |
+          echo "LLMGATE_OPENCODE_API_KEY=${LLMGATE_OPENCODE_API_KEY}" > .env
+        env:
+          LLMGATE_OPENCODE_API_KEY: ${{ secrets.LLMGATE_OPENCODE_API_KEY }}
+
+      - name: Boot gate
+        run: docker compose up -d --build
+
+      - name: Wait for healthz
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/healthz >/dev/null; then
+              echo "ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "gate did not become ready" >&2
+          docker compose logs llmgate >&2 || true
+          exit 1
+
+      - uses: astral-sh/setup-uv@v3
+
+      - name: Run e2e matrix
+        working-directory: tests/e2e
+        env:
+          LLMGATE_E2E_EXTERNAL: "1"
+        run: uv run pytest test_all_models.py -v
+
+      - name: Capture gate logs
+        if: always()
+        run: docker compose logs llmgate > gate.log || true
+
+      - name: Upload gate logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-logs
+          path: gate.log
+
+      - name: Tear down
+        if: always()
+        run: docker compose down

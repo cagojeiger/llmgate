@@ -75,7 +75,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if consumer.AuthError != "" {
 		// Auth middleware ran but rejected; emit the audit record
-		// (audit-always — ADR 008) and return 401. The specific
+		// (audit-always — ADR 003) and return 401. The specific
 		// AuthErrorKind stays out of the wire response — callers see
 		// only "unauthorized" — but is stamped on rec.AuthError so
 		// audit/access-log surfaces show "missing" vs "format" vs

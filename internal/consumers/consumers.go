@@ -12,7 +12,7 @@
 // caller out-of-band. Multiple hashes per consumer enable rotation: add the
 // new hash, deploy, retire the old hash on a later deploy.
 //
-// Schema is intentionally flat (see ADR 008). Operator-facing notes belong
+// Schema is intentionally flat (see ADR 003). Operator-facing notes belong
 // in yaml comments, not data fields. Permission / quota fields are
 // deliberately absent — those are post-processing concerns.
 //

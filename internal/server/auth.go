@@ -14,7 +14,7 @@ import (
 // failure AuthError is non-empty and identifies the failure mode so the
 // handler can audit-emit and short-circuit. The middleware *never*
 // short-circuits itself — the handler stays the single audit emitter
-// (ADR 007 / ADR 008 audit-always).
+// (ADR 001 / ADR 003 audit-always).
 type ConsumerInfo struct {
 	Name      string
 	KeyID     string

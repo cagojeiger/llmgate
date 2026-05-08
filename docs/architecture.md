@@ -2,7 +2,8 @@
 
 OpenAI SDK 와이어 호환 게이트웨이. 모델은 *기본 등록 단위*, **별명**이 *실제 제어 단위*.
 별명 하나가 chain 으로 풀리고 chain 을 따라 자동 폴백한다. DB 없음, fact 만 발행, 비용 /
-한도 계산은 후처리 시스템 책임. 정체성 결정 근거는 ADR 001.
+한도 계산은 후처리 시스템 책임 — 풀-피처 게이트웨이의 운영 면적을 *한 사람 머리에 들어오는
+작은 컴포넌트* 로 좁힌 게 정체성. 컴포넌트 책임 분할은 ADR 001.
 
 ## 시스템 지도
 
@@ -66,22 +67,22 @@ graph LR
 - **Routing** (`internal/llmrouter/`) — *standalone* 서비스. alias → chain 해석, fallback 적격 판정, 회로 차단. stdlib + `llmtypes` 만 import. HTTP 외 frontend (CLI / queue / gRPC) 가 `llmrouter.NewService(models, aliases, ...)` 만 호출하면 그대로 구동.
 - **Providers** (`internal/providers/openai|anthropic/`) — `llmtypes.Provider` 구현. vendor 와이어 차이 (status 분류 / 첫 이벤트 검증 / 와이어 정규화) 를 자기 안에 가둠.
 - **Contracts** (`internal/llmtypes/`) — Provider / Stream / Request / Response / Error / Attempt — 모든 런타임 레이어가 import 하는 *도메인 계약 모듈*. 런타임 호출 노드가 아니므로 시스템 지도에서 점선 import 로만 표시.
-- **boundary**: Routing 이 Delivery 로 돌려주는 형식은 `llmtypes.Stream` (인터페이스) / `llmtypes.Response` (struct). 둘 다 HTTP 모름. ADR 006 의 *first-event boundary* = 시간축에서의 레이어 경계 표현.
+- **boundary**: Routing 이 Delivery 로 돌려주는 형식은 `llmtypes.Stream` (인터페이스) / `llmtypes.Response` (struct). 둘 다 HTTP 모름. ADR 004 의 *first-event boundary* = 시간축에서의 레이어 경계 표현.
 
 | 레이어 | 컴포넌트 | 역할 |
 |---|---|---|
 | Delivery | HTTP Server | chi 라우터 + request_id / clientContext / access log / recoverer / read+request timeout. `/v1/chat/completions` (auth 보호), `/healthz/live` · `/healthz/ready` · `/healthz` (공개) |
-| Delivery | auth middleware | `Authorization: Bearer` 추출 → sha256 → consumers Store lookup → ctx 에 ConsumerInfo 기록. 실패해도 short-circuit 안 함 — Handler 가 audit-always emit (ADR 008) |
+| Delivery | auth middleware | `Authorization: Bearer` 추출 → sha256 → consumers Store lookup → ctx 에 ConsumerInfo 기록. 실패해도 short-circuit 안 함 — Handler 가 audit-always emit (ADR 003) |
 | Delivery | Handler | 요청 디코드, stream / non-stream 분기. ConsumerInfo 로 Record 채움 + auth 실패 시 401. 요청 총 wall-clock 한도의 권위자 (ADR 005) |
-| Delivery | streamRelay | 스트림 열린 뒤 SSE wire transcript. 이벤트 전송, idle timeout, client_closed, mid-stream error, `[DONE]` (ADR 006). 스트림 idle 한도의 권위자 (ADR 005) |
+| Delivery | streamRelay | 스트림 열린 뒤 SSE wire transcript. 이벤트 전송, idle timeout, client_closed, mid-stream error, `[DONE]` (ADR 004). 스트림 idle 한도의 권위자 (ADR 005) |
 | Delivery | ProbeState | SIGTERM 시 `MarkShuttingDown()` → readiness 만 503. liveness · in-flight 영향 없음 |
 | Delivery | Audit Recorder | 요청당 1 개 fact record. consumer_name + consumer_key_id + auth_error 포함 — *누가 / 왜 실패* 의 사실 |
 | Routing | llmrouter.Service | 별명 → chain 해석, 폴백 적격 판정, 회로 차단 (ADR 004). non-stream 시도당 한도의 권위자 (ADR 005). stdlib + llmtypes 만 import |
-| Providers | OpenAI Adapter | OpenAI 와이어 호출. status 분류 + 첫 이벤트 검증 (ADR 006) |
-| Providers | Anthropic Adapter | Anthropic ↔ OpenAI 와이어 양방향 변환 (tools / tool_choice / tool_calls / tool_use). status 분류 + 첫 이벤트 검증 (ADR 006) |
-| Boot data | consumers Store | 부팅 시 yaml → sha256 → consumer 매핑 read-only. 0 개면 부팅 fail (ADR 008). Delivery 의 auth middleware 가 소비 |
+| Providers | OpenAI Adapter | OpenAI 와이어 호출. status 분류 + 첫 이벤트 검증 (ADR 004) |
+| Providers | Anthropic Adapter | Anthropic ↔ OpenAI 와이어 양방향 변환 (tools / tool_choice / tool_calls / tool_use). status 분류 + 첫 이벤트 검증 (ADR 004) |
+| Boot data | consumers Store | 부팅 시 yaml → sha256 → consumer 매핑 read-only. 0 개면 부팅 fail (ADR 003). Delivery 의 auth middleware 가 소비 |
 
-각 컴포넌트의 단일 책임 (*권위자가 한 명*) 결정 근거는 ADR 007.
+각 컴포넌트의 단일 책임 (*권위자가 한 명*) 결정 근거는 ADR 001.
 
 ## 코드 구조
 
@@ -149,7 +150,7 @@ key_hashes:
 
 데이터 / 정책 / 코드가 세 자리에 산다 — yaml = 운영 데이터, env = 인프라·시크릿, 코드 = 알고리즘.
 - **catalog**: 별명 호출만 chain 폴백 (raw model id 호출은 chain 길이 1, 폴백 발동 자체 없음). 모르는 필드 → 부팅 fail. 결정 근거 ADR 002.
-- **consumers**: `scripts/gen-consumer.sh` 가 raw 키 발급 → sha256 만 yaml 에 박음. multi-key 활성 가능 (회전 윈도우). 부재 / 빈 디렉토리 → 부팅 fail (닫힘 default). 결정 근거 ADR 008.
+- **consumers**: `scripts/gen-consumer.sh` 가 raw 키 발급 → sha256 만 yaml 에 박음. multi-key 활성 가능 (회전 윈도우). 부재 / 빈 디렉토리 → 부팅 fail (닫힘 default). 결정 근거 ADR 003.
 
 ## 환경 변수
 
@@ -262,7 +263,7 @@ Time ─────────────────────────
 Handler 가 200 OK 를 커밋한 뒤에는 streamRelay 가 SSE 전송. 이벤트 사이 idle 은
 `LLMGATE_STREAM_IDLE_TIMEOUT`, end-of-stream 에서 `Stream.Summary()` 로 usage / finish
 reason 을 audit 에 finalize. mid-stream 폴백 거부 근거 (HTTP 시맨틱 / SDK 호환 / record
-무결성) 는 ADR 006.
+무결성) 는 ADR 004.
 
 ## 상태가 어디 사는가
 
@@ -280,6 +281,16 @@ reason 을 audit 에 finalize. mid-stream 폴백 거부 근거 (HTTP 시맨틱 /
 
 ## 의도적 미지원
 
-멀티모달 capability 매칭 / `/v1/models` discovery / hot-reload / pre-call 한도 / mid-stream
-폴백 / 모델 메타정보 (가격 · context window) 보유 / multi-key smart distribution / k8s·CRD
-인지 — 모두 V1 범위 밖. 누적 결정과 거절 근거는 ADR 003.
+V1 에서 다음을 *지원하지 않는다*. 디폴트는 거절 — 외부 요청에 같은 잣대로 응답한다.
+
+| 항목 | 거절 근거 |
+|---|---|
+| **mid-stream 폴백** | HTTP 시맨틱 + SDK 호환 + record 무결성 셋 동시 위반. 첫 chunk 송출 후 vendor 교체 안 함 (ADR 004) |
+| **capability matching / `/v1/models` discovery** | 게이트웨이가 모델 능력을 *판정* = 파생 값 생성. *사실만 발행* 위반. 능력은 호출자가 안다 |
+| **hot-reload** | yaml 갱신 실시간 반영 시 *언제 반영됐나* 가 흐려지고 같은 호출이 부분 적용된 catalog 를 보는 race. 재시작 = 적용 |
+| **모델 메타 (가격 / context window / capabilities)** | yaml 에 안 박음. destination 없음 — 가격은 후처리 시스템이 record 받아 계산 |
+| **multi-key smart distribution** | 키별 사용량 상태 = *상태 없음* 위반. 같은 vendor model 을 다른 yaml 두 장에 다른 인증으로 등록하면 catalog 에서 별개 모델 → alias chain 자연 단위 (ADR 002 부수 효과) |
+| **사전 한도 차단 (pre-call quota)** | 외부 상태 조회 = 상태 없음 위반. 한도는 후처리 시스템이 record 모아 판정 |
+| **k8s · CRD 인지 / 게이트웨이 안 operator** | *환경 의존* 이 게이트웨이 정체성에 새로 들어옴. operator 가 필요해지면 *외부* 컴포넌트가 yaml 굴림 — 게이트웨이는 mount path 만 본다 |
+
+"이 정도면 가벼우니" 의 누적 압력 — 항목이 늘면 본 문서 갱신으로 응답.

@@ -13,7 +13,7 @@ vendor 단위 yaml 한 장에 endpoints / models / aliases / fallback 다 들어
 - `catalog/models/<id>.yaml` = 모델 1 개. 6 필드: `id` / `vendor` / `protocol` / `base_url` / `auth_env` (생략 시 `LLMGATE_<VENDOR>_API_KEY`) / `auth_scheme`. `protocol` 은 `llmtypes.Protocol` 닫힌 enum.
 - `catalog/aliases/<name>.yaml` = chain. raw model id 호출은 chain 길이 1 → 폴백 발동 자체 없음 (별명이 *실제 제어 단위*).
 - 정책 (`LLMGATE_FALLBACK_ON` / circuit / timeouts) 은 env. yaml 에 없음.
-- 모델 메타 (cost / context window) 안 가짐 — 미지원 항목 architecture.md "의도적 미지원" 참조.
+- 모델 메타 (cost / context window) 안 가짐 — 미지원 항목 [identity.md "의도적 미지원"](../identity.md) 참조.
 - schema flat. apiVersion / kind 헤더 안 둠.
 - strict 파싱 — 모르는 필드 → 부팅 fail.
 - `LLMGATE_CATALOG=<dir>` 또는 cwd 의 `./catalog`. hot-reload 없음, 재시작 적용.

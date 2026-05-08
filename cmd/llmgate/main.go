@@ -18,8 +18,8 @@ import (
 	"llmgate/internal/catalog"
 	"llmgate/internal/config"
 	"llmgate/internal/consumers"
-	"llmgate/internal/llmtypes"
 	"llmgate/internal/llmrouter"
+	"llmgate/internal/llmtypes"
 	"llmgate/internal/providers/anthropic"
 	"llmgate/internal/providers/openai"
 	"llmgate/internal/server"
@@ -45,6 +45,12 @@ func run() error {
 		slog.String("phase", "v1-bypass"),
 	)
 	slog.SetDefault(logger)
+	// Two parallel structured-log streams share the same handler/stdout
+	// but stamp a "log" attr so downstream consumers (Loki/ELK) can
+	// filter cleanly: access lines describe HTTP transport, audit lines
+	// describe gateway-domain operations.
+	accessLog := logger.With(slog.String("log", "access"))
+	auditLog := logger.With(slog.String("log", "audit"))
 
 	cat, err := catalog.Load()
 	if err != nil {
@@ -83,7 +89,7 @@ func run() error {
 		return err
 	}
 
-	recorder := audit.Composite{audit.NewLogRecorder(logger)}
+	recorder := audit.Recorders{audit.NewSlogRecorder(auditLog)}
 	defer func() {
 		if err := recorder.Close(); err != nil {
 			logger.Warn("recorder close failed", slog.String("err", err.Error()))
@@ -95,7 +101,7 @@ func run() error {
 		StreamIdleTimeout: cfg.StreamIdleTimeout,
 	})
 	probe := server.NewProbeState()
-	srv := server.New(cfg, logger, handler, consumerStore, probe)
+	srv := server.New(cfg, accessLog, handler, consumerStore, probe)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

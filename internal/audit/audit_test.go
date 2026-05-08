@@ -18,14 +18,14 @@ func newCapturingLogger() (*slog.Logger, *bytes.Buffer) {
 	return slog.New(h), buf
 }
 
-func TestLogRecorder_RecordSuccess(t *testing.T) {
+func TestSlogRecorder_RecordSuccess(t *testing.T) {
 	log, buf := newCapturingLogger()
-	r := NewLogRecorder(log)
+	r := NewSlogRecorder(log)
 
 	rec := &Record{
 		Timestamp:      time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
 		RequestID:      "req-1",
-		Method:         "chat.completions",
+		Operation:      "chat.completions",
 		ModelRequested: "deepseek-v4-flash",
 		StatusCode:     200,
 		DurationMS:     234,
@@ -47,6 +47,9 @@ func TestLogRecorder_RecordSuccess(t *testing.T) {
 	if out["msg"] != "audit" {
 		t.Errorf("msg = %v, want audit", out["msg"])
 	}
+	if out["operation"] != "chat.completions" {
+		t.Errorf("operation = %v, want chat.completions", out["operation"])
+	}
 	if out["request_id"] != "req-1" || out["model_requested"] != "deepseek-v4-flash" {
 		t.Errorf("missing core fields: %+v", out)
 	}
@@ -56,21 +59,24 @@ func TestLogRecorder_RecordSuccess(t *testing.T) {
 	if out["vendor_cost"] != "0.001" {
 		t.Errorf("vendor_cost = %v, want 0.001", out["vendor_cost"])
 	}
+	if out["duration_ms"].(float64) != 234 {
+		t.Errorf("duration_ms = %v, want 234", out["duration_ms"])
+	}
 	if _, ok := out["error_kind"]; ok {
 		t.Errorf("error_kind should be omitted on success: %+v", out)
 	}
 }
 
-func TestLogRecorder_RecordAuthFields(t *testing.T) {
+func TestSlogRecorder_RecordAuthFields(t *testing.T) {
 	// Caller-identity attrs land on the success line so post-processing
 	// can answer "who called?" from the audit stream alone.
 	log, buf := newCapturingLogger()
-	r := NewLogRecorder(log)
+	r := NewSlogRecorder(log)
 
 	r.Record(context.Background(), &Record{
 		Timestamp:      time.Now(),
 		RequestID:      "req-auth-ok",
-		Method:         "chat.completions",
+		Operation:      "chat.completions",
 		ModelRequested: "deepseek-v4-flash",
 		ConsumerName:   "alpha",
 		ConsumerKeyID:  "01234567",
@@ -92,20 +98,20 @@ func TestLogRecorder_RecordAuthFields(t *testing.T) {
 	}
 }
 
-func TestLogRecorder_RecordAuthFailure(t *testing.T) {
+func TestSlogRecorder_RecordAuthFailure(t *testing.T) {
 	// The audit-always property hinges on this: a 401 must still leave a
 	// recognizable line in the audit stream, with auth_error pinning the
 	// failure mode and ConsumerName/KeyID empty (kept off the line).
 	log, buf := newCapturingLogger()
-	r := NewLogRecorder(log)
+	r := NewSlogRecorder(log)
 
 	r.Record(context.Background(), &Record{
 		Timestamp:      time.Now(),
 		RequestID:      "req-auth-bad",
-		Method:         "chat.completions",
+		Operation:      "chat.completions",
 		ModelRequested: "",
-		AuthError:      "unknown",
-		ErrorKind:      llmtypes.KindAuth,
+		AuthError:      AuthErrorUnknown,
+		Kind:           llmtypes.KindAuth,
 		StatusCode:     401,
 	})
 
@@ -124,17 +130,17 @@ func TestLogRecorder_RecordAuthFailure(t *testing.T) {
 	}
 }
 
-func TestLogRecorder_RecordError(t *testing.T) {
+func TestSlogRecorder_RecordError(t *testing.T) {
 	log, buf := newCapturingLogger()
-	r := NewLogRecorder(log)
+	r := NewSlogRecorder(log)
 
 	r.Record(context.Background(), &Record{
 		Timestamp:      time.Now(),
 		RequestID:      "req-2",
-		Method:         "chat.completions",
+		Operation:      "chat.completions",
 		ModelRequested: "kimi-k2.6",
 		StatusCode:     429,
-		ErrorKind:      llmtypes.KindRateLimit,
+		Kind:           llmtypes.KindRateLimit,
 		DurationMS:     50,
 	})
 
@@ -150,30 +156,30 @@ func TestLogRecorder_RecordError(t *testing.T) {
 	}
 }
 
-func TestLogRecorder_RecordNil(t *testing.T) {
+func TestSlogRecorder_RecordNil(t *testing.T) {
 	log, buf := newCapturingLogger()
-	r := NewLogRecorder(log)
+	r := NewSlogRecorder(log)
 	r.Record(context.Background(), nil)
 	if buf.Len() != 0 {
 		t.Errorf("nil record should emit nothing, got %s", buf.String())
 	}
 }
 
-func TestLogRecorder_FallbackFields(t *testing.T) {
+func TestSlogRecorder_FallbackFields(t *testing.T) {
 	log, buf := newCapturingLogger()
-	r := NewLogRecorder(log)
+	r := NewSlogRecorder(log)
 
 	r.Record(context.Background(), &Record{
 		Timestamp:      time.Now(),
 		RequestID:      "req-3",
-		Method:         "chat.completions",
+		Operation:      "chat.completions",
 		ModelRequested: "coder",
 		Vendor:         "opencode",
 		ModelUsed:      "deepseek-v4-flash",
 		StatusCode:     200,
 		Usage:          &llmtypes.Usage{PromptTokens: 5, CompletionTokens: 7, TotalTokens: 12},
 		Attempts: []llmtypes.Attempt{
-			{Vendor: "opencode", Model: "deepseek-v4-pro", DurationMS: 80, ErrorKind: llmtypes.KindRateLimit, StatusCode: 429},
+			{Vendor: "opencode", Model: "deepseek-v4-pro", DurationMS: 80, Kind: llmtypes.KindRateLimit, StatusCode: 429},
 			{Vendor: "opencode", Model: "deepseek-v4-flash", DurationMS: 200, StatusCode: 200, Usage: &llmtypes.Usage{PromptTokens: 5, CompletionTokens: 7, TotalTokens: 12}},
 		},
 	})
@@ -197,14 +203,14 @@ func TestLogRecorder_FallbackFields(t *testing.T) {
 	}
 }
 
-func TestLogRecorder_OmitsAttemptsWhenSingle(t *testing.T) {
+func TestSlogRecorder_OmitsAttemptsWhenSingle(t *testing.T) {
 	log, buf := newCapturingLogger()
-	r := NewLogRecorder(log)
+	r := NewSlogRecorder(log)
 
 	r.Record(context.Background(), &Record{
 		Timestamp:      time.Now(),
 		RequestID:      "req-4",
-		Method:         "chat.completions",
+		Operation:      "chat.completions",
 		ModelRequested: "deepseek-v4-flash",
 		Vendor:         "opencode",
 		ModelUsed:      "deepseek-v4-flash",
@@ -239,9 +245,9 @@ func (c *captureRecorder) Record(_ context.Context, r *Record) {
 
 func (c *captureRecorder) Close() error { return c.err }
 
-func TestComposite(t *testing.T) {
+func TestRecorders(t *testing.T) {
 	a, b := &captureRecorder{}, &captureRecorder{}
-	c := Composite{a, b}
+	c := Recorders{a, b}
 	c.Record(context.Background(), &Record{ModelRequested: "m"})
 
 	if len(a.calls) != 1 || len(b.calls) != 1 {
@@ -249,9 +255,9 @@ func TestComposite(t *testing.T) {
 	}
 }
 
-func TestComposite_NilElement(t *testing.T) {
+func TestRecorders_NilElement(t *testing.T) {
 	a := &captureRecorder{}
-	c := Composite{nil, a, nil}
+	c := Recorders{nil, a, nil}
 	c.Record(context.Background(), &Record{ModelRequested: "m"})
 	if len(a.calls) != 1 {
 		t.Errorf("non-nil element should still receive: %d", len(a.calls))
@@ -261,15 +267,15 @@ func TestComposite_NilElement(t *testing.T) {
 	}
 }
 
-func TestComposite_CloseReturnsFirstErrButStillRunsRest(t *testing.T) {
+func TestRecorders_CloseReturnsFirstErrButStillRunsRest(t *testing.T) {
 	first := errors.New("first-failed")
 	second := errors.New("second-failed")
 	a := &captureRecorder{err: first}
 	b := &captureRecorder{err: second}
 	c := &captureRecorder{}
-	composite := Composite{a, b, c}
+	rs := Recorders{a, b, c}
 
-	got := composite.Close()
+	got := rs.Close()
 	if !errors.Is(got, first) {
 		t.Errorf("Close = %v, want first-failed (first non-nil)", got)
 	}

@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"llmgate/internal/audit"
-	"llmgate/internal/llmtypes"
 	"llmgate/internal/llmrouter"
+	"llmgate/internal/llmtypes"
 )
 
 const maxChatRequestBytes = 1 << 20
@@ -64,7 +64,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rec := &audit.Record{
 		Timestamp:     start,
 		RequestID:     RequestIDFromContext(ctx),
-		Method:        "chat.completions",
+		Operation:     "chat.completions",
 		ConsumerName:  consumer.Name,
 		ConsumerKeyID: consumer.KeyID,
 	}
@@ -76,12 +76,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if consumer.AuthError != "" {
 		// Auth middleware ran but rejected; emit the audit record
 		// (audit-always — ADR 003) and return 401. The specific
-		// AuthErrorKind stays out of the wire response — callers see
+		// audit.AuthError stays out of the wire response — callers see
 		// only "unauthorized" — but is stamped on rec.AuthError so
 		// audit/access-log surfaces show "missing" vs "format" vs
 		// "unknown" for operators.
-		rec.AuthError = string(consumer.AuthError)
-		perr := &llmtypes.Error{ErrorKind: llmtypes.KindAuth, Message: "unauthorized"}
+		rec.AuthError = consumer.AuthError
+		perr := &llmtypes.Error{Kind: llmtypes.KindAuth, Message: "unauthorized"}
 		adoptError(rec, perr)
 		writeError(w, perr)
 		return
@@ -89,7 +89,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxChatRequestBytes))
 	if err != nil {
-		perr := &llmtypes.Error{ErrorKind: llmtypes.KindBadRequest, Message: "read request body: " + err.Error()}
+		perr := &llmtypes.Error{Kind: llmtypes.KindBadRequest, Message: "read request body: " + err.Error()}
 		adoptError(rec, perr)
 		writeError(w, perr)
 		return
@@ -98,7 +98,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	req := &llmtypes.Request{}
 	if err := json.Unmarshal(body, req); err != nil {
-		perr := &llmtypes.Error{ErrorKind: llmtypes.KindBadRequest, Message: "decode request: " + err.Error()}
+		perr := &llmtypes.Error{Kind: llmtypes.KindBadRequest, Message: "decode request: " + err.Error()}
 		adoptError(rec, perr)
 		writeError(w, perr)
 		return
@@ -106,7 +106,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rec.ModelRequested = req.Model
 
 	if req.Stream != nil && *req.Stream {
-		rec.Method = "chat.completions.stream"
+		rec.Operation = "chat.completions.stream"
 		h.serveStream(w, r, req, rec)
 		return
 	}
@@ -123,9 +123,9 @@ func adoptRoute(rec *audit.Record, result *llmrouter.RouteResult) {
 	rec.ModelUsed = result.ModelUsed
 }
 
-// adoptError populates rec.ErrorKind and rec.StatusCode from err.
+// adoptError populates rec.Kind and rec.StatusCode from err.
 func adoptError(rec *audit.Record, err error) {
-	rec.ErrorKind = llmtypes.ErrorKindOf(err)
+	rec.Kind = llmtypes.ErrorKindOf(err)
 	rec.StatusCode = errStatus(err)
 }
 
@@ -134,8 +134,8 @@ func adoptStreamSummary(rec *audit.Record, sum *llmtypes.Summary, now time.Time)
 	if len(rec.Attempts) > 0 {
 		last := &rec.Attempts[len(rec.Attempts)-1]
 		last.DurationMS = now.Sub(last.StartedAt).Milliseconds()
-		if last.ErrorKind == "" && rec.ErrorKind != "" {
-			last.ErrorKind = rec.ErrorKind
+		if last.Kind == "" && rec.Kind != "" {
+			last.Kind = rec.Kind
 		}
 		if sum != nil {
 			if sum.Usage != nil {
@@ -168,7 +168,7 @@ func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *llm
 
 	out, err := json.Marshal(result.Response)
 	if err != nil {
-		perr := &llmtypes.Error{ErrorKind: llmtypes.KindUnknown, Message: "encode response: " + err.Error(), Cause: err}
+		perr := &llmtypes.Error{Kind: llmtypes.KindUnknown, Message: "encode response: " + err.Error(), Cause: err}
 		adoptError(rec, perr)
 		writeError(w, perr)
 		return
@@ -186,7 +186,7 @@ func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *llm
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if _, werr := w.Write(out); werr != nil {
-		rec.ErrorKind = llmtypes.KindClientClosed
+		rec.Kind = llmtypes.KindClientClosed
 		h.log.LogAttrs(r.Context(), slog.LevelInfo, "client write failed",
 			slog.String("vendor", rec.Vendor),
 			slog.String("err", werr.Error()),

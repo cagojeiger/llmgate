@@ -198,8 +198,8 @@ func TestSSEReader_ScannerErrorBubblesAsUpstreamError(t *testing.T) {
 	if !errors.As(err, &perr) {
 		t.Fatalf("err type = %T, want *llmtypes.Error", err)
 	}
-	if perr.ErrorKind != llmtypes.KindUpstream {
-		t.Errorf("ErrorKind = %s, want %s", perr.ErrorKind, llmtypes.KindUpstream)
+	if perr.Kind != llmtypes.KindUpstream {
+		t.Errorf("Kind = %s, want %s", perr.Kind, llmtypes.KindUpstream)
 	}
 }
 

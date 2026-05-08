@@ -118,8 +118,8 @@ func TestComplete_UpstreamErrorEnvelope(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 	perr := requireProviderError(t, err)
-	if perr.ErrorKind != llmtypes.KindAuth {
-		t.Errorf("ErrorKind = %q, want %q", perr.ErrorKind, llmtypes.KindAuth)
+	if perr.Kind != llmtypes.KindAuth {
+		t.Errorf("Kind = %q, want %q", perr.Kind, llmtypes.KindAuth)
 	}
 	if !strings.Contains(perr.Message, "invalid api key") {
 		t.Errorf("Message = %q, want substring 'invalid api key'", perr.Message)
@@ -148,8 +148,8 @@ func TestComplete_UpstreamErrorNonJSON(t *testing.T) {
 		t.Fatal("expected error")
 	}
 	perr := requireProviderError(t, err)
-	if perr.ErrorKind != llmtypes.KindUpstream {
-		t.Errorf("ErrorKind = %q, want %q", perr.ErrorKind, llmtypes.KindUpstream)
+	if perr.Kind != llmtypes.KindUpstream {
+		t.Errorf("Kind = %q, want %q", perr.Kind, llmtypes.KindUpstream)
 	}
 	if !strings.Contains(perr.Message, "upstream gateway down") {
 		t.Errorf("Message = %q, want substring 'upstream gateway down'", perr.Message)
@@ -173,8 +173,8 @@ func TestComplete_ValidationErrors(t *testing.T) {
 				t.Fatal("expected validation error, got nil")
 			}
 			perr := requireProviderError(t, err)
-			if perr.ErrorKind != llmtypes.KindBadRequest {
-				t.Fatalf("ErrorKind = %q, want %q", perr.ErrorKind, llmtypes.KindBadRequest)
+			if perr.Kind != llmtypes.KindBadRequest {
+				t.Fatalf("Kind = %q, want %q", perr.Kind, llmtypes.KindBadRequest)
 			}
 		})
 	}
@@ -211,8 +211,8 @@ func TestClassify_StatusAndEnvelope(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			perr := c.classify(tc.status, []byte(tc.body), "")
-			if perr.ErrorKind != tc.want {
-				t.Errorf("ErrorKind = %q, want %q (body=%s)", perr.ErrorKind, tc.want, tc.body)
+			if perr.Kind != tc.want {
+				t.Errorf("Kind = %q, want %q (body=%s)", perr.Kind, tc.want, tc.body)
 			}
 			if perr.StatusCode != tc.status {
 				t.Errorf("StatusCode = %d, want %d (preserved verbatim)", perr.StatusCode, tc.status)
@@ -313,8 +313,8 @@ func TestCompleteStream_StreamErrorMidFlight(t *testing.T) {
 	}
 	_, err = stream.Recv()
 	perr := requireProviderError(t, err)
-	if perr.ErrorKind != llmtypes.KindUpstream {
-		t.Fatalf("ErrorKind = %q, want %q", perr.ErrorKind, llmtypes.KindUpstream)
+	if perr.Kind != llmtypes.KindUpstream {
+		t.Fatalf("Kind = %q, want %q", perr.Kind, llmtypes.KindUpstream)
 	}
 	if !strings.Contains(perr.Message, "stream exploded") {
 		t.Fatalf("Message = %q, want stream exploded", perr.Message)
@@ -340,8 +340,8 @@ func TestParseStreamError_UsesOpenAIKindClassifier(t *testing.T) {
 			if perr == nil {
 				t.Fatal("parseStreamError returned nil")
 			}
-			if perr.ErrorKind != tc.want {
-				t.Fatalf("ErrorKind = %q, want %q", perr.ErrorKind, tc.want)
+			if perr.Kind != tc.want {
+				t.Fatalf("Kind = %q, want %q", perr.Kind, tc.want)
 			}
 		})
 	}

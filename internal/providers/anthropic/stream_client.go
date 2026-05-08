@@ -164,11 +164,11 @@ func (s *stream) decodePayload(payload []byte) (*anthropicStreamEvent, error) {
 	var event anthropicStreamEvent
 	if err := json.Unmarshal(payload, &event); err != nil {
 		return nil, &llmtypes.Error{
-			ErrorKind: llmtypes.KindUpstream,
-			Provider:  s.ProviderName,
-			Message:   "decode stream event: " + err.Error(),
-			Cause:     err,
-			Raw:       upstream.FirstBytes(payload),
+			Kind:     llmtypes.KindUpstream,
+			Provider: s.ProviderName,
+			Message:  "decode stream event: " + err.Error(),
+			Cause:    err,
+			Raw:      upstream.FirstBytes(payload),
 		}
 	}
 	return &event, nil
@@ -417,9 +417,9 @@ func (s *stream) finalize() (*llmtypes.Event, error) {
 		return s.emitFinish(), nil
 	}
 	return nil, &llmtypes.Error{
-		ErrorKind: llmtypes.KindUpstream,
-		Provider:  s.ProviderName,
-		Message:   "stream ended without message_stop",
+		Kind:     llmtypes.KindUpstream,
+		Provider: s.ProviderName,
+		Message:  "stream ended without message_stop",
 	}
 }
 

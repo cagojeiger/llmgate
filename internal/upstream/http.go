@@ -132,10 +132,10 @@ func LowLevelError(providerName, message string, cause error) *llmtypes.Error {
 		}
 	}
 	return &llmtypes.Error{
-		ErrorKind: kind,
-		Provider:  providerName,
-		Message:   message + ": " + cause.Error(),
-		Cause:     cause,
+		Kind:     kind,
+		Provider: providerName,
+		Message:  message + ": " + cause.Error(),
+		Cause:    cause,
 	}
 }
 
@@ -144,10 +144,10 @@ func LowLevelError(providerName, message string, cause error) *llmtypes.Error {
 // so audit logs stay bounded.
 func BadRequest(providerName, message string, cause error, raw []byte) *llmtypes.Error {
 	return &llmtypes.Error{
-		ErrorKind: llmtypes.KindBadRequest,
-		Provider:  providerName,
-		Message:   message + ": " + cause.Error(),
-		Cause:     cause,
-		Raw:       FirstBytes(raw),
+		Kind:     llmtypes.KindBadRequest,
+		Provider: providerName,
+		Message:  message + ": " + cause.Error(),
+		Cause:    cause,
+		Raw:      FirstBytes(raw),
 	}
 }

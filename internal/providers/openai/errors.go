@@ -30,7 +30,7 @@ func (c *Client) classify(status int, body []byte, retryAfterHeader string) *llm
 	env.Message = message
 
 	return &llmtypes.Error{
-		ErrorKind:  kindFromOpenAIError(status, env),
+		Kind:       kindFromOpenAIError(status, env),
 		Provider:   c.cfg.Name,
 		Message:    message,
 		StatusCode: status,

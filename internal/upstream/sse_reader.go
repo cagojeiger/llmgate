@@ -114,7 +114,7 @@ func (r *SSEReader) Recv() (data []byte, err error) {
 		// before a connection drop may themselves be corrupt, so the
 		// error signal is the priority and any salvage attempt belongs
 		// to the adapter that knows how to validate the JSON shape.
-		return nil, &llmtypes.Error{ErrorKind: llmtypes.KindUpstream, Message: err.Error(), Cause: err}
+		return nil, &llmtypes.Error{Kind: llmtypes.KindUpstream, Message: err.Error(), Cause: err}
 	}
 	// Natural EOF (clean stream end). If parts were buffered (e.g.
 	// upstream finished delivering `data: ...` lines but the trailing

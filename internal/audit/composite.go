@@ -2,12 +2,13 @@ package audit
 
 import "context"
 
-// Composite fans out each Record to every contained Recorder. Used to
-// run multiple back-ends in parallel (e.g. slog + Postgres + Prometheus).
-type Composite []Recorder
+// Recorders is a slice that itself satisfies Recorder, fanning each
+// Record out to every contained Recorder. The slice-with-method shape
+// (cf. http.HandlerFunc, sort.IntSlice) avoids a wrapper type.
+type Recorders []Recorder
 
-func (c Composite) Record(ctx context.Context, r *Record) {
-	for _, rec := range c {
+func (rs Recorders) Record(ctx context.Context, r *Record) {
+	for _, rec := range rs {
 		if rec == nil {
 			continue
 		}
@@ -17,9 +18,9 @@ func (c Composite) Record(ctx context.Context, r *Record) {
 
 // Close closes every contained Recorder, returning the first error seen
 // while still attempting the rest.
-func (c Composite) Close() error {
+func (rs Recorders) Close() error {
 	var firstErr error
-	for _, rec := range c {
+	for _, rec := range rs {
 		if rec == nil {
 			continue
 		}

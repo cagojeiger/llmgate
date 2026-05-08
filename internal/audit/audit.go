@@ -8,12 +8,28 @@ import (
 	"llmgate/internal/llmtypes"
 )
 
+// AuthError names the failure mode at the gateway auth boundary. The
+// wire response collapses every auth failure to 401, so the kind only
+// lives in the audit / access-log surface. Empty value means auth
+// succeeded (or the route had no auth at all).
+type AuthError string
+
+const (
+	AuthErrorMissing AuthError = "missing"
+	AuthErrorFormat  AuthError = "format"
+	AuthErrorUnknown AuthError = "unknown"
+)
+
 // Record captures the per-request audit payload.
 type Record struct {
 	Timestamp time.Time
 	RequestID string
 
-	Method         string // "chat.completions" | "chat.completions.stream"
+	// Operation is the gateway-domain method name —
+	// "chat.completions" or "chat.completions.stream" — not the HTTP
+	// method. Naming it Method would clash with r.Method (HTTP "POST")
+	// in mixed log streams.
+	Operation      string
 	ModelRequested string
 
 	// ConsumerName identifies the registered caller (matched yaml `name` in
@@ -22,19 +38,19 @@ type Record struct {
 	// brute-force / mis-configured-key activity is observable. ConsumerKeyID
 	// is the first 8 hex chars of the matched hash (sha256), useful for
 	// detecting which key in a rotating set was actually used. AuthError
-	// names the failure mode at the auth boundary ("missing" / "format" /
-	// "unknown") and is empty on success — it stays separate from ErrorKind
-	// because the wire response collapses every auth failure to 401, so
-	// the kind only lives in the audit / access-log surface.
+	// names the failure mode at the auth boundary and is empty on success
+	// — it stays separate from Kind because the wire response collapses
+	// every auth failure to 401, so the kind only lives in the audit /
+	// access-log surface.
 	ConsumerName  string
 	ConsumerKeyID string
-	AuthError     string
+	AuthError     AuthError
 
 	Vendor    string
 	ModelUsed string
 
 	StatusCode int
-	ErrorKind  llmtypes.ErrorKind
+	Kind       llmtypes.ErrorKind
 	DurationMS int64
 
 	RequestBytes  int64

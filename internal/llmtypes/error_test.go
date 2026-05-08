@@ -14,8 +14,8 @@ func TestErrorKindOf(t *testing.T) {
 		want ErrorKind
 	}{
 		{"nil", nil, ""},
-		{"provider kind", &Error{ErrorKind: KindRateLimit, Message: "slow"}, KindRateLimit},
-		{"wrapped provider kind", errors.Join(errors.New("outer"), &Error{ErrorKind: KindAuth, Message: "bad key"}), KindAuth},
+		{"provider kind", &Error{Kind: KindRateLimit, Message: "slow"}, KindRateLimit},
+		{"wrapped provider kind", errors.Join(errors.New("outer"), &Error{Kind: KindAuth, Message: "bad key"}), KindAuth},
 		{"deadline", context.DeadlineExceeded, KindTimeout},
 		{"unknown non-provider", errors.New("boom"), KindUnknown},
 		{"empty provider kind", &Error{Message: "empty kind"}, KindUnknown},
@@ -31,7 +31,7 @@ func TestErrorKindOf(t *testing.T) {
 
 func TestProviderErrorAccessors(t *testing.T) {
 	target := &Error{
-		ErrorKind:  KindRateLimit,
+		Kind:       KindRateLimit,
 		Message:    "slow down",
 		StatusCode: 429,
 		RetryAfter: 3 * time.Second,

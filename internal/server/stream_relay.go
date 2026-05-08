@@ -33,12 +33,12 @@ func newStreamRelay(log *slog.Logger, idleTimeout time.Duration) *streamRelay {
 
 // Run drives the SSE wire response. Returns when the stream has been
 // fully drained or a terminal condition was reached. rec is mutated in
-// place: StatusCode, ResponseBytes, ErrorKind. The caller's deferred
+// place: StatusCode, ResponseBytes, Kind. The caller's deferred
 // stream.Close() and adoptStreamSummary() finalize the rest.
 func (s *streamRelay) Run(ctx context.Context, w http.ResponseWriter, stream llmtypes.Stream, rec *audit.Record) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		perr := &llmtypes.Error{ErrorKind: llmtypes.KindUnknown, Message: "streaming unsupported"}
+		perr := &llmtypes.Error{Kind: llmtypes.KindUnknown, Message: "streaming unsupported"}
 		adoptError(rec, perr)
 		writeError(w, perr)
 		return
@@ -62,7 +62,7 @@ func (s *streamRelay) Run(ctx context.Context, w http.ResponseWriter, stream llm
 				s.recordClientClosed(ctx, rec, err)
 				return
 			}
-			rec.ErrorKind = llmtypes.ErrorKindOf(err)
+			rec.Kind = llmtypes.ErrorKindOf(err)
 			s.log.LogAttrs(ctx, slog.LevelWarn, "stream receive failed",
 				slog.String("vendor", rec.Vendor),
 				slog.String("err", err.Error()),
@@ -74,8 +74,8 @@ func (s *streamRelay) Run(ctx context.Context, w http.ResponseWriter, stream llm
 
 		payload, err := json.Marshal(event)
 		if err != nil {
-			perr := &llmtypes.Error{ErrorKind: llmtypes.KindUnknown, Message: "encode stream event: " + err.Error(), Cause: err}
-			rec.ErrorKind = perr.ErrorKind
+			perr := &llmtypes.Error{Kind: llmtypes.KindUnknown, Message: "encode stream event: " + err.Error(), Cause: err}
+			rec.Kind = perr.Kind
 			_ = sink.SendError(perr)
 			_ = sink.SendDone()
 			return
@@ -91,7 +91,7 @@ func (s *streamRelay) Run(ctx context.Context, w http.ResponseWriter, stream llm
 // Caller should return immediately afterwards — further writes would
 // fail the same way and SendDone would too.
 func (s *streamRelay) recordClientClosed(ctx context.Context, rec *audit.Record, werr error) {
-	rec.ErrorKind = llmtypes.KindClientClosed
+	rec.Kind = llmtypes.KindClientClosed
 	s.log.LogAttrs(ctx, slog.LevelInfo, "client disconnected mid-stream",
 		slog.String("vendor", rec.Vendor),
 		slog.String("err", werr.Error()),
@@ -128,12 +128,12 @@ func recvWithIdleTimeout(ctx context.Context, stream llmtypes.Stream, timeout ti
 	case <-timeoutC:
 		_ = stream.Close()
 		streaming.DrainRecvOrAbandon(ch, streaming.CloseGrace)
-		return nil, &llmtypes.Error{ErrorKind: llmtypes.KindTimeout, Message: "stream idle timeout"}
+		return nil, &llmtypes.Error{Kind: llmtypes.KindTimeout, Message: "stream idle timeout"}
 	case <-ctx.Done():
 		_ = stream.Close()
 		streaming.DrainRecvOrAbandon(ch, streaming.CloseGrace)
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, &llmtypes.Error{ErrorKind: llmtypes.KindTimeout, Message: ctx.Err().Error(), Cause: ctx.Err()}
+			return nil, &llmtypes.Error{Kind: llmtypes.KindTimeout, Message: ctx.Err().Error(), Cause: ctx.Err()}
 		}
 		return nil, ctx.Err()
 	}

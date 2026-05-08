@@ -3,7 +3,21 @@
 OpenAI SDK 와이어 호환 게이트웨이. 모델은 *기본 등록 단위*, **별명**이 *실제 제어 단위*.
 별명 하나가 chain 으로 풀리고 chain 을 따라 자동 폴백한다. DB 없음, fact 만 발행, 비용 /
 한도 계산은 후처리 시스템 책임 — 풀-피처 게이트웨이의 운영 면적을 *한 사람 머리에 들어오는
-작은 컴포넌트* 로 좁힌 게 정체성. 컴포넌트 책임 분할은 ADR 001.
+작은 컴포넌트* 로 좁힌 게 정체성. 컴포넌트 책임 분할은 [ADR 001](adr/001-component-boundaries.md).
+
+## 문서 지도
+
+본 페이지는 시스템 지도와 코드 구조만 둔다. 세부 항목은 개념별 자식 문서.
+
+| 문서 | 다루는 것 |
+|---|---|
+| [data.md](data.md) | catalog / consumers yaml 형태와 검증 정책 |
+| [config.md](config.md) | `LLMGATE_*` 환경 변수 |
+| [lifecycle.md](lifecycle.md) | 부팅 시퀀스 + 프로브 + 셧다운 / drain |
+| [request.md](request.md) | 요청 생애주기 + 스트리밍 폴백 경계 |
+| [logs.md](logs.md) | access / audit 두 로그 갈래와 키 스키마 |
+| [identity.md](identity.md) | 상태 위치 + 의도적 미지원 (V1 거절 목록) |
+| [adr/](adr/) | Accepted 결정 기록 (5개) |
 
 ## 시스템 지도
 
@@ -72,17 +86,17 @@ graph LR
 | 레이어 | 컴포넌트 | 역할 |
 |---|---|---|
 | Delivery | HTTP Server | chi 라우터 + request_id / clientContext / access log / recoverer / read+request timeout. `/v1/chat/completions` (auth 보호), `/healthz/live` · `/healthz/ready` · `/healthz` (공개) |
-| Delivery | auth middleware | `Authorization: Bearer` 추출 → sha256 → consumers Store lookup → ctx 에 ConsumerInfo 기록. 실패해도 short-circuit 안 함 — Handler 가 audit-always emit (ADR 003) |
-| Delivery | Handler | 요청 디코드, stream / non-stream 분기. ConsumerInfo 로 Record 채움 + auth 실패 시 401. 요청 총 wall-clock 한도의 권위자 (ADR 005) |
-| Delivery | streamRelay | 스트림 열린 뒤 SSE wire transcript. 이벤트 전송, idle timeout, client_closed, mid-stream error, `[DONE]` (ADR 004). 스트림 idle 한도의 권위자 (ADR 005) |
+| Delivery | auth middleware | `Authorization: Bearer` 추출 → sha256 → consumers Store lookup → ctx 에 ConsumerInfo 기록. 실패해도 short-circuit 안 함 — Handler 가 audit-always emit ([ADR 003](adr/003-consumers.md)) |
+| Delivery | Handler | 요청 디코드, stream / non-stream 분기. ConsumerInfo 로 Record 채움 + auth 실패 시 401. 요청 총 wall-clock 한도의 권위자 ([ADR 005](adr/005-timeout-authority.md)) |
+| Delivery | streamRelay | 스트림 열린 뒤 SSE wire transcript. 이벤트 전송, idle timeout, client_closed, mid-stream error, `[DONE]` ([ADR 004](adr/004-fallback-policy.md)). 스트림 idle 한도의 권위자 ([ADR 005](adr/005-timeout-authority.md)) |
 | Delivery | ProbeState | SIGTERM 시 `MarkShuttingDown()` → readiness 만 503. liveness · in-flight 영향 없음 |
 | Delivery | Audit Recorder | 요청당 1 개 fact record. consumer_name + consumer_key_id + auth_error 포함 — *누가 / 왜 실패* 의 사실 |
-| Routing | llmrouter.Service | 별명 → chain 해석, 폴백 적격 판정, 회로 차단 (ADR 004). non-stream 시도당 한도의 권위자 (ADR 005). stdlib + llmtypes 만 import |
-| Providers | OpenAI Adapter | OpenAI 와이어 호출. status 분류 + 첫 이벤트 검증 (ADR 004) |
-| Providers | Anthropic Adapter | Anthropic ↔ OpenAI 와이어 양방향 변환 (tools / tool_choice / tool_calls / tool_use). status 분류 + 첫 이벤트 검증 (ADR 004) |
-| Boot data | consumers Store | 부팅 시 yaml → sha256 → consumer 매핑 read-only. 0 개면 부팅 fail (ADR 003). Delivery 의 auth middleware 가 소비 |
+| Routing | llmrouter.Service | 별명 → chain 해석, 폴백 적격 판정, 회로 차단 ([ADR 004](adr/004-fallback-policy.md)). non-stream 시도당 한도의 권위자 ([ADR 005](adr/005-timeout-authority.md)). stdlib + llmtypes 만 import |
+| Providers | OpenAI Adapter | OpenAI 와이어 호출. status 분류 + 첫 이벤트 검증 ([ADR 004](adr/004-fallback-policy.md)) |
+| Providers | Anthropic Adapter | Anthropic ↔ OpenAI 와이어 양방향 변환 (tools / tool_choice / tool_calls / tool_use). status 분류 + 첫 이벤트 검증 ([ADR 004](adr/004-fallback-policy.md)) |
+| Boot data | consumers Store | 부팅 시 yaml → sha256 → consumer 매핑 read-only. 0 개면 부팅 fail ([ADR 003](adr/003-consumers.md)). Delivery 의 auth middleware 가 소비 |
 
-각 컴포넌트의 단일 책임 (*권위자가 한 명*) 결정 근거는 ADR 001.
+각 컴포넌트의 단일 책임 (*권위자가 한 명*) 결정 근거는 [ADR 001](adr/001-component-boundaries.md).
 
 ## 코드 구조
 
@@ -102,195 +116,8 @@ internal/providers/          벤더 어댑터
 internal/llmrouter/          별명 → chain, 폴백, 회로 (service.go + breaker.go)
 internal/streaming/          스트림 시작 검증 + close grace helper
 internal/server/             chi + middleware + auth + handler + streamRelay + probes
-internal/audit/              Recorder + LogRecorder (stdout)
+internal/audit/              Recorder + SlogRecorder (stdout)
 cmd/llmgate/                 wiring + shutdown
 scripts/gen-consumer.sh      호출자 발급 헬퍼
 docs/adr/                    Accepted 결정 기록
 ```
-
-## 카탈로그 / 호출자 yaml
-
-```
-catalog/                              consumers/
-├── models/<id>.yaml                  └── <name>.yaml
-│      id + vendor + protocol            name +
-│      + base_url + auth_env             key_hashes (sha256:hex64)
-│      + auth_scheme                     [raw 키는 디스크 미존재]
-└── aliases/<name>.yaml
-       alias + chain
-```
-
-샘플:
-
-```yaml
-# catalog/models/deepseek-v4-flash.yaml
-id: deepseek-v4-flash
-vendor: opencode
-protocol: openai
-base_url: https://api.opencode.example/v1
-auth_env: LLMGATE_OPENCODE_API_KEY
-auth_scheme: bearer
-```
-
-```yaml
-# catalog/aliases/smart.yaml
-alias: smart
-chain:
-  - kimi-k2.6
-  - deepseek-v4-pro
-  - deepseek-v4-flash
-```
-
-```yaml
-# consumers/acme-prod.yaml
-name: acme-prod
-key_hashes:
-  - sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
-```
-
-데이터 / 정책 / 코드가 세 자리에 산다 — yaml = 운영 데이터, env = 인프라·시크릿, 코드 = 알고리즘.
-- **catalog**: 별명 호출만 chain 폴백 (raw model id 호출은 chain 길이 1, 폴백 발동 자체 없음). 모르는 필드 → 부팅 fail. 결정 근거 ADR 002.
-- **consumers**: `scripts/gen-consumer.sh` 가 raw 키 발급 → sha256 만 yaml 에 박음. multi-key 활성 가능 (회전 윈도우). 부재 / 빈 디렉토리 → 부팅 fail (닫힘 default). 결정 근거 ADR 003.
-
-## 환경 변수
-
-폴백 / 회로 결정 근거는 ADR 004, 타임아웃 권위자 분리는 ADR 005.
-
-| 변수 | 디폴트 | 의미 |
-|---|---|---|
-| `LLMGATE_FALLBACK_ON` | `rate_limit,upstream,timeout,network` | chain 진행 사유 |
-| `LLMGATE_CIRCUIT_FAILURES` | `3` | 연속 실패 임계 (0 = 비활성) |
-| `LLMGATE_CIRCUIT_OPEN_DURATION` | `30s` | 차단 기본 시간 |
-| `LLMGATE_CIRCUIT_MAX_OPEN_DURATION` | `5m` | 차단 최대 시간 (백오프 cap) |
-| `LLMGATE_CIRCUIT_JITTER` | `0.2` | 차단 시간 ±지터 |
-| `LLMGATE_REQUEST_TIMEOUT` | `5m` | 요청 1 회 총 wall-clock |
-| `LLMGATE_COMPLETE_TIMEOUT` | `1m` | non-stream 시도당 |
-| `LLMGATE_STREAM_IDLE_TIMEOUT` | `1m` | 스트림 이벤트 사이 idle |
-| `LLMGATE_CATALOG` | `./catalog` | catalog 디렉토리 (부재 → fail) |
-| `LLMGATE_CONSUMERS` | `./consumers` | consumers 디렉토리 (부재 → fail) |
-| `LLMGATE_SHUTDOWN_DRAIN_TIMEOUT` | `5m` | drain 최대 wall-clock, 이후 force close |
-
-## 부팅 시퀀스
-
-```mermaid
-graph TD
-    Env[env config] --> ServerCfg[Server config]
-    Env --> Policy[fallback / circuit / timeouts]
-    CatalogM[catalog/models] --> Adapters[Adapter instances]
-    Adapters --> Service[llmrouter.Service]
-    CatalogA[catalog/aliases] --> Service
-    Policy --> Service
-    Consumers[consumers/] --> Store[sha256 → name store]
-    ServerCfg --> Server
-    Store --> Server
-    Service --> Server
-    Probe[ProbeState] --> Server
-    Server --> Listen([HTTP Listen])
-```
-
-순서 (`cmd/llmgate/main.go`): env 로드 → catalog 파싱 → adapter factory → llmrouter.Service 조립 → consumers 파싱 (0 개면 fail) → Audit + Handler + middleware wire → ProbeState + Listen.
-
-## 프로브 & 셧다운
-
-```mermaid
-stateDiagram-v2
-    [*] --> Ready: 부팅 완료
-    Ready --> Draining: SIGTERM<br/>+probe.MarkShuttingDown()
-    Draining --> Drained: in-flight<br/>자연 종료
-    Draining --> ForceClosed: drain timeout<br/>경과
-    Drained --> [*]
-    ForceClosed --> [*]
-```
-
-엔드포인트 응답 (각 상태에서):
-
-```
-                       Ready                Draining / ForceClosed
-GET /healthz/live    →  200 ok            →  200 ok               (항상)
-GET /healthz/ready   →  200 ready         →  503 shutting_down
-GET /healthz         →  200 ready         →  503 shutting_down    (legacy alias)
-```
-
-`LLMGATE_SHUTDOWN_DRAIN_TIMEOUT` (디폴트 5m) 이 drain 의 상한. 오케스트레이터의
-`terminationGracePeriodSeconds` (k8s) / `stop_grace_period` (compose) 를 이 값보다 살짝 크게
-잡아 SIGKILL 이전에 앱 단 force close 가 먼저 발화하게 한다. preStop `sleep` 으로
-endpoint propagation lag 를 깔면 readiness flip 과 신규 트래픽 차단 사이의 race 가 줄어든다.
-
-## 요청 생애주기
-
-```mermaid
-sequenceDiagram
-    participant A as Agent
-    participant M as auth middleware
-    participant H as Handler
-    participant S as llmrouter.Service
-    participant P as Adapter
-    participant Au as Audit
-
-    A->>M: POST /v1/chat/completions<br/>Authorization: Bearer ...
-    Note over M: sha256(raw) lookup → ConsumerInfo on ctx<br/>(audit-always: pass through on failure)
-    M->>H: next(r)
-    Note over H: ConsumerInfo → Record<br/>(auth 실패 시 401 emit + return)
-    H->>S: Complete(req)
-    Note over S: 별명 해석 → chain 시도<br/>실패마다 Attempt 누적
-    S-->>H: Result
-    H-->>A: 200 OK
-    H->>Au: Record (consumer_name + key_id + (auth_error?))
-```
-
-## 스트리밍 폴백 경계
-
-```
-Time ───────────────────────────────────────────────────────────────►
-
-   ┌── status open ──┐    ┌── first event ──┐    ┌── mid-stream ────────┐
-   │ HTTP status     │    │ 첫 chunk 검증    │    │ Recv 루프 / idle /   │
-   │ 분류 (adapter)  │    │ (adapter)       │    │ [DONE] (responder)   │
-   └────────┬────────┘    └─────────┬───────┘    └──────────┬───────────┘
-            │                       │                       │
-        ✅ fallback              ✅ fallback              ❌ no fallback
-        (llmrouter.Service)      (llmrouter.Service)      SSE error frame
-                                                          + [DONE], 종결
-
-   ◄────────── 폴백 가능 영역 ──────────►◄────── 폴백 불가 ──────►
-```
-
-`llmrouter.Service` 는 status open / first event 단계의 실패만 받는다 — 와이어 분류는 adapter 가 끝낸
-상태이므로 폴백 적격 판정 (ADR 004) 을 non-stream 과 같은 규칙으로 적용. 스트림 시작에
-별도 timeout 을 만들지 않고 Handler 의 request context 를 그대로 넘긴다 (ADR 005) —
-시작 / 첫 이벤트 / 전송 전체가 `LLMGATE_REQUEST_TIMEOUT` 하나를 공유.
-
-Handler 가 200 OK 를 커밋한 뒤에는 streamRelay 가 SSE 전송. 이벤트 사이 idle 은
-`LLMGATE_STREAM_IDLE_TIMEOUT`, end-of-stream 에서 `Stream.Summary()` 로 usage / finish
-reason 을 audit 에 finalize. mid-stream 폴백 거부 근거 (HTTP 시맨틱 / SDK 호환 / record
-무결성) 는 ADR 004.
-
-## 상태가 어디 사는가
-
-| 데이터 | 위치 | 수명 |
-|---|---|---|
-| 모델 / 별명 | `catalog/` yaml | 외부 갱신 시 재시작 |
-| 호출자 등록 (해시만) | `consumers/` yaml | 외부 갱신 시 재시작 |
-| 호출자 raw 키 | **gateway 보관 안 함** (호출자 측 vault) | — |
-| 라우팅 정책 + 서버 런타임 | env → Server config | 프로세스 수명 |
-| 회로 차단 상태 | `llmrouter.Service` breakerStore (per-process) | 프로세스 수명 |
-| 호출자 lookup | consumers Store (per-process) | 프로세스 수명 |
-| 요청별 시도 이력 | Result → Record | 요청 1 회 |
-| 감사 record | Sink 정책 따라 | Sink 정책 |
-| 비용 / 한도 / 단가 | **gateway 보관 안 함** | 후처리 시스템 |
-
-## 의도적 미지원
-
-V1 에서 다음을 *지원하지 않는다*. 디폴트는 거절 — 외부 요청에 같은 잣대로 응답한다.
-
-| 항목 | 거절 근거 |
-|---|---|
-| **mid-stream 폴백** | HTTP 시맨틱 + SDK 호환 + record 무결성 셋 동시 위반. 첫 chunk 송출 후 vendor 교체 안 함 (ADR 004) |
-| **capability matching / `/v1/models` discovery** | 게이트웨이가 모델 능력을 *판정* = 파생 값 생성. *사실만 발행* 위반. 능력은 호출자가 안다 |
-| **hot-reload** | yaml 갱신 실시간 반영 시 *언제 반영됐나* 가 흐려지고 같은 호출이 부분 적용된 catalog 를 보는 race. 재시작 = 적용 |
-| **모델 메타 (가격 / context window / capabilities)** | yaml 에 안 박음. destination 없음 — 가격은 후처리 시스템이 record 받아 계산 |
-| **multi-key smart distribution** | 키별 사용량 상태 = *상태 없음* 위반. 같은 vendor model 을 다른 yaml 두 장에 다른 인증으로 등록하면 catalog 에서 별개 모델 → alias chain 자연 단위 (ADR 002 부수 효과) |
-| **사전 한도 차단 (pre-call quota)** | 외부 상태 조회 = 상태 없음 위반. 한도는 후처리 시스템이 record 모아 판정 |
-| **k8s · CRD 인지 / 게이트웨이 안 operator** | *환경 의존* 이 게이트웨이 정체성에 새로 들어옴. operator 가 필요해지면 *외부* 컴포넌트가 yaml 굴림 — 게이트웨이는 mount path 만 본다 |
-
-"이 정도면 가벼우니" 의 누적 압력 — 항목이 늘면 본 문서 갱신으로 응답.

@@ -10,7 +10,7 @@ type Attempt struct {
 	StartedAt  time.Time
 	DurationMS int64
 	StatusCode int
-	ErrorKind  ErrorKind
+	Kind       ErrorKind
 	Usage      *Usage
 	VendorCost string
 }

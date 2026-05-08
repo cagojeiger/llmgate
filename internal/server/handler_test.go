@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"llmgate/internal/audit"
-	"llmgate/internal/llmtypes"
 	"llmgate/internal/llmrouter"
+	"llmgate/internal/llmtypes"
 	"llmgate/internal/providers/fake"
 	"llmgate/internal/streaming"
 )
@@ -75,7 +75,7 @@ func TestHandler_FallbackChain_AttemptsRecorded(t *testing.T) {
 				Vendor:    "opencode",
 				ModelUsed: "deepseek-v4-flash",
 				Attempts: []llmtypes.Attempt{
-					{Vendor: "opencode", Model: "deepseek-v4-pro", ErrorKind: llmtypes.KindRateLimit, StatusCode: 429, StartedAt: time.Now()},
+					{Vendor: "opencode", Model: "deepseek-v4-pro", Kind: llmtypes.KindRateLimit, StatusCode: 429, StartedAt: time.Now()},
 					{Vendor: "opencode", Model: "deepseek-v4-flash", StatusCode: 200, StartedAt: time.Now()},
 				},
 			}
@@ -101,8 +101,8 @@ func TestHandler_FallbackChain_AttemptsRecorded(t *testing.T) {
 	if len(got.Attempts) != 2 {
 		t.Fatalf("len(Attempts) = %d, want 2", len(got.Attempts))
 	}
-	if got.Attempts[0].ErrorKind != llmtypes.KindRateLimit {
-		t.Errorf("attempts[0].ErrorKind = %q, want rate_limit", got.Attempts[0].ErrorKind)
+	if got.Attempts[0].Kind != llmtypes.KindRateLimit {
+		t.Errorf("attempts[0].Kind = %q, want rate_limit", got.Attempts[0].Kind)
 	}
 }
 
@@ -123,9 +123,9 @@ func TestAdoptError_ProviderErrorMapsKindAndStatus(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := &audit.Record{}
-			adoptError(rec, &llmtypes.Error{ErrorKind: tc.kind, Message: "x"})
-			if rec.ErrorKind != tc.kind {
-				t.Errorf("ErrorKind = %q, want %q", rec.ErrorKind, tc.kind)
+			adoptError(rec, &llmtypes.Error{Kind: tc.kind, Message: "x"})
+			if rec.Kind != tc.kind {
+				t.Errorf("Kind = %q, want %q", rec.Kind, tc.kind)
 			}
 			if rec.StatusCode != tc.wantStatus {
 				t.Errorf("StatusCode = %d, want %d", rec.StatusCode, tc.wantStatus)
@@ -137,8 +137,8 @@ func TestAdoptError_ProviderErrorMapsKindAndStatus(t *testing.T) {
 func TestAdoptError_NonProviderError_Falls500Unknown(t *testing.T) {
 	rec := &audit.Record{}
 	adoptError(rec, io.ErrUnexpectedEOF)
-	if rec.ErrorKind != llmtypes.KindUnknown {
-		t.Errorf("ErrorKind = %q, want unknown", rec.ErrorKind)
+	if rec.Kind != llmtypes.KindUnknown {
+		t.Errorf("Kind = %q, want unknown", rec.Kind)
 	}
 	if rec.StatusCode != http.StatusInternalServerError {
 		t.Errorf("StatusCode = %d, want 500", rec.StatusCode)
@@ -179,13 +179,13 @@ func TestAdoptStreamSummary_FinalizesAttemptAndRecord(t *testing.T) {
 }
 
 func TestAdoptStreamSummary_PropagatesRecvErrorKindToAttempt(t *testing.T) {
-	// Recv loop set rec.ErrorKind; the deferred summary sync must mirror
+	// Recv loop set rec.Kind; the deferred summary sync must mirror
 	// it onto the in-flight Attempt so audit logs stay symmetric with the
 	// non-stream path.
 	started := time.Unix(1700000000, 0)
 	now := started.Add(100 * time.Millisecond)
 	rec := &audit.Record{
-		ErrorKind: llmtypes.KindUpstream,
+		Kind: llmtypes.KindUpstream,
 		Attempts: []llmtypes.Attempt{
 			{Vendor: "v", Model: "m", StartedAt: started},
 		},
@@ -193,8 +193,8 @@ func TestAdoptStreamSummary_PropagatesRecvErrorKindToAttempt(t *testing.T) {
 
 	adoptStreamSummary(rec, nil, now)
 
-	if rec.Attempts[0].ErrorKind != llmtypes.KindUpstream {
-		t.Errorf("attempt ErrorKind = %q, want upstream", rec.Attempts[0].ErrorKind)
+	if rec.Attempts[0].Kind != llmtypes.KindUpstream {
+		t.Errorf("attempt ErrorKind = %q, want upstream", rec.Attempts[0].Kind)
 	}
 	if rec.Attempts[0].DurationMS != 100 {
 		t.Errorf("DurationMS = %d, want 100", rec.Attempts[0].DurationMS)
@@ -248,8 +248,8 @@ func TestHandler_Stream_NormalEOF(t *testing.T) {
 	}
 
 	got := captured.last(t)
-	if got.Method != "chat.completions.stream" {
-		t.Errorf("Method = %q, want chat.completions.stream", got.Method)
+	if got.Operation != "chat.completions.stream" {
+		t.Errorf("Operation = %q, want chat.completions.stream", got.Operation)
 	}
 	if got.StatusCode != 200 {
 		t.Errorf("StatusCode = %d, want 200", got.StatusCode)
@@ -274,7 +274,7 @@ func TestHandler_Stream_RecvError_PropagatesErrorKind(t *testing.T) {
 		fake.WithEvents([]*llmtypes.Event{
 			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: "partial"}}}},
 		}),
-		fake.WithRecvErr(&llmtypes.Error{ErrorKind: llmtypes.KindUpstream, Message: "boom mid-stream"}),
+		fake.WithRecvErr(&llmtypes.Error{Kind: llmtypes.KindUpstream, Message: "boom mid-stream"}),
 		fake.WithSummary(&llmtypes.Summary{}),
 	)
 	r := &fakeService{
@@ -313,11 +313,11 @@ func TestHandler_Stream_RecvError_PropagatesErrorKind(t *testing.T) {
 	}
 
 	got := captured.last(t)
-	if got.ErrorKind != llmtypes.KindUpstream {
-		t.Errorf("rec.ErrorKind = %q, want upstream", got.ErrorKind)
+	if got.Kind != llmtypes.KindUpstream {
+		t.Errorf("rec.Kind = %q, want upstream", got.Kind)
 	}
-	if len(got.Attempts) != 1 || got.Attempts[0].ErrorKind != llmtypes.KindUpstream {
-		t.Errorf("Attempts[0].ErrorKind not propagated: %+v", got.Attempts)
+	if len(got.Attempts) != 1 || got.Attempts[0].Kind != llmtypes.KindUpstream {
+		t.Errorf("Attempts[0].Kind not propagated: %+v", got.Attempts)
 	}
 }
 
@@ -360,11 +360,11 @@ func TestHandler_Stream_IdleTimeoutSendsError(t *testing.T) {
 	}
 
 	got := captured.last(t)
-	if got.ErrorKind != llmtypes.KindTimeout {
-		t.Errorf("rec.ErrorKind = %q, want timeout", got.ErrorKind)
+	if got.Kind != llmtypes.KindTimeout {
+		t.Errorf("rec.Kind = %q, want timeout", got.Kind)
 	}
-	if len(got.Attempts) != 1 || got.Attempts[0].ErrorKind != llmtypes.KindTimeout {
-		t.Errorf("Attempts[0].ErrorKind not propagated: %+v", got.Attempts)
+	if len(got.Attempts) != 1 || got.Attempts[0].Kind != llmtypes.KindTimeout {
+		t.Errorf("Attempts[0].Kind not propagated: %+v", got.Attempts)
 	}
 	if streamObj.Closed() == 0 {
 		t.Errorf("Stream.Close() calls = 0, want at least 1")
@@ -410,11 +410,11 @@ func TestHandler_Stream_RequestTimeoutSendsError(t *testing.T) {
 	}
 
 	got := captured.last(t)
-	if got.ErrorKind != llmtypes.KindTimeout {
-		t.Errorf("rec.ErrorKind = %q, want timeout", got.ErrorKind)
+	if got.Kind != llmtypes.KindTimeout {
+		t.Errorf("rec.Kind = %q, want timeout", got.Kind)
 	}
-	if len(got.Attempts) != 1 || got.Attempts[0].ErrorKind != llmtypes.KindTimeout {
-		t.Errorf("Attempts[0].ErrorKind not propagated: %+v", got.Attempts)
+	if len(got.Attempts) != 1 || got.Attempts[0].Kind != llmtypes.KindTimeout {
+		t.Errorf("Attempts[0].Kind not propagated: %+v", got.Attempts)
 	}
 }
 
@@ -448,8 +448,8 @@ func TestHandler_Stream_ContextCanceledRecordsClientClosed(t *testing.T) {
 	h.ServeHTTP(w, req)
 
 	got := captured.last(t)
-	if got.ErrorKind != llmtypes.KindClientClosed {
-		t.Fatalf("ErrorKind = %q, want client_closed", got.ErrorKind)
+	if got.Kind != llmtypes.KindClientClosed {
+		t.Fatalf("Kind = %q, want client_closed", got.Kind)
 	}
 	if streamObj.Closed() == 0 {
 		t.Errorf("Stream.Close() calls = 0, want at least 1")
@@ -491,8 +491,8 @@ func TestHandler_Stream_ClientDisconnect_MidStream(t *testing.T) {
 	h.ServeHTTP(w, req)
 
 	got := captured.last(t)
-	if got.ErrorKind != llmtypes.KindClientClosed {
-		t.Fatalf("ErrorKind = %q, want client_closed", got.ErrorKind)
+	if got.Kind != llmtypes.KindClientClosed {
+		t.Fatalf("Kind = %q, want client_closed", got.Kind)
 	}
 	// Loop runs two Recvs: events[0] sends OK, events[1] send fails, handler
 	// bails. events[2] must remain unread.
@@ -537,8 +537,8 @@ func TestHandler_Stream_ClientDisconnect_OnDone(t *testing.T) {
 	h.ServeHTTP(w, req)
 
 	got := captured.last(t)
-	if got.ErrorKind != llmtypes.KindClientClosed {
-		t.Errorf("ErrorKind = %q, want client_closed (SendDone failed)", got.ErrorKind)
+	if got.Kind != llmtypes.KindClientClosed {
+		t.Errorf("Kind = %q, want client_closed (SendDone failed)", got.Kind)
 	}
 }
 
@@ -574,8 +574,8 @@ func TestHandler_Stream_ClientDisconnect_OnFirstEvent(t *testing.T) {
 	h.ServeHTTP(w, req)
 
 	got := captured.last(t)
-	if got.ErrorKind != llmtypes.KindClientClosed {
-		t.Fatalf("ErrorKind = %q, want client_closed", got.ErrorKind)
+	if got.Kind != llmtypes.KindClientClosed {
+		t.Fatalf("Kind = %q, want client_closed", got.Kind)
 	}
 	if streamObj.Cursor() != 1 {
 		t.Errorf("stream cursor = %d, want 1 (one Recv before first Send fails)", streamObj.Cursor())
@@ -610,8 +610,8 @@ func TestHandler_NonStream_ClientDisconnect(t *testing.T) {
 	h.ServeHTTP(w, req)
 
 	got := captured.last(t)
-	if got.ErrorKind != llmtypes.KindClientClosed {
-		t.Errorf("ErrorKind = %q, want client_closed", got.ErrorKind)
+	if got.Kind != llmtypes.KindClientClosed {
+		t.Errorf("Kind = %q, want client_closed", got.Kind)
 	}
 	if got.StatusCode != http.StatusOK {
 		t.Errorf("StatusCode = %d, want 200 (already flushed before write failure)", got.StatusCode)
@@ -654,9 +654,9 @@ func TestHandler_Stream_PreStreamServiceError(t *testing.T) {
 				Vendor:    "opencode",
 				ModelUsed: req.Model,
 				Attempts: []llmtypes.Attempt{
-					{Vendor: "opencode", Model: req.Model, ErrorKind: llmtypes.KindAuth, StatusCode: 401, StartedAt: time.Now()},
+					{Vendor: "opencode", Model: req.Model, Kind: llmtypes.KindAuth, StatusCode: 401, StartedAt: time.Now()},
 				},
-			}, &llmtypes.Error{ErrorKind: llmtypes.KindAuth, Message: "no key"}
+			}, &llmtypes.Error{Kind: llmtypes.KindAuth, Message: "no key"}
 		},
 	}
 	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
@@ -677,13 +677,13 @@ func TestHandler_Stream_PreStreamServiceError(t *testing.T) {
 	}
 
 	got := captured.last(t)
-	if got.ErrorKind != llmtypes.KindAuth {
-		t.Errorf("rec.ErrorKind = %q, want auth", got.ErrorKind)
+	if got.Kind != llmtypes.KindAuth {
+		t.Errorf("rec.Kind = %q, want auth", got.Kind)
 	}
 	if got.StatusCode != http.StatusUnauthorized {
 		t.Errorf("rec.StatusCode = %d, want 401", got.StatusCode)
 	}
-	if len(got.Attempts) != 1 || got.Attempts[0].ErrorKind != llmtypes.KindAuth {
+	if len(got.Attempts) != 1 || got.Attempts[0].Kind != llmtypes.KindAuth {
 		t.Errorf("Attempts[0] = %+v, want auth attempt", got.Attempts)
 	}
 }
@@ -706,7 +706,7 @@ func (f *fakeService) CompleteStream(_ context.Context, req *llmtypes.Request) (
 	if f.buildStreamResult != nil {
 		return f.buildStreamResult(req)
 	}
-	return &llmrouter.RouteResult{}, &llmtypes.Error{ErrorKind: llmtypes.KindUpstream, Message: "stream not implemented in this fake"}
+	return &llmrouter.RouteResult{}, &llmtypes.Error{Kind: llmtypes.KindUpstream, Message: "stream not implemented in this fake"}
 }
 
 type captureRecorder struct {
@@ -806,7 +806,7 @@ func TestRecvWithIdleTimeout_BoundedDrainOnIdleTimeout(t *testing.T) {
 		t.Fatalf("recvWithIdleTimeout returned in %v, want < 500ms", elapsed)
 	}
 	var perr *llmtypes.Error
-	if !errors.As(err, &perr) || perr.ErrorKind != llmtypes.KindTimeout {
+	if !errors.As(err, &perr) || perr.Kind != llmtypes.KindTimeout {
 		t.Errorf("err = %v, want KindTimeout llmtypes.Error", err)
 	}
 	if s.closeCalled == 0 {

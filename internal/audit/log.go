@@ -5,19 +5,21 @@ import (
 	"log/slog"
 )
 
-// LogRecorder emits each Record as one structured slog line.
-type LogRecorder struct {
+// SlogRecorder emits each Record as one structured slog line. The
+// prefix names the backing technology (slog) — same convention as
+// bufio.Reader / slog.JSONHandler.
+type SlogRecorder struct {
 	log *slog.Logger
 }
 
-func NewLogRecorder(log *slog.Logger) *LogRecorder {
+func NewSlogRecorder(log *slog.Logger) *SlogRecorder {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &LogRecorder{log: log}
+	return &SlogRecorder{log: log}
 }
 
-func (r *LogRecorder) Record(ctx context.Context, rec *Record) {
+func (r *SlogRecorder) Record(ctx context.Context, rec *Record) {
 	if rec == nil {
 		return
 	}
@@ -25,7 +27,7 @@ func (r *LogRecorder) Record(ctx context.Context, rec *Record) {
 	attrs := []slog.Attr{
 		slog.Time("timestamp", rec.Timestamp),
 		slog.String("request_id", rec.RequestID),
-		slog.String("method", rec.Method),
+		slog.String("operation", rec.Operation),
 		slog.String("model_requested", rec.ModelRequested),
 		slog.Int("status", rec.StatusCode),
 		slog.Int64("duration_ms", rec.DurationMS),
@@ -39,7 +41,7 @@ func (r *LogRecorder) Record(ctx context.Context, rec *Record) {
 		attrs = append(attrs, slog.String("consumer_key_id", rec.ConsumerKeyID))
 	}
 	if rec.AuthError != "" {
-		attrs = append(attrs, slog.String("auth_error", rec.AuthError))
+		attrs = append(attrs, slog.String("auth_error", string(rec.AuthError)))
 	}
 	if rec.Vendor != "" {
 		attrs = append(attrs, slog.String("vendor", rec.Vendor))
@@ -47,8 +49,8 @@ func (r *LogRecorder) Record(ctx context.Context, rec *Record) {
 	if rec.ModelUsed != "" && rec.ModelUsed != rec.ModelRequested {
 		attrs = append(attrs, slog.String("model_used", rec.ModelUsed))
 	}
-	if rec.ErrorKind != "" {
-		attrs = append(attrs, slog.String("error_kind", string(rec.ErrorKind)))
+	if rec.Kind != "" {
+		attrs = append(attrs, slog.String("error_kind", string(rec.Kind)))
 	}
 	if rec.Usage != nil {
 		attrs = append(attrs,
@@ -69,4 +71,4 @@ func (r *LogRecorder) Record(ctx context.Context, rec *Record) {
 	r.log.LogAttrs(ctx, slog.LevelInfo, "audit", attrs...)
 }
 
-func (r *LogRecorder) Close() error { return nil }
+func (r *SlogRecorder) Close() error { return nil }

@@ -24,7 +24,7 @@ const (
 )
 
 type Error struct {
-	ErrorKind  ErrorKind
+	Kind       ErrorKind
 	Provider   string
 	Message    string
 	StatusCode int
@@ -38,9 +38,9 @@ func (e *Error) Error() string {
 		return "<nil>"
 	}
 	if e.Provider != "" {
-		return fmt.Sprintf("%s/%s: %s", e.Provider, e.ErrorKind, e.Message)
+		return fmt.Sprintf("%s/%s: %s", e.Provider, e.Kind, e.Message)
 	}
-	return fmt.Sprintf("%s: %s", e.ErrorKind, e.Message)
+	return fmt.Sprintf("%s: %s", e.Kind, e.Message)
 }
 
 func (e *Error) Unwrap() error { return e.Cause }
@@ -50,10 +50,10 @@ func (e *Error) Is(target error) bool {
 	if !errors.As(target, &t) {
 		return false
 	}
-	if t.ErrorKind == "" {
+	if t.Kind == "" {
 		return false
 	}
-	return e.ErrorKind == t.ErrorKind
+	return e.Kind == t.Kind
 }
 
 // ErrorKindOf extracts the gateway error kind from err. It is the common
@@ -64,8 +64,8 @@ func ErrorKindOf(err error) ErrorKind {
 		return ""
 	}
 	var perr *Error
-	if errors.As(err, &perr) && perr.ErrorKind != "" {
-		return perr.ErrorKind
+	if errors.As(err, &perr) && perr.Kind != "" {
+		return perr.Kind
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return KindTimeout

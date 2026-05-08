@@ -65,11 +65,11 @@ func (s *stream) Recv() (*llmtypes.Event, error) {
 	var event llmtypes.Event
 	if err := json.Unmarshal(data, &event); err != nil {
 		return nil, &llmtypes.Error{
-			ErrorKind: llmtypes.KindUpstream,
-			Provider:  s.ProviderName,
-			Message:   "decode stream event: " + err.Error(),
-			Cause:     err,
-			Raw:       upstream.FirstBytes(data),
+			Kind:     llmtypes.KindUpstream,
+			Provider: s.ProviderName,
+			Message:  "decode stream event: " + err.Error(),
+			Cause:    err,
+			Raw:      upstream.FirstBytes(data),
 		}
 	}
 
@@ -120,9 +120,9 @@ func parseStreamError(data []byte, providerName string) *llmtypes.Error {
 		return nil
 	}
 	return &llmtypes.Error{
-		ErrorKind: kindFromOpenAIError(0, env),
-		Provider:  providerName,
-		Message:   env.Message,
-		Raw:       upstream.FirstBytes(data),
+		Kind:     kindFromOpenAIError(0, env),
+		Provider: providerName,
+		Message:  env.Message,
+		Raw:      upstream.FirstBytes(data),
 	}
 }

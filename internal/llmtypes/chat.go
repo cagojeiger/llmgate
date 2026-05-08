@@ -57,13 +57,13 @@ type Request struct {
 
 func (r *Request) Validate() error {
 	if r == nil {
-		return &Error{ErrorKind: KindBadRequest, Message: "request is nil"}
+		return &Error{Kind: KindBadRequest, Message: "request is nil"}
 	}
 	if r.Model == "" {
-		return &Error{ErrorKind: KindBadRequest, Message: "model is required"}
+		return &Error{Kind: KindBadRequest, Message: "model is required"}
 	}
 	if len(r.Messages) == 0 {
-		return &Error{ErrorKind: KindBadRequest, Message: "messages must not be empty"}
+		return &Error{Kind: KindBadRequest, Message: "messages must not be empty"}
 	}
 	return nil
 }

@@ -79,8 +79,8 @@ func TestService_UnknownModel(t *testing.T) {
 	if !errors.As(err, &perr) {
 		t.Fatalf("err type = %T, want *Error", err)
 	}
-	if perr.ErrorKind != llmtypes.KindBadRequest {
-		t.Fatalf("ErrorKind = %q, want %q", perr.ErrorKind, llmtypes.KindBadRequest)
+	if perr.Kind != llmtypes.KindBadRequest {
+		t.Fatalf("Kind = %q, want %q", perr.Kind, llmtypes.KindBadRequest)
 	}
 }
 
@@ -151,7 +151,7 @@ func TestService_AliasFallback_RetriesOnEligibleError(t *testing.T) {
 	// Primary fails with KindRateLimit (eligible) → next chain entry tried.
 	openAI := fake.NewProvider("openai", fake.WithCompleteErrorOnModel(
 		"deepseek-v4-pro",
-		&llmtypes.Error{ErrorKind: llmtypes.KindRateLimit, Message: "throttled", StatusCode: 429},
+		&llmtypes.Error{Kind: llmtypes.KindRateLimit, Message: "throttled", StatusCode: 429},
 	))
 	svc := mustService(t, fallbackCatalog(t), openAI, nil)
 
@@ -168,10 +168,10 @@ func TestService_AliasFallback_RetriesOnEligibleError(t *testing.T) {
 	if len(result.Attempts) != 2 {
 		t.Fatalf("attempts = %d, want 2", len(result.Attempts))
 	}
-	if result.Attempts[0].ErrorKind != llmtypes.KindRateLimit || result.Attempts[0].StatusCode != 429 {
+	if result.Attempts[0].Kind != llmtypes.KindRateLimit || result.Attempts[0].StatusCode != 429 {
 		t.Errorf("attempt[0] = %+v, want rate_limit/429", result.Attempts[0])
 	}
-	if result.Attempts[1].ErrorKind != "" || result.Attempts[1].StatusCode != 200 {
+	if result.Attempts[1].Kind != "" || result.Attempts[1].StatusCode != 200 {
 		t.Errorf("attempt[1] = %+v, want success", result.Attempts[1])
 	}
 }
@@ -179,7 +179,7 @@ func TestService_AliasFallback_RetriesOnEligibleError(t *testing.T) {
 func TestService_StreamAliasFallback_RetriesOnEligiblePreStreamError(t *testing.T) {
 	openAI := fake.NewProvider("openai", fake.WithStreamErrorOnModel(
 		"deepseek-v4-pro",
-		&llmtypes.Error{ErrorKind: llmtypes.KindRateLimit, Message: "stream throttled", StatusCode: 429},
+		&llmtypes.Error{Kind: llmtypes.KindRateLimit, Message: "stream throttled", StatusCode: 429},
 	))
 	svc := mustService(t, fallbackCatalog(t), openAI, nil)
 
@@ -199,10 +199,10 @@ func TestService_StreamAliasFallback_RetriesOnEligiblePreStreamError(t *testing.
 	if len(result.Attempts) != 2 {
 		t.Fatalf("attempts = %d, want 2", len(result.Attempts))
 	}
-	if result.Attempts[0].Model != "deepseek-v4-pro" || result.Attempts[0].ErrorKind != llmtypes.KindRateLimit {
+	if result.Attempts[0].Model != "deepseek-v4-pro" || result.Attempts[0].Kind != llmtypes.KindRateLimit {
 		t.Errorf("attempt[0] = %+v, want deepseek-v4-pro rate_limit", result.Attempts[0])
 	}
-	if result.Attempts[1].Model != "deepseek-v4-flash" || result.Attempts[1].ErrorKind != "" {
+	if result.Attempts[1].Model != "deepseek-v4-flash" || result.Attempts[1].Kind != "" {
 		t.Errorf("attempt[1] = %+v, want deepseek-v4-flash success", result.Attempts[1])
 	}
 }
@@ -211,7 +211,7 @@ func TestService_AliasFallback_BadRequestStopsImmediately(t *testing.T) {
 	// Primary fails with KindBadRequest (not eligible) → return immediately.
 	openAI := fake.NewProvider("openai", fake.WithCompleteErrorOnModel(
 		"deepseek-v4-pro",
-		&llmtypes.Error{ErrorKind: llmtypes.KindBadRequest, Message: "malformed"},
+		&llmtypes.Error{Kind: llmtypes.KindBadRequest, Message: "malformed"},
 	))
 	svc := mustService(t, fallbackCatalog(t), openAI, nil)
 
@@ -220,7 +220,7 @@ func TestService_AliasFallback_BadRequestStopsImmediately(t *testing.T) {
 		t.Fatal("Complete: want error")
 	}
 	var perr *llmtypes.Error
-	if !errors.As(err, &perr) || perr.ErrorKind != llmtypes.KindBadRequest {
+	if !errors.As(err, &perr) || perr.Kind != llmtypes.KindBadRequest {
 		t.Fatalf("err = %v, want KindBadRequest", err)
 	}
 	if openAI.CompleteCalls() != 1 {
@@ -234,7 +234,7 @@ func TestService_AliasFallback_BadRequestStopsImmediately(t *testing.T) {
 func TestService_StreamAliasFallback_BadRequestStopsImmediately(t *testing.T) {
 	openAI := fake.NewProvider("openai", fake.WithStreamErrorOnModel(
 		"deepseek-v4-pro",
-		&llmtypes.Error{ErrorKind: llmtypes.KindBadRequest, Message: "malformed stream"},
+		&llmtypes.Error{Kind: llmtypes.KindBadRequest, Message: "malformed stream"},
 	))
 	svc := mustService(t, fallbackCatalog(t), openAI, nil)
 
@@ -243,20 +243,20 @@ func TestService_StreamAliasFallback_BadRequestStopsImmediately(t *testing.T) {
 		t.Fatal("CompleteStream: want error")
 	}
 	var perr *llmtypes.Error
-	if !errors.As(err, &perr) || perr.ErrorKind != llmtypes.KindBadRequest {
+	if !errors.As(err, &perr) || perr.Kind != llmtypes.KindBadRequest {
 		t.Fatalf("err = %v, want KindBadRequest", err)
 	}
 	if openAI.StreamCalls() != 1 {
 		t.Errorf("streamCalls = %d, want 1 (no fallback for non-eligible)", openAI.StreamCalls())
 	}
-	if len(result.Attempts) != 1 || result.Attempts[0].ErrorKind != llmtypes.KindBadRequest {
+	if len(result.Attempts) != 1 || result.Attempts[0].Kind != llmtypes.KindBadRequest {
 		t.Fatalf("attempts = %+v, want one bad_request attempt", result.Attempts)
 	}
 }
 
 func TestService_AliasFallback_AllExhausted(t *testing.T) {
 	openAI := fake.NewProvider("openai", fake.WithCompleteError(
-		&llmtypes.Error{ErrorKind: llmtypes.KindUpstream, Message: "boom", StatusCode: 502},
+		&llmtypes.Error{Kind: llmtypes.KindUpstream, Message: "boom", StatusCode: 502},
 	))
 	svc := mustService(t, fallbackCatalog(t), openAI, nil)
 
@@ -265,7 +265,7 @@ func TestService_AliasFallback_AllExhausted(t *testing.T) {
 		t.Fatal("Complete: want error")
 	}
 	var perr *llmtypes.Error
-	if !errors.As(err, &perr) || perr.ErrorKind != llmtypes.KindUpstream {
+	if !errors.As(err, &perr) || perr.Kind != llmtypes.KindUpstream {
 		t.Fatalf("err = %v, want KindUpstream (last attempt err)", err)
 	}
 	// chain has 4 openai-protocol entries; all should be tried before chain exhausted.
@@ -277,7 +277,7 @@ func TestService_AliasFallback_AllExhausted(t *testing.T) {
 func TestService_StreamSkipsOpenCircuitModel(t *testing.T) {
 	openAI := fake.NewProvider("openai", fake.WithCompleteErrorOnModel(
 		"deepseek-v4-pro",
-		&llmtypes.Error{ErrorKind: llmtypes.KindUpstream, Message: "boom"},
+		&llmtypes.Error{Kind: llmtypes.KindUpstream, Message: "boom"},
 	))
 	svc := mustService(t, fallbackCatalog(t), openAI, nil)
 
@@ -306,7 +306,7 @@ func TestService_StreamSkipsOpenCircuitModel(t *testing.T) {
 func TestService_StreamPreStreamFailuresOpenCircuit(t *testing.T) {
 	openAI := fake.NewProvider("openai", fake.WithStreamErrorOnModel(
 		"deepseek-v4-pro",
-		&llmtypes.Error{ErrorKind: llmtypes.KindUpstream, Message: "stream setup failed"},
+		&llmtypes.Error{Kind: llmtypes.KindUpstream, Message: "stream setup failed"},
 	))
 	svc := mustService(t, fallbackCatalog(t), openAI, nil)
 
@@ -350,8 +350,8 @@ func TestService_StreamEmptyFirstEventFallsBack(t *testing.T) {
 	if len(result.Attempts) != 2 {
 		t.Fatalf("attempts = %d, want 2", len(result.Attempts))
 	}
-	if result.Attempts[0].ErrorKind != llmtypes.KindUpstream {
-		t.Fatalf("attempt[0].ErrorKind = %q, want upstream", result.Attempts[0].ErrorKind)
+	if result.Attempts[0].Kind != llmtypes.KindUpstream {
+		t.Fatalf("attempt[0].Kind = %q, want upstream", result.Attempts[0].Kind)
 	}
 }
 
@@ -361,7 +361,7 @@ func TestService_CircuitOpensAfterRepeatedFailures(t *testing.T) {
 	// the primary and hit secondary directly.
 	openAI := fake.NewProvider("openai", fake.WithCompleteErrorOnModel(
 		"deepseek-v4-pro",
-		&llmtypes.Error{ErrorKind: llmtypes.KindUpstream, Message: "boom"},
+		&llmtypes.Error{Kind: llmtypes.KindUpstream, Message: "boom"},
 	))
 	svc := mustService(t, fallbackCatalog(t), openAI, nil)
 
@@ -401,8 +401,8 @@ func TestService_CompleteTimeoutFallsBack(t *testing.T) {
 	if len(result.Attempts) != 2 {
 		t.Fatalf("attempts = %d, want 2", len(result.Attempts))
 	}
-	if result.Attempts[0].ErrorKind != llmtypes.KindTimeout {
-		t.Fatalf("attempt[0].ErrorKind = %q, want timeout", result.Attempts[0].ErrorKind)
+	if result.Attempts[0].Kind != llmtypes.KindTimeout {
+		t.Fatalf("attempt[0].Kind = %q, want timeout", result.Attempts[0].Kind)
 	}
 }
 
@@ -421,13 +421,13 @@ func TestService_RequestTimeoutStopsChain(t *testing.T) {
 		t.Fatal("Complete: want request timeout error")
 	}
 	var perr *llmtypes.Error
-	if !errors.As(err, &perr) || perr.ErrorKind != llmtypes.KindTimeout {
+	if !errors.As(err, &perr) || perr.Kind != llmtypes.KindTimeout {
 		t.Fatalf("err = %v, want provider timeout", err)
 	}
 	if openAI.CompleteCalls() != 1 {
 		t.Fatalf("completeCalls = %d, want 1 (request budget exhausted before fallback)", openAI.CompleteCalls())
 	}
-	if len(result.Attempts) != 1 || result.Attempts[0].ErrorKind != llmtypes.KindTimeout {
+	if len(result.Attempts) != 1 || result.Attempts[0].Kind != llmtypes.KindTimeout {
 		t.Fatalf("attempts = %+v, want one timeout attempt", result.Attempts)
 	}
 }
@@ -538,4 +538,3 @@ func stubCatalog(t *testing.T) *catalog.Catalog {
 	}
 	return cat
 }
-

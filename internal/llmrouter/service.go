@@ -120,7 +120,7 @@ func NewService(models Models, aliases Aliases, policy FallbackPolicy, log *slog
 func (r *Service) Complete(ctx context.Context, req *llmtypes.Request) (*RouteResult, error) {
 	result := &RouteResult{}
 	if req == nil {
-		return result, &llmtypes.Error{ErrorKind: llmtypes.KindBadRequest, Message: "request is nil"}
+		return result, &llmtypes.Error{Kind: llmtypes.KindBadRequest, Message: "request is nil"}
 	}
 
 	candidates, err := r.candidates(req.Model)
@@ -176,7 +176,7 @@ func (r *Service) Complete(ctx context.Context, req *llmtypes.Request) (*RouteRe
 		result.ModelUsed = candidate.model
 		lastErr = err
 
-		if !r.fallbackEligible(att.ErrorKind) {
+		if !r.fallbackEligible(att.Kind) {
 			return result, err
 		}
 		r.breakers.recordFailure(candidate.model)
@@ -185,7 +185,7 @@ func (r *Service) Complete(ctx context.Context, req *llmtypes.Request) (*RouteRe
 		}
 		r.log.Info("fallback triggered",
 			slog.String("model", candidate.model),
-			slog.String("error_kind", string(att.ErrorKind)),
+			slog.String("error_kind", string(att.Kind)),
 		)
 	}
 
@@ -195,7 +195,7 @@ func (r *Service) Complete(ctx context.Context, req *llmtypes.Request) (*RouteRe
 func (r *Service) CompleteStream(ctx context.Context, req *llmtypes.Request) (*RouteResult, error) {
 	result := &RouteResult{}
 	if req == nil {
-		return result, &llmtypes.Error{ErrorKind: llmtypes.KindBadRequest, Message: "request is nil"}
+		return result, &llmtypes.Error{Kind: llmtypes.KindBadRequest, Message: "request is nil"}
 	}
 
 	candidates, err := r.candidates(req.Model)
@@ -243,7 +243,7 @@ func (r *Service) finalizeStreamFailure(result *RouteResult, candidate candidate
 	result.Vendor = candidate.provider.Name()
 	result.ModelUsed = candidate.model
 
-	if !r.fallbackEligible(att.ErrorKind) {
+	if !r.fallbackEligible(att.Kind) {
 		return err
 	}
 	r.breakers.recordFailure(candidate.model)
@@ -252,7 +252,7 @@ func (r *Service) finalizeStreamFailure(result *RouteResult, candidate candidate
 	}
 	r.log.Info("stream fallback triggered",
 		slog.String("model", candidate.model),
-		slog.String("error_kind", string(att.ErrorKind)),
+		slog.String("error_kind", string(att.Kind)),
 	)
 	return nil
 }
@@ -264,13 +264,13 @@ func requestForCandidate(req *llmtypes.Request, candidate candidate) llmtypes.Re
 }
 
 func adoptAttemptError(att *llmtypes.Attempt, err error) {
-	att.ErrorKind = llmtypes.ErrorKindOf(err)
+	att.Kind = llmtypes.ErrorKindOf(err)
 	att.StatusCode = llmtypes.StatusCodeOf(err)
 }
 
 func contextError(err error) error {
 	if errors.Is(err, context.DeadlineExceeded) {
-		return &llmtypes.Error{ErrorKind: llmtypes.KindTimeout, Message: err.Error(), Cause: err}
+		return &llmtypes.Error{Kind: llmtypes.KindTimeout, Message: err.Error(), Cause: err}
 	}
 	return err
 }
@@ -296,7 +296,7 @@ func (r *Service) candidates(model string) ([]candidate, error) {
 		})
 	}
 	if len(out) == 0 {
-		return nil, &llmtypes.Error{ErrorKind: llmtypes.KindUpstream, Message: "all models in chain are currently unavailable"}
+		return nil, &llmtypes.Error{Kind: llmtypes.KindUpstream, Message: "all models in chain are currently unavailable"}
 	}
 	return out, nil
 }
@@ -310,7 +310,7 @@ func (r *Service) resolveChain(model string) ([]string, error) {
 	if _, ok := r.byModel[key]; ok {
 		return []string{key}, nil
 	}
-	return nil, &llmtypes.Error{ErrorKind: llmtypes.KindBadRequest, Message: "unknown model: " + model}
+	return nil, &llmtypes.Error{Kind: llmtypes.KindBadRequest, Message: "unknown model: " + model}
 }
 
 func (r *Service) fallbackEligible(k llmtypes.ErrorKind) bool {

@@ -17,8 +17,8 @@ import (
 	"llmgate/internal/audit"
 	"llmgate/internal/config"
 	"llmgate/internal/consumers"
-	"llmgate/internal/llmtypes"
 	"llmgate/internal/llmrouter"
+	"llmgate/internal/llmtypes"
 )
 
 // recordingRecorder captures every emitted audit Record so tests can
@@ -69,8 +69,8 @@ func writeStoreYAML(t *testing.T, name, rawKey string) *consumers.Store {
 func TestClassifyAuth_NoHeader(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	got := classifyAuth(r, nil)
-	if got.AuthError != AuthErrorMissing {
-		t.Fatalf("AuthError = %q, want %q", got.AuthError, AuthErrorMissing)
+	if got.AuthError != audit.AuthErrorMissing {
+		t.Fatalf("AuthError = %q, want %q", got.AuthError, audit.AuthErrorMissing)
 	}
 	if got.Name != "" || got.KeyID != "" {
 		t.Errorf("consumer info populated on missing header: %+v", got)
@@ -90,8 +90,8 @@ func TestClassifyAuth_BadFormat(t *testing.T) {
 			r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 			r.Header.Set("Authorization", header)
 			got := classifyAuth(r, nil)
-			if got.AuthError != AuthErrorFormat {
-				t.Fatalf("AuthError = %q, want %q (header=%q)", got.AuthError, AuthErrorFormat, header)
+			if got.AuthError != audit.AuthErrorFormat {
+				t.Fatalf("AuthError = %q, want %q (header=%q)", got.AuthError, audit.AuthErrorFormat, header)
 			}
 		})
 	}
@@ -102,8 +102,8 @@ func TestClassifyAuth_UnknownKey(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	r.Header.Set("Authorization", "Bearer not-issued")
 	got := classifyAuth(r, store)
-	if got.AuthError != AuthErrorUnknown {
-		t.Fatalf("AuthError = %q, want %q", got.AuthError, AuthErrorUnknown)
+	if got.AuthError != audit.AuthErrorUnknown {
+		t.Fatalf("AuthError = %q, want %q", got.AuthError, audit.AuthErrorUnknown)
 	}
 	if got.Name != "" {
 		t.Errorf("Name = %q, want empty on unknown key", got.Name)
@@ -169,7 +169,7 @@ func TestAuthMiddleware_AlwaysCallsNext(t *testing.T) {
 	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		called = true
 		got := ConsumerFromContext(r.Context())
-		if got.AuthError != AuthErrorUnknown {
+		if got.AuthError != audit.AuthErrorUnknown {
 			t.Errorf("ctx AuthError = %q, want unknown", got.AuthError)
 		}
 	})
@@ -210,7 +210,7 @@ func TestServer_AuthIntegration(t *testing.T) {
 		wantStatus    int
 		wantClient    string
 		wantKind      llmtypes.ErrorKind
-		wantAuthError string
+		wantAuthError audit.AuthError
 	}
 	cases := []call{
 		{"no-auth", "", http.StatusUnauthorized, "", llmtypes.KindAuth, "missing"},
@@ -247,8 +247,8 @@ func TestServer_AuthIntegration(t *testing.T) {
 		if got.ConsumerName != c.wantClient {
 			t.Errorf("[%s] consumer_name = %q, want %q", c.label, got.ConsumerName, c.wantClient)
 		}
-		if got.ErrorKind != c.wantKind {
-			t.Errorf("[%s] error_kind = %q, want %q", c.label, got.ErrorKind, c.wantKind)
+		if got.Kind != c.wantKind {
+			t.Errorf("[%s] error_kind = %q, want %q", c.label, got.Kind, c.wantKind)
 		}
 		if got.AuthError != c.wantAuthError {
 			t.Errorf("[%s] auth_error = %q, want %q", c.label, got.AuthError, c.wantAuthError)
@@ -262,8 +262,8 @@ func TestServer_AuthIntegration(t *testing.T) {
 	// specific failure mode on the auth-failure line, since the wire 401
 	// alone cannot distinguish missing vs format vs unknown.
 	logged := logBuf.String()
-	if !strings.Contains(logged, `"consumer":"alpha"`) {
-		t.Errorf("access log missing consumer field for success request: %s", logged)
+	if !strings.Contains(logged, `"consumer_name":"alpha"`) {
+		t.Errorf("access log missing consumer_name field for success request: %s", logged)
 	}
 	for _, want := range []string{`"auth_error":"missing"`, `"auth_error":"format"`, `"auth_error":"unknown"`} {
 		if !strings.Contains(logged, want) {

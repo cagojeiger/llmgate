@@ -39,17 +39,17 @@ func (c *Client) Complete(ctx context.Context, req *llmtypes.Request) (*llmtypes
 		return nil, c.classify(resp.StatusCode, raw, resp.Header.Get("Retry-After"))
 	}
 	if len(raw) == 0 {
-		return nil, &llmtypes.Error{ErrorKind: llmtypes.KindEmpty, Provider: c.cfg.Name, Message: "empty response"}
+		return nil, &llmtypes.Error{Kind: llmtypes.KindEmpty, Provider: c.cfg.Name, Message: "empty response"}
 	}
 
 	var out llmtypes.Response
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil, &llmtypes.Error{
-			ErrorKind: llmtypes.KindUpstream,
-			Provider:  c.cfg.Name,
-			Message:   "decode response: " + err.Error(),
-			Cause:     err,
-			Raw:       upstream.FirstBytes(raw),
+			Kind:     llmtypes.KindUpstream,
+			Provider: c.cfg.Name,
+			Message:  "decode response: " + err.Error(),
+			Cause:    err,
+			Raw:      upstream.FirstBytes(raw),
 		}
 	}
 	return &out, nil

@@ -79,7 +79,7 @@ func accessLogMiddleware(log *slog.Logger) func(http.Handler) http.Handler {
 				slog.Int64("duration_ms", time.Since(start).Milliseconds()),
 				slog.Int64("bytes_out", cw.bytes),
 				slog.String("request_id", RequestIDFromContext(r.Context())),
-				slog.String("consumer", consumer.Name),
+				slog.String("consumer_name", consumer.Name),
 			}
 			if consumer.AuthError != "" {
 				// Surface the auth-failure mode (missing / format / unknown)

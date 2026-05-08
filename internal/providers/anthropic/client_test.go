@@ -227,8 +227,8 @@ func TestClassify_ContentFilterOverridesStatus(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			perr := c.classify(tc.status, []byte(tc.body), "")
-			if perr.ErrorKind != tc.want {
-				t.Errorf("ErrorKind = %q, want %q", perr.ErrorKind, tc.want)
+			if perr.Kind != tc.want {
+				t.Errorf("Kind = %q, want %q", perr.Kind, tc.want)
 			}
 			if perr.StatusCode != tc.status {
 				t.Errorf("StatusCode = %d, want %d", perr.StatusCode, tc.status)
@@ -259,7 +259,7 @@ func TestKindFromAnthropicErrorType(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.errorType, func(t *testing.T) {
 			if got := kindFromAnthropicErrorType(tc.errorType); got != tc.want {
-				t.Errorf("ErrorKind = %q, want %q", got, tc.want)
+				t.Errorf("Kind = %q, want %q", got, tc.want)
 			}
 		})
 	}
@@ -314,8 +314,8 @@ func TestComplete_ErrorEnvelope(t *testing.T) {
 		Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
 	})
 	perr := requireProviderError(t, err)
-	if perr.ErrorKind != llmtypes.KindAuth {
-		t.Errorf("ErrorKind = %q, want %q", perr.ErrorKind, llmtypes.KindAuth)
+	if perr.Kind != llmtypes.KindAuth {
+		t.Errorf("Kind = %q, want %q", perr.Kind, llmtypes.KindAuth)
 	}
 	if !strings.Contains(perr.Message, "invalid api key") {
 		t.Errorf("Message = %q, want invalid api key", perr.Message)
@@ -440,8 +440,8 @@ func TestCompleteStream_ErrorMidFlight(t *testing.T) {
 	}
 	_, err = stream.Recv()
 	perr := requireProviderError(t, err)
-	if perr.ErrorKind != llmtypes.KindUpstream {
-		t.Fatalf("ErrorKind = %q, want %q", perr.ErrorKind, llmtypes.KindUpstream)
+	if perr.Kind != llmtypes.KindUpstream {
+		t.Fatalf("Kind = %q, want %q", perr.Kind, llmtypes.KindUpstream)
 	}
 	if !strings.Contains(perr.Message, "stream exploded") {
 		t.Fatalf("Message = %q, want stream exploded", perr.Message)
@@ -474,8 +474,8 @@ func TestCompleteStream_NoMessageStop(t *testing.T) {
 	}
 	_, err = stream.Recv()
 	perr := requireProviderError(t, err)
-	if perr.ErrorKind != llmtypes.KindUpstream {
-		t.Fatalf("ErrorKind = %q, want %q", perr.ErrorKind, llmtypes.KindUpstream)
+	if perr.Kind != llmtypes.KindUpstream {
+		t.Fatalf("Kind = %q, want %q", perr.Kind, llmtypes.KindUpstream)
 	}
 	if !strings.Contains(perr.Message, "stream ended without message_stop") {
 		t.Fatalf("Message = %q, want missing message_stop", perr.Message)

@@ -35,7 +35,7 @@ func ValidateStreamStart(ctx context.Context, raw llmtypes.Stream) (llmtypes.Str
 		if r.err != nil {
 			_ = raw.Close()
 			if errors.Is(r.err, io.EOF) {
-				return nil, &llmtypes.Error{ErrorKind: llmtypes.KindUpstream, Message: "stream ended before first event", Cause: r.err}
+				return nil, &llmtypes.Error{Kind: llmtypes.KindUpstream, Message: "stream ended before first event", Cause: r.err}
 			}
 			return nil, r.err
 		}

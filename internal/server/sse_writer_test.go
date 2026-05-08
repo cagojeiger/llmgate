@@ -79,7 +79,7 @@ func TestSSEWriter_SendError_EmbedsErrorPayload(t *testing.T) {
 	flusher := &stubFlusher{}
 	sw := newSSEWriter(rec, flusher)
 
-	sw.SendError(&llmtypes.Error{ErrorKind: llmtypes.KindUpstream, Message: "boom"})
+	sw.SendError(&llmtypes.Error{Kind: llmtypes.KindUpstream, Message: "boom"})
 
 	body := rec.Body.String()
 	if !strings.HasPrefix(body, "data: ") || !strings.HasSuffix(body, "\n\n") {

@@ -165,8 +165,8 @@ func TestDefaultClient_TuningPreservedAcrossCalls(t *testing.T) {
 
 func TestLowLevelError_DeadlineExceededBecomesTimeout(t *testing.T) {
 	perr := LowLevelError("opencode", "send request", context.DeadlineExceeded)
-	if perr.ErrorKind != llmtypes.KindTimeout {
-		t.Errorf("ErrorKind = %q, want timeout", perr.ErrorKind)
+	if perr.Kind != llmtypes.KindTimeout {
+		t.Errorf("Kind = %q, want timeout", perr.Kind)
 	}
 	if perr.Provider != "opencode" {
 		t.Errorf("Provider = %q, want opencode", perr.Provider)
@@ -188,15 +188,15 @@ var _ net.Error = timeoutNetErr{}
 
 func TestLowLevelError_NetTimeoutBecomesTimeout(t *testing.T) {
 	perr := LowLevelError("opencode", "dial", timeoutNetErr{})
-	if perr.ErrorKind != llmtypes.KindTimeout {
-		t.Errorf("ErrorKind = %q, want timeout (from net.Error.Timeout())", perr.ErrorKind)
+	if perr.Kind != llmtypes.KindTimeout {
+		t.Errorf("Kind = %q, want timeout (from net.Error.Timeout())", perr.Kind)
 	}
 }
 
 func TestLowLevelError_GenericFailureIsNetwork(t *testing.T) {
 	perr := LowLevelError("opencode", "read response", errors.New("connection reset"))
-	if perr.ErrorKind != llmtypes.KindNetwork {
-		t.Errorf("ErrorKind = %q, want network", perr.ErrorKind)
+	if perr.Kind != llmtypes.KindNetwork {
+		t.Errorf("Kind = %q, want network", perr.Kind)
 	}
 }
 
@@ -204,8 +204,8 @@ func TestBadRequest_AssemblesMessageAndRaw(t *testing.T) {
 	cause := errors.New("invalid json")
 	raw := []byte(`{"bad":`)
 	perr := BadRequest("opencode", "decode body", cause, raw)
-	if perr.ErrorKind != llmtypes.KindBadRequest {
-		t.Errorf("ErrorKind = %q, want bad_request", perr.ErrorKind)
+	if perr.Kind != llmtypes.KindBadRequest {
+		t.Errorf("Kind = %q, want bad_request", perr.Kind)
 	}
 	if perr.Provider != "opencode" {
 		t.Errorf("Provider = %q, want opencode", perr.Provider)

@@ -14,7 +14,7 @@ audit record 의 *누가* 가 비어있다. 외부 IdP / proxy 가정 없이 상
 - `consumers/<name>.yaml` = `name` + `key_hashes` (sha256 만, raw 키 없음).
 - multi-key array — 회전은 새 해시 추가 → deploy → 옛 해시 제거.
 - 인증: `Authorization: Bearer <key>`. OpenAI SDK 컨벤션.
-- 인증 실패도 audit emit (`consumer_name=""`, `error_kind=auth`, `status_code=401`).
+- 인증 실패도 audit emit (`consumer_name` omitted, `error_kind=auth`, `status_code=401`, `auth_error=missing|format|unknown`).
 - audit Record 에 `consumer_name` + `consumer_key_id` (해시 앞 8자) 추가.
 - 이름 규칙 `^[a-z0-9][a-z0-9_-]{0,63}$`. 영구 식별자 — 재사용 금지 (운영자 책임).
 - 권한 / 한도 필드 없음 — 후처리 책임.

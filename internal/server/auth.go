@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"llmgate/internal/audit"
 	"llmgate/internal/consumers"
 )
 
@@ -18,21 +19,8 @@ import (
 type ConsumerInfo struct {
 	Name      string
 	KeyID     string
-	AuthError AuthErrorKind
+	AuthError audit.AuthError
 }
-
-// AuthErrorKind is the reason auth failed at the gateway boundary. The
-// handler maps every non-empty value to a 401 KindAuth response; the
-// distinction is forwarded to audit Record.AuthError + the access log's
-// auth_error attr so operators can grep "missing header" vs "unknown
-// key" without re-reading the matching code.
-type AuthErrorKind string
-
-const (
-	AuthErrorMissing AuthErrorKind = "missing"
-	AuthErrorFormat  AuthErrorKind = "format"
-	AuthErrorUnknown AuthErrorKind = "unknown"
-)
 
 type consumerCtxKey struct{}
 
@@ -81,23 +69,23 @@ func authMiddleware(store *consumers.Store) func(http.Handler) http.Handler {
 
 // classifyAuth inspects the Authorization header and looks the bearer
 // token up in store. It deliberately does not log the raw key on any
-// failure path — the AuthErrorKind is the only signal that escapes.
+// failure path — the audit.AuthError is the only signal that escapes.
 func classifyAuth(r *http.Request, store *consumers.Store) ConsumerInfo {
 	raw := r.Header.Get("Authorization")
 	if raw == "" {
-		return ConsumerInfo{AuthError: AuthErrorMissing}
+		return ConsumerInfo{AuthError: audit.AuthErrorMissing}
 	}
 	const prefix = "Bearer "
 	if len(raw) <= len(prefix) || !strings.EqualFold(raw[:len(prefix)], prefix) {
-		return ConsumerInfo{AuthError: AuthErrorFormat}
+		return ConsumerInfo{AuthError: audit.AuthErrorFormat}
 	}
 	key := strings.TrimSpace(raw[len(prefix):])
 	if key == "" {
-		return ConsumerInfo{AuthError: AuthErrorFormat}
+		return ConsumerInfo{AuthError: audit.AuthErrorFormat}
 	}
 	name, keyID, ok := store.Lookup(key)
 	if !ok {
-		return ConsumerInfo{AuthError: AuthErrorUnknown}
+		return ConsumerInfo{AuthError: audit.AuthErrorUnknown}
 	}
 	return ConsumerInfo{Name: name, KeyID: keyID}
 }

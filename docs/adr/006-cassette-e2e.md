@@ -18,6 +18,13 @@
 - vendor key 없어도 동작 (binary 가 dummy 값을 받아도 cassette 는 무시).
 - 자동 record 는 의도적 미채택 — 첫 호출 비용 + 캡쳐 시점 결정을 운영자에게 둠. `scripts/refresh-fixtures.sh` 는 catalog↔fixture 차이만 보고 record / delete 는 수동.
 
+**Convention** (test 코드 hardcode 0 보장):
+
+- fixture path = `tests/e2e/fixtures/models/<catalog-model-id>/chat-completion.{json,sse}`. 카탈로그 model id 가 키.
+- cassette 는 path 안 봄 — request body 의 `model` 필드 + `stream` 플래그만 보고 fixture 결정.
+- 테스트는 `discover_models_by_protocol()` 로 catalog 에서 자동 발견. 새 모델 추가 = yaml + record, 코드 0줄.
+- cassette 모드에서 fixture 가 없는 모델은 autouse fixture (`_skip_if_no_cassette_fixture`) 가 자동 skip — matrix 가 깨지지 않음.
+
 ## 대가
 
 - fixture stale — vendor 가 와이어를 바꾸면 재캡쳐 전까지 못 잡음. 완화: `make e2e` 를 nightly 로 유지.

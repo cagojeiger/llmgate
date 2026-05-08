@@ -246,6 +246,47 @@ def field(obj, name):
     return extra.get(name)
 
 
+def discover_models_by_protocol(protocol: str) -> list[str]:
+    """Catalog model ids whose ``protocol:`` field matches.
+
+    Lets test files pick a primary model + matrix without hardcoding ids.
+    Adding a new yaml under catalog/models/ flows through here on the next
+    test run — no edit required.
+    """
+    id_pat = re.compile(r"^id:\s*(\S+)", re.MULTILINE)
+    proto_pat = re.compile(r"^protocol:\s*(\S+)", re.MULTILINE)
+    out: list[str] = []
+    for path in sorted((REPO_ROOT / "catalog" / "models").glob("*.yaml")):
+        text = path.read_text()
+        m_proto = proto_pat.search(text)
+        if m_proto and m_proto.group(1) == protocol:
+            m_id = id_pat.search(text)
+            if m_id:
+                out.append(m_id.group(1))
+    return out
+
+
+def cassette_has_fixture(model: str) -> bool:
+    """Whether a cassette fixture set exists for this model id."""
+    return (FIXTURES_DIR / "models" / model / "chat-completion.json").exists()
+
+
+@pytest.fixture(autouse=True)
+def _skip_if_no_cassette_fixture(request: pytest.FixtureRequest) -> None:
+    """Auto-skip a parametrized test in cassette mode when its model has
+    no fixture. Lets `test_all_models` keep using the catalog as the
+    matrix without hard-failing for catalog rows we haven't recorded yet.
+    """
+    if os.environ.get("LLMGATE_E2E_MODE", "live").lower() != "cassette":
+        return
+    callspec = getattr(request.node, "callspec", None)
+    if callspec is None:
+        return
+    model = callspec.params.get("model")
+    if model and not cassette_has_fixture(model):
+        pytest.skip(f"cassette: no fixture for {model}")
+
+
 def discover_catalog_models() -> list[str]:
     """Read every catalog/models/*.yaml and return their declared ids, sorted.
 

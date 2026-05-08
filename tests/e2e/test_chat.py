@@ -12,12 +12,28 @@ import time
 import pytest
 from openai import OpenAI
 
-from conftest import assert_streaming_progressive, field, raw_consumer_key
+from conftest import (
+    assert_streaming_progressive,
+    discover_models_by_protocol,
+    field,
+    raw_consumer_key,
+)
 
 
 pytestmark = pytest.mark.timeout(120)
 
-MODEL = "deepseek-v4-flash"
+# Pick the primary model per protocol from the catalog. Adding a new
+# yaml under catalog/models/ + recording its fixture flows through here
+# on the next test run — no edit in this file required. ADR 006.
+OPENAI_MODELS = discover_models_by_protocol("openai")
+ANTHROPIC_MODELS = discover_models_by_protocol("anthropic")
+if not OPENAI_MODELS:
+    pytest.skip("no openai-protocol models in catalog", allow_module_level=True)
+if not ANTHROPIC_MODELS:
+    pytest.skip("no anthropic-protocol models in catalog", allow_module_level=True)
+
+MODEL = OPENAI_MODELS[0]
+ANTHROPIC_MODEL = ANTHROPIC_MODELS[0]
 
 
 @pytest.fixture
@@ -46,7 +62,7 @@ def test_chat_non_stream(client: OpenAI) -> None:
     assert resp.usage.total_tokens > 0
 
 
-@pytest.mark.parametrize("model", ["kimi-k2.6", "glm-5.1", "mimo-v2.5-pro"])
+@pytest.mark.parametrize("model", OPENAI_MODELS[1:4])
 def test_chat_non_stream_other_models(client: OpenAI, model: str) -> None:
     resp = client.chat.completions.create(
         model=model,
@@ -59,7 +75,7 @@ def test_chat_non_stream_other_models(client: OpenAI, model: str) -> None:
     assert text, f"{model}: empty content and reasoning"
 
 
-@pytest.mark.parametrize("model", ["minimax-m2.5", "minimax-m2.7"])
+@pytest.mark.parametrize("model", ANTHROPIC_MODELS)
 def test_chat_anthropic_models_non_stream(client: OpenAI, model: str) -> None:
     # minimax can be a reasoning model — give enough budget that the
     # reply doesn't get truncated mid-thinking.
@@ -81,7 +97,7 @@ def test_chat_anthropic_stream(client: OpenAI) -> None:
     finish_reason: str | None = None
 
     stream = client.chat.completions.create(
-        model="minimax-m2.5",
+        model=ANTHROPIC_MODEL,
         messages=[{"role": "user", "content": "Count 1 to 3, one per line."}],
         stream=True,
         max_tokens=128,
@@ -104,7 +120,7 @@ def test_chat_anthropic_stream(client: OpenAI) -> None:
 
 def test_chat_system_message_extraction(client: OpenAI) -> None:
     resp = client.chat.completions.create(
-        model="minimax-m2.5",
+        model=ANTHROPIC_MODEL,
         messages=[
             {"role": "system", "content": "Answer in one short sentence."},
             {"role": "user", "content": "Say hello."},

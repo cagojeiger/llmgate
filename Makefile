@@ -1,5 +1,8 @@
 .PHONY: test tidy build clean run e2e e2e-mock
 
+VERSION := $(shell cat VERSION)
+LDFLAGS := -X main.version=$(VERSION)
+
 test:
 	go test ./...
 
@@ -7,7 +10,7 @@ tidy:
 	go mod tidy
 
 build:
-	go build -o bin/llmgate ./cmd/llmgate
+	go build -ldflags "$(LDFLAGS)" -o bin/llmgate ./cmd/llmgate
 
 run:
 	go run ./cmd/llmgate

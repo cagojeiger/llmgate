@@ -12,7 +12,7 @@ import time
 import pytest
 from openai import OpenAI
 
-from conftest import assert_streaming_progressive, field
+from conftest import assert_streaming_progressive, field, raw_consumer_key
 
 
 pytestmark = pytest.mark.timeout(120)
@@ -22,10 +22,10 @@ MODEL = "deepseek-v4-flash"
 
 @pytest.fixture
 def client(gate_base_url: str) -> OpenAI:
-    # api_key value is irrelevant — the gate strips client Authorization
-    # and injects its own OpenCode key. We pass a non-empty string so the
-    # SDK is satisfied during construction.
-    return OpenAI(base_url=f"{gate_base_url}/v1", api_key="dummy-client-key")
+    # The gate validates the bearer token against consumers/ — a registered
+    # raw key is required (no auth-bypass mode). Pull the documented key
+    # from consumers/example.yaml so rotated keys flow through automatically.
+    return OpenAI(base_url=f"{gate_base_url}/v1", api_key=raw_consumer_key())
 
 
 def test_chat_non_stream(client: OpenAI) -> None:
@@ -182,19 +182,21 @@ def test_chat_stream(client: OpenAI) -> None:
     assert_streaming_progressive(timestamps, label="chat-stream")
 
 
-def test_client_authorization_header_is_stripped(client: OpenAI) -> None:
-    """The gate must drop client Authorization and inject its own OpenCode key.
+def test_unregistered_client_key_is_rejected(gate_base_url: str) -> None:
+    """Audit-always property: an unregistered bearer token gets 401.
 
-    We can't directly observe the upstream request, but we can assert the
-    call SUCCEEDS even though the SDK sent ``Authorization: Bearer dummy``.
-    If the gate were forwarding our dummy key, upstream would 401.
+    The gate validates Authorization against consumers/ — there is no
+    bypass mode. ADR 003.
     """
-    resp = client.chat.completions.create(
-        model=MODEL,
-        messages=[{"role": "user", "content": "hi"}],
-        max_tokens=64,
-    )
-    assert resp.choices, f"call failed despite dummy client key — auth not replaced: {resp}"
+    import openai as openai_pkg
+
+    dummy = OpenAI(base_url=f"{gate_base_url}/v1", api_key="dummy-client-key")
+    with pytest.raises(openai_pkg.AuthenticationError):
+        dummy.chat.completions.create(
+            model=MODEL,
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=64,
+        )
 
 
 def test_unknown_model_fails(client: OpenAI) -> None:

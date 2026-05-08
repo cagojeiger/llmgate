@@ -164,8 +164,14 @@ docker compose down
 The image is distroless static, ~12MB, runs as nonroot. Suitable as a
 starting point for k8s manifests / configMap mounts.
 
-## End-to-end checks against upstream
+## End-to-end checks
 
 ```bash
-make e2e
+make e2e-mock     # cassette: free, deterministic, default for PR CI
+make e2e          # live: real upstream from .env, costs vendor credits
+
+./scripts/refresh-fixtures.sh --status   # diff catalog ↔ fixture set
+./scripts/refresh-fixtures.sh --prune    # delete fixtures for removed models
 ```
+
+Design + recording recipe in `docs/adr/006-cassette-e2e.md`.

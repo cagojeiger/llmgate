@@ -85,6 +85,7 @@ def test_stream(client: OpenAI, model: str) -> None:
     assert finish_reason in ("stop", "length"), f"{model}: finish_reason={finish_reason}"
 
 
+@pytest.mark.live_only
 @pytest.mark.parametrize("model", MODELS)
 def test_function_call(client: OpenAI, model: str) -> None:
     resp = client.chat.completions.create(

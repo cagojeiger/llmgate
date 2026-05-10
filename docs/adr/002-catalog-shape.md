@@ -1,30 +1,37 @@
-# ADR 002: 카탈로그 — 데이터 디렉토리, 별명이 제어 단위
+# ADR 002: 카탈로그는 모델 데이터와 별명 체인만 담는다
 
 - Status: Accepted
 - Date: 2026-05-02
-- 관련: 003
+- 관련: 000, 003
 
 ## 문제
 
-vendor 단위 yaml 한 장에 endpoints / models / aliases / fallback 다 들어가면 모델 추가 PR 과 alias 변경 PR 이 충돌하고, "fallback policy" 가 사실 셋 (적격 / 회로 / 디폴트) 을 묶어 catalog 패키지가 데이터·로더·정책을 동시에 든다.
+벤더 단위로 YAML 한 장에 endpoint, model, alias, fallback을 모두 넣으면, 모델을 추가하는 PR과 별명을 바꾸는 PR이 같은 파일에서 충돌한다. 게다가 "fallback 정책"은 사실 세 가지가 묶여 있어 — 적격성, 회로 차단, 디폴트값 — catalog 패키지가 데이터 로딩과 라우팅 정책을 동시에 짊어지게 된다.
 
 ## 결정
 
-- `catalog/models/<id>.yaml` = 모델 1 개. 6 필드: `id` / `vendor` / `protocol` / `base_url` / `auth_env` (생략 시 `LLMGATE_<VENDOR>_API_KEY`) / `auth_scheme`. `protocol` 은 `llmtypes.Protocol` 닫힌 enum.
-- `catalog/aliases/<name>.yaml` = chain. raw model id 호출은 chain 길이 1 → 폴백 발동 자체 없음 (별명이 *실제 제어 단위*).
-- 정책 (`LLMGATE_FALLBACK_ON` / circuit / timeouts) 은 env. yaml 에 없음.
-- 모델 메타 (cost / context window) 안 가짐 — 미지원 항목 [identity.md "의도적 미지원"](../identity.md) 참조.
-- schema flat. apiVersion / kind 헤더 안 둠.
-- strict 파싱 — 모르는 필드 → 부팅 fail.
-- `LLMGATE_CATALOG=<dir>` 또는 cwd 의 `./catalog`. hot-reload 없음, 재시작 적용.
+**카탈로그는 모델 데이터와 별명 체인만 담는다. 정책과 알고리즘은 다른 자리에 산다.**
 
-## 이유
+- `catalog/models/<id>.yaml` = 모델 한 개. 6 필드 — `id`, `vendor`, `protocol`, `base_url`, `auth_env`(생략 시 `LLMGATE_<VENDOR>_API_KEY`), `auth_scheme`. `protocol`은 `llmtypes.Protocol`이 정의한 닫힌 enum.
+- `catalog/aliases/<name>.yaml` = 모델 ID 체인. raw 모델 ID로 호출하면 체인 길이가 1이라 폴백이 발동하지 않는다 — *별명만이 실제 제어 단위*.
+- 정책(`LLMGATE_FALLBACK_ON`, 회로 차단, 시간 한도)은 환경 변수에 둔다. YAML에는 없다.
 
-- 모델 추가 = 파일 1 개. PR diff 명확, 동시 PR 충돌 사라짐.
-- yaml = 모델·별명, env = 정책, 코드 = 알고리즘. 운영자 시점이 단순.
-- catalog 패키지 책임 = "yaml → 데이터" 1 개.
+### 경계선
 
-## 대가
+- **YAML = 데이터, env = 정책, 코드 = 알고리즘.** 운영자가 어디를 보고 어디를 바꿀지 한눈에 안다.
+- **카탈로그가 검증하는 것**: 스키마 구조 — 모르는 필드가 있으면 부팅 실패, 별명 chain이 존재하지 않는 모델을 가리키면 부팅 실패.
+- **카탈로그가 판단하지 않는 것**: alias 이름의 의미, chain 순서의 타당성, 가격, context window, 모델 적합도 ([ADR 000](000-identity.md)).
+- **hot-reload 없음.** YAML 변경은 재시작이 적용 시점이다. *언제 적용됐나*가 흐려지는 race를 만드는 대신, 재시작 경계가 그 답이다.
+- **저장 위치**: `LLMGATE_CATALOG=<dir>` 또는 작업 디렉토리의 `./catalog`.
 
-- 같은 vendor N 모델이 base_url 등 N 번 반복. sync 도구가 자동 생성 가정.
-- 별명별 정책 (alias 마다 다른 OnKinds) 표현 안 됨. 신호 뜨면 alias yaml override 로 확장.
+## 근거
+
+- 모델 추가가 파일 하나로 끝난다. PR diff가 깔끔하고, 같은 파일에서 PR끼리 충돌하던 문제가 사라진다.
+- catalog 패키지의 책임이 "YAML → 데이터" 하나로 좁혀진다.
+- 데이터·정책·알고리즘 분리는 [ADR 000](000-identity.md)의 "작은 실행기" 정체성을 운영자 시점에서 표현한다.
+
+## 결과
+
+- 같은 벤더의 N개 모델이 `base_url`을 N번 반복한다. sync 도구로 자동 생성하는 것을 전제로 둔다.
+- 별명마다 다른 정책(예: 별명별로 다른 OnKinds)은 표현되지 않는다. 필요해지면 별명 YAML에 override를 더해 확장한다.
+- 모델 메타(가격, context window)는 카탈로그 밖. [identity.md "의도적 미지원"](../identity.md) 참조.

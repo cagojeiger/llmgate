@@ -15,5 +15,10 @@ RUN CGO_ENABLED=0 go build -trimpath \
 FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /app
 COPY --from=builder /out/llmgate /app/llmgate
+# Ship a default catalog inside the image so `docker run` works zero-config.
+# Prod always overrides via LLMGATE_CATALOG to a ConfigMap mount, so this
+# embed is effectively a dev/standalone fallback — never the source of
+# truth for any deployed environment.
+COPY --from=builder /src/catalog /app/catalog
 EXPOSE 8080
 ENTRYPOINT ["/app/llmgate"]

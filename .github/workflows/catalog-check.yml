@@ -58,6 +58,7 @@ jobs:
           title: "chore(catalog): auto-sync with opencode docs"
           body-path: pr-body.md
           commit-message: "chore(catalog): auto-sync with opencode docs"
+          add-paths: catalog/
 
       - name: Slack notify (PR)
         if: steps.agent.outputs.exit == '1' && steps.pr.outputs.pull-request-number != ''

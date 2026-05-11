@@ -23,8 +23,13 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+    # Counts are exported so the notify job can compose its Slack text
+    # without pulling the artifact back and reinstalling pyyaml — see the
+    # notify job below.
     outputs:
       exit-code: ${{ steps.agent.outputs.exit }}
+      action-count: ${{ steps.summary.outputs.action_count }}
+      warning-count: ${{ steps.summary.outputs.warning_count }}
     steps:
       - uses: actions/checkout@v6
 
@@ -44,7 +49,19 @@ jobs:
           python scripts/catalog_diff/main.py -v > manifest.yaml
           echo "exit=$?" >> "$GITHUB_OUTPUT"
 
+      - name: Extract manifest summary
+        id: summary
+        if: steps.agent.outputs.exit == '1'
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import yaml
+          summary = (yaml.safe_load(open('manifest.yaml')) or {}).get('summary') or {}
+          print(f"action_count={summary.get('action_count', 0)}")
+          print(f"warning_count={summary.get('warning_count', 0)}")
+          PY
+
       - name: Show manifest in step summary
+        if: steps.agent.outputs.exit != '0'
         run: |
           {
             echo "## Catalog drift manifest"
@@ -139,22 +156,13 @@ jobs:
     # 3 = needs manual review). Exit 0 = no drift = silent. always() is
     # required so the job runs even when apply-and-pr / review-issue were
     # skipped due to their own conditional gates.
+    #
+    # detect job already exported action-count + warning-count as job outputs,
+    # so this job stays pure bash — no setup-python, no pip, no artifact pull.
     if: always() && needs.detect.outputs.exit-code != '0'
     runs-on: ubuntu-latest
     timeout-minutes: 3
-    permissions:
-      contents: read
     steps:
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-
-      - run: pip install pyyaml
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: agent-output
-
       - name: Notify Slack
         if: env.SLACK_WEBHOOK_URL != ''
         env:
@@ -164,6 +172,8 @@ jobs:
           PR_URL: ${{ needs.apply-and-pr.outputs.pr-url }}
           PR_NUM: ${{ needs.apply-and-pr.outputs.pr-number }}
           ISSUE_URL: ${{ needs.review-issue.outputs.url }}
+          ACTION_COUNT: ${{ needs.detect.outputs.action-count }}
+          WARNING_COUNT: ${{ needs.detect.outputs.warning-count }}
           TRIGGER: ${{ github.event_name }}
           ACTOR: ${{ github.actor }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -176,9 +186,7 @@ jobs:
                 # failure, permissions issue, or no-op diff after apply. Surface as red.
                 text=":x: *llmgate catalog drift* — detected but PR creation failed${NL}• trigger: ${TRIGGER} by ${ACTOR}${NL}• apply-and-pr result: ${APPLY_RESULT:-unknown}${NL}${RUN_URL}"
               else
-                n=$(python3 -c "import yaml; print(yaml.safe_load(open('manifest.yaml'))['summary']['action_count'])")
-                w=$(python3 -c "import yaml; print(yaml.safe_load(open('manifest.yaml'))['summary']['warning_count'])")
-                text=":white_check_mark: *llmgate catalog drift* — PR opened${NL}• trigger: ${TRIGGER} by ${ACTOR}${NL}• ${n} actions, ${w} warnings${NL}• <${PR_URL}|PR #${PR_NUM}>${NL}${RUN_URL}"
+                text=":white_check_mark: *llmgate catalog drift* — PR opened${NL}• trigger: ${TRIGGER} by ${ACTOR}${NL}• ${ACTION_COUNT:-?} actions, ${WARNING_COUNT:-?} warnings${NL}• <${PR_URL}|PR #${PR_NUM}>${NL}${RUN_URL}"
               fi
               ;;
             2)

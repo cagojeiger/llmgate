@@ -1,4 +1,4 @@
-name: e2e (live upstream)
+name: e2e live
 
 # Manual / monthly only — costs vendor credits and is non-deterministic.
 # Set LLMGATE_OPENCODE_API_KEY and SLACK_WEBHOOK_URL as repo secrets. ADR 006.

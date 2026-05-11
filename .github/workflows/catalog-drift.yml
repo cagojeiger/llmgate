@@ -1,4 +1,4 @@
-name: catalog drift check
+name: catalog drift
 
 # Five jobs, each with the smallest permission set its work actually needs:
 #   detect       — read-only, runs the LLM agent, uploads manifest as artifact
@@ -15,7 +15,7 @@ name: catalog drift check
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 0 * * 0'   # 매주 일요일 09:00 KST (UTC 00:00)
+    - cron: '0 0 * * 0'  # Sun 00:00 UTC (09:00 KST)
 
 jobs:
   detect:

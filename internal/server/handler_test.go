@@ -815,6 +815,49 @@ func TestHandler_PanicAfterResponseStarted_DoesNotCorruptWireBody(t *testing.T) 
 	}
 }
 
+// TestHandler_AbortHandlerPanic_Repropagates_NotStamped locks in the
+// http.ErrAbortHandler exception in the panic recover path:
+// `panic(http.ErrAbortHandler)` is net/http's documented sentinel
+// for an intentional abort (the handler chose to drop the connection
+// without writing further). Swallowing it would (a) silently change
+// the abort semantics callers rely on, and (b) mis-label an
+// intentional protocol signal as a "panic" in the audit stream.
+//
+// The recover defer must re-panic in this case so the standard abort
+// path runs, and must NOT stamp KindPanic on the audit row.
+func TestHandler_AbortHandlerPanic_Repropagates_NotStamped(t *testing.T) {
+	rec, recorder := newCaptureRecorder()
+	svc := &fakeService{
+		vendor: "opencode",
+		buildResult: func(req *llmtypes.Request) *llmrouter.RouteResult {
+			panic(http.ErrAbortHandler)
+		},
+	}
+	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+
+	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	func() {
+		defer func() {
+			r := recover()
+			if r != http.ErrAbortHandler {
+				t.Fatalf("recovered = %v, want http.ErrAbortHandler propagated upward", r)
+			}
+		}()
+		h.ServeHTTP(w, req)
+	}()
+
+	// Audit row still exists (audit-always invariant) but must NOT
+	// be tagged as panic — the abort sentinel is an intentional
+	// protocol signal, not a fault.
+	got := rec.last(t)
+	if got.Kind == llmtypes.KindPanic {
+		t.Errorf("Kind = %q, want non-panic for intentional http.ErrAbortHandler abort", got.Kind)
+	}
+}
+
 // fakeService implements ChatService for handler tests. buildResult /
 // buildStreamResult let each test case shape the RouteResult —
 // including pre-populated Attempts — so we exercise the audit-copy

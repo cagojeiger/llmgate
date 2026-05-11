@@ -95,6 +95,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if p == nil {
 			return
 		}
+		// http.ErrAbortHandler is net/http's documented sentinel: the
+		// handler intentionally panicked to abort the response without
+		// writing anything further (chi.Recoverer also lets this one
+		// through). Re-panic so the standard abort path runs as
+		// intended — and do NOT stamp it as KindPanic in the audit
+		// stream, since it is an intentional protocol signal rather
+		// than a fault. The audit defer above still fires (audit-always
+		// invariant), but with the kind left at whatever the request
+		// reached before the abort.
+		if p == http.ErrAbortHandler {
+			panic(p)
+		}
 		rec.Kind = llmtypes.KindPanic
 		if rec.StatusCode == 0 {
 			rec.StatusCode = http.StatusInternalServerError

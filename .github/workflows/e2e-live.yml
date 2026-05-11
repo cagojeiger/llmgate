@@ -23,7 +23,7 @@ jobs:
           go-version: '1.23'
           cache: true
 
-      - uses: astral-sh/setup-uv@v8
+      - uses: astral-sh/setup-uv@v8.1.0
 
       - name: Run pytest (live)
         id: e2e

@@ -41,6 +41,7 @@ func errorPayload(err error) (int, time.Duration, []byte) {
 	var code any
 	retryAfter := llmtypes.RetryAfterOf(err)
 
+	transportClass := false
 	if err != nil {
 		switch kind {
 		case llmtypes.KindAuth:
@@ -53,12 +54,31 @@ func errorPayload(err error) (int, time.Duration, []byte) {
 			status, code = http.StatusBadRequest, "context_length_exceeded"
 		case llmtypes.KindContentFilter:
 			status, code = http.StatusBadRequest, "content_filter"
-		case llmtypes.KindUpstream, llmtypes.KindNetwork, llmtypes.KindTimeout, llmtypes.KindEmpty:
+		case llmtypes.KindNetwork, llmtypes.KindTimeout, llmtypes.KindEmpty:
+			// Transport-class failures: the original cause is built
+			// from cause.Error() in upstream/http.go's LowLevelError
+			// and may carry upstream IPs, in-cluster hostnames, or DNS
+			// errors. Collapse to a fixed wire message so none of that
+			// leaves the gateway. Operator detail still rides on
+			// rec.Kind + the slog stream where the failure was observed.
+			//
+			// KindUpstream is intentionally NOT collapsed here: that
+			// kind is set by provider adapters with deliberately-shaped
+			// messages, and sanitizing vendor body fragments is the
+			// adapter's responsibility, not this layer's.
+			status = http.StatusBadGateway
+			transportClass = true
+			if kind == llmtypes.KindTimeout {
+				message = "upstream timeout"
+			} else {
+				message = "upstream unavailable"
+			}
+		case llmtypes.KindUpstream:
 			status = http.StatusBadGateway
 		case llmtypes.KindClientClosed:
 			status = 499
 		}
-		if llmtypes.MessageOf(err) == "" {
+		if !transportClass && llmtypes.MessageOf(err) == "" {
 			message = http.StatusText(status)
 		}
 	}

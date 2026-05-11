@@ -41,6 +41,7 @@ func errorPayload(err error) (int, time.Duration, []byte) {
 	var code any
 	retryAfter := llmtypes.RetryAfterOf(err)
 
+	transportClass := false
 	if err != nil {
 		switch kind {
 		case llmtypes.KindAuth:
@@ -54,11 +55,24 @@ func errorPayload(err error) (int, time.Duration, []byte) {
 		case llmtypes.KindContentFilter:
 			status, code = http.StatusBadRequest, "content_filter"
 		case llmtypes.KindUpstream, llmtypes.KindNetwork, llmtypes.KindTimeout, llmtypes.KindEmpty:
+			// Transport / vendor-side failures: the original cause is
+			// built from cause.Error() in upstream/http.go and may carry
+			// upstream IPs, in-cluster hostnames, vendor body fragments,
+			// or secrets in vendor error envelopes. Collapse to a fixed
+			// wire message so none of that leaves the gateway. Operator
+			// detail still rides on rec.Kind + the slog stream where the
+			// failure was observed, so debugging is unaffected.
 			status = http.StatusBadGateway
+			transportClass = true
+			if kind == llmtypes.KindTimeout {
+				message = "upstream timeout"
+			} else {
+				message = "upstream unavailable"
+			}
 		case llmtypes.KindClientClosed:
 			status = 499
 		}
-		if llmtypes.MessageOf(err) == "" {
+		if !transportClass && llmtypes.MessageOf(err) == "" {
 			message = http.StatusText(status)
 		}
 	}

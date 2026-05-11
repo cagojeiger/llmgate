@@ -79,14 +79,18 @@ func TestSSEWriter_SendError_EmbedsErrorPayload(t *testing.T) {
 	flusher := &stubFlusher{}
 	sw := newSSEWriter(rec, flusher)
 
-	sw.SendError(&llmtypes.Error{Kind: llmtypes.KindUpstream, Message: "boom"})
+	// KindBadRequest is used here (rather than a transport kind) so the
+	// caller-supplied Message rides through unchanged — this test asserts
+	// the SSE-framing + envelope shape, not the wire-message sanitization
+	// contract for transport kinds (covered by errors_test.go).
+	sw.SendError(&llmtypes.Error{Kind: llmtypes.KindBadRequest, Message: "boom"})
 
 	body := rec.Body.String()
 	if !strings.HasPrefix(body, "data: ") || !strings.HasSuffix(body, "\n\n") {
 		t.Errorf("body = %q, want SSE-framed", body)
 	}
-	if !strings.Contains(body, `"type":"upstream"`) {
-		t.Errorf("body = %q, want OpenAI-style envelope with type=upstream", body)
+	if !strings.Contains(body, `"type":"bad_request"`) {
+		t.Errorf("body = %q, want OpenAI-style envelope with type=bad_request", body)
 	}
 	if !strings.Contains(body, `"message":"boom"`) {
 		t.Errorf("body = %q, want message=boom", body)

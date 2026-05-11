@@ -763,6 +763,58 @@ func TestHandler_PanicInStream_StampsAuditAndReturns500(t *testing.T) {
 	}
 }
 
+// TestHandler_PanicAfterResponseStarted_DoesNotCorruptWireBody locks
+// in the SSE-safety contract for the panic recover path: when the
+// response has already started (typical mid-stream panic where SSE
+// headers are flushed and chunks are in flight on the wire), the
+// recover defer must NOT write the JSON error envelope. net/http
+// silently drops a second WriteHeader, but still sends the body
+// bytes — they would land raw in the SSE stream the client is
+// decoding and corrupt the framing.
+//
+// We simulate "response started" by handing the handler a
+// countingWriter whose wroteHeader is already true. The audit row
+// must still be stamped (audit-always invariant), and the wire body
+// must be empty (no JSON envelope written on top of the stream).
+func TestHandler_PanicAfterResponseStarted_DoesNotCorruptWireBody(t *testing.T) {
+	rec, recorder := newCaptureRecorder()
+	svc := &fakeService{
+		vendor: "opencode",
+		buildResult: func(req *llmtypes.Request) *llmrouter.RouteResult {
+			panic("late boom")
+		},
+	}
+	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+
+	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+
+	// Inner recorder captures any wire writes the handler attempts.
+	inner := httptest.NewRecorder()
+	// Wrap with countingWriter pre-set to "header already flushed",
+	// which is the state the access-log middleware presents to the
+	// handler after streamRelay has emitted its 200 SSE headers.
+	cw := &countingWriter{ResponseWriter: inner, status: http.StatusOK, wroteHeader: true}
+
+	h.ServeHTTP(cw, req)
+
+	// Audit-always invariant still holds — KindPanic + 500 stamped
+	// even though the wire response was already in flight.
+	got := rec.last(t)
+	if got.Kind != llmtypes.KindPanic {
+		t.Errorf("Kind = %q, want %q", got.Kind, llmtypes.KindPanic)
+	}
+	if got.StatusCode != http.StatusInternalServerError {
+		t.Errorf("StatusCode = %d, want 500", got.StatusCode)
+	}
+
+	// Wire body must be untouched — no JSON envelope smuggled into
+	// the in-flight stream.
+	if inner.Body.Len() != 0 {
+		t.Errorf("wire body = %q, want empty (mid-stream panic must not write body)", inner.Body.String())
+	}
+}
+
 // fakeService implements ChatService for handler tests. buildResult /
 // buildStreamResult let each test case shape the RouteResult —
 // including pre-populated Attempts — so we exercise the audit-copy

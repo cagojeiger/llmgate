@@ -104,6 +104,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			slog.Any("panic", p),
 			slog.String("stack", string(debug.Stack())),
 		)
+		// If the response has already started — the typical case for
+		// a streaming panic mid-Run, when SSE headers (200, text/
+		// event-stream) are already flushed — net/http silently drops
+		// a second WriteHeader but still sends raw body bytes. Writing
+		// our JSON error envelope on top of an in-flight SSE stream
+		// would corrupt the framing the client is decoding. Skip the
+		// body write in that case; the audit row is still stamped,
+		// which is the invariant. The slog ERROR above carries the
+		// full diagnostic for operators.
+		if cw, ok := w.(*countingWriter); ok && cw.wroteHeader {
+			return
+		}
 		writeError(w, &llmtypes.Error{Kind: llmtypes.KindUnknown, Message: "internal server error"})
 	}()
 

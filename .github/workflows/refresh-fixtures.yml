@@ -1,4 +1,4 @@
-name: refresh cassette fixtures
+name: refresh fixtures
 
 # Manual / monthly — calls real upstream, opens PR with new fixtures.
 # Set LLMGATE_OPENCODE_API_KEY and SLACK_WEBHOOK_URL as repo secrets. ADR 006.

@@ -1,18 +1,30 @@
 name: catalog drift check
 
+# Five jobs, each with the smallest permission set its work actually needs:
+#   detect       — read-only, runs the LLM agent, uploads manifest as artifact
+#   apply-and-pr — writes catalog files and opens a PR (exit 1)
+#   review-issue — opens a manual-review issue (exit 3)
+#   notify       — pushes a Slack message reflecting whichever branch fired
+#   fail-on-error — surfaces agent runtime errors (exit 2)
+#
+# Manifest flows between jobs as a 90-day GitHub artifact, so each job
+# gets a fresh checkout/download and never inherits the agent's working
+# tree. Step summary + artifact preserve the run's trace independently
+# of Slack and PR.
+
 on:
   workflow_dispatch:
   schedule:
     - cron: '0 0 * * 0'   # 매주 일요일 09:00 KST (UTC 00:00)
 
 jobs:
-  diff:
+  detect:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     permissions:
-      contents: write
-      pull-requests: write
-      issues: write
+      contents: read
+    outputs:
+      exit-code: ${{ steps.agent.outputs.exit }}
     steps:
       - uses: actions/checkout@v6
 
@@ -21,9 +33,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install deps
-        run: |
-          pip install -r scripts/catalog_diff/requirements.txt
-          pip install ruamel.yaml
+        run: pip install -r scripts/catalog_diff/requirements.txt
 
       - name: Run catalog-diff agent
         id: agent
@@ -44,13 +54,42 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # exit 1: safe changes -> apply + (create-or-update) PR
+      - name: Upload manifest artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-output
+          path: manifest.yaml
+          retention-days: 90
+
+  apply-and-pr:
+    needs: detect
+    if: needs.detect.outputs.exit-code == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      pr-number: ${{ steps.pr.outputs.pull-request-number }}
+      pr-url: ${{ steps.pr.outputs.pull-request-url }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: pip install pyyaml ruamel.yaml
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-output
+
       - name: Apply manifest
-        if: steps.agent.outputs.exit == '1'
         run: python scripts/catalog_diff/apply.py manifest.yaml
 
       - name: Create or update PR
-        if: steps.agent.outputs.exit == '1'
         id: pr
         uses: peter-evans/create-pull-request@v8
         with:
@@ -61,31 +100,25 @@ jobs:
           commit-message: "chore(catalog): auto-sync with opencode docs"
           add-paths: catalog/
 
-      - name: Notify Slack (PR)
-        if: steps.agent.outputs.exit == '1' && steps.pr.outputs.pull-request-number != '' && env.SLACK_WEBHOOK_URL != ''
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          STATUS: ${{ job.status }}
-          PR_URL: ${{ steps.pr.outputs.pull-request-url }}
-          PR_NUM: ${{ steps.pr.outputs.pull-request-number }}
-          TRIGGER: ${{ github.event_name }}
-          ACTOR: ${{ github.actor }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          icon=":white_check_mark:"; [ "$STATUS" != "success" ] && icon=":x:"
-          NL=$'\n'
-          n=$(python3 -c "import yaml; print(yaml.safe_load(open('manifest.yaml'))['summary']['action_count'])")
-          w=$(python3 -c "import yaml; print(yaml.safe_load(open('manifest.yaml'))['summary']['warning_count'])")
-          text="${icon} *llmgate catalog drift* — PR opened${NL}• trigger: ${TRIGGER} by ${ACTOR}${NL}• ${n} actions, ${w} warnings${NL}• <${PR_URL}|PR #${PR_NUM}>${NL}${RUN_URL}"
-          jq -nc --arg t "$text" '{text:$t}' \
-            | curl -fsS -X POST -H 'Content-Type: application/json' --data @- "$SLACK_WEBHOOK_URL"
+  review-issue:
+    needs: detect
+    if: needs.detect.outputs.exit-code == '3'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      issues: write
+    outputs:
+      url: ${{ steps.issue.outputs.url }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-output
 
-      # exit 3: warnings -> issue + Slack
       - name: Create review issue
-        if: steps.agent.outputs.exit == '3'
         id: issue
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
           {
             echo "Auto-detected drift requires manual review. See manifest below."
@@ -95,27 +128,61 @@ jobs:
             echo '```'
           } > issue-body.md
           url=$(gh issue create \
+            --repo "$REPO" \
             --title "catalog drift needs manual review" \
             --body-file issue-body.md)
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
-      - name: Notify Slack (issue)
-        if: steps.agent.outputs.exit == '3' && env.SLACK_WEBHOOK_URL != ''
+  notify:
+    needs: [detect, apply-and-pr, review-issue]
+    if: always() && needs.detect.outputs.exit-code != '0' && needs.detect.outputs.exit-code != '2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - run: pip install pyyaml
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-output
+
+      - name: Notify Slack
+        if: env.SLACK_WEBHOOK_URL != ''
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          ISSUE_URL: ${{ steps.issue.outputs.url }}
+          EXIT_CODE: ${{ needs.detect.outputs.exit-code }}
+          PR_URL: ${{ needs.apply-and-pr.outputs.pr-url }}
+          PR_NUM: ${{ needs.apply-and-pr.outputs.pr-number }}
+          ISSUE_URL: ${{ needs.review-issue.outputs.url }}
           TRIGGER: ${{ github.event_name }}
           ACTOR: ${{ github.actor }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           NL=$'\n'
-          text=":warning: *llmgate catalog drift* — needs manual review${NL}• trigger: ${TRIGGER} by ${ACTOR}${NL}• warnings detected${NL}• <${ISSUE_URL}|review issue>${NL}${RUN_URL}"
+          if [ "$EXIT_CODE" = "1" ]; then
+            n=$(python3 -c "import yaml; print(yaml.safe_load(open('manifest.yaml'))['summary']['action_count'])")
+            w=$(python3 -c "import yaml; print(yaml.safe_load(open('manifest.yaml'))['summary']['warning_count'])")
+            text=":white_check_mark: *llmgate catalog drift* — PR opened${NL}• trigger: ${TRIGGER} by ${ACTOR}${NL}• ${n} actions, ${w} warnings${NL}• <${PR_URL}|PR #${PR_NUM}>${NL}${RUN_URL}"
+          elif [ "$EXIT_CODE" = "3" ]; then
+            text=":warning: *llmgate catalog drift* — needs manual review${NL}• trigger: ${TRIGGER} by ${ACTOR}${NL}• warnings detected${NL}• <${ISSUE_URL}|review issue>${NL}${RUN_URL}"
+          else
+            text=":grey_question: *llmgate catalog drift* — unexpected exit ${EXIT_CODE}${NL}${RUN_URL}"
+          fi
           jq -nc --arg t "$text" '{text:$t}' \
             | curl -fsS -X POST -H 'Content-Type: application/json' --data @- "$SLACK_WEBHOOK_URL"
 
-      # exit 2: runtime error
-      - name: Fail on runtime error
-        if: steps.agent.outputs.exit == '2'
+  fail-on-error:
+    needs: detect
+    if: needs.detect.outputs.exit-code == '2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Surface runtime error
         run: |
           echo "agent runtime error (exit 2)" >&2
           exit 1

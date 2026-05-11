@@ -47,7 +47,7 @@ func (c *Client) classify(status int, body []byte, retryAfterHeader string) *llm
 	return &llmtypes.Error{
 		Kind:       kind,
 		Provider:   c.cfg.Name,
-		Message:    message,
+		Message:    upstream.PublicProviderMessage(kind, message),
 		StatusCode: status,
 		RetryAfter: upstream.ParseRetryAfter(retryAfterHeader),
 		Raw:        upstream.FirstBytes(body),
@@ -84,10 +84,11 @@ func errorFromStreamEvent(payload []byte, providerName string) *llmtypes.Error {
 	if message == "" {
 		message = "upstream stream error"
 	}
+	kind := kindFromAnthropicErrorType(errorType)
 	return &llmtypes.Error{
-		Kind:     kindFromAnthropicErrorType(errorType),
+		Kind:     kind,
 		Provider: providerName,
-		Message:  message,
+		Message:  upstream.PublicProviderMessage(kind, message),
 		Raw:      upstream.FirstBytes(payload),
 	}
 }

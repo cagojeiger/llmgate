@@ -166,7 +166,7 @@ func (s *stream) decodePayload(payload []byte) (*anthropicStreamEvent, error) {
 		return nil, &llmtypes.Error{
 			Kind:     llmtypes.KindUpstream,
 			Provider: s.ProviderName,
-			Message:  "decode stream event: " + err.Error(),
+			Message:  "upstream returned invalid response",
 			Cause:    err,
 			Raw:      upstream.FirstBytes(payload),
 		}

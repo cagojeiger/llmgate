@@ -167,6 +167,32 @@ func TestComplete_ThinkingContentMappedToReasoning(t *testing.T) {
 	}
 }
 
+func TestComplete_InvalidSuccessBodySanitizesDecodeDetail(t *testing.T) {
+	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`<html>internal stack from upstream</html>`))
+	}))
+	defer server.Close()
+
+	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "k", HTTPClient: server.Client, Name: "opencode"})
+	_, err := c.Complete(context.Background(), &llmtypes.Request{
+		Model:    "minimax-m2.5",
+		Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
+	})
+	perr := requireProviderError(t, err)
+	if perr.Kind != llmtypes.KindUpstream {
+		t.Fatalf("Kind = %q, want %q", perr.Kind, llmtypes.KindUpstream)
+	}
+	if perr.Message != "upstream returned invalid response" {
+		t.Fatalf("Message = %q, want sanitized invalid response", perr.Message)
+	}
+	if strings.Contains(perr.Message, "<html>") || strings.Contains(perr.Message, "invalid character") {
+		t.Fatalf("Message leaked parser/body detail: %q", perr.Message)
+	}
+	if !strings.Contains(string(perr.Raw), "internal stack") {
+		t.Fatalf("Raw = %q, want original invalid body preserved", string(perr.Raw))
+	}
+}
+
 func TestComplete_MaxTokensDefault(t *testing.T) {
 	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -443,8 +469,32 @@ func TestCompleteStream_ErrorMidFlight(t *testing.T) {
 	if perr.Kind != llmtypes.KindUpstream {
 		t.Fatalf("Kind = %q, want %q", perr.Kind, llmtypes.KindUpstream)
 	}
-	if !strings.Contains(perr.Message, "stream exploded") {
-		t.Fatalf("Message = %q, want stream exploded", perr.Message)
+	if perr.Message != "upstream unavailable" {
+		t.Fatalf("Message = %q, want sanitized upstream message", perr.Message)
+	}
+	if !strings.Contains(string(perr.Raw), "stream exploded") {
+		t.Fatalf("Raw = %q, want original stream error preserved", string(perr.Raw))
+	}
+}
+
+func TestClassify_UpstreamMessageSanitizedPreservesRaw(t *testing.T) {
+	c := mustNew(t, Config{BaseURL: "http://example.invalid", APIKey: "k", Name: "opencode"})
+	body := []byte(`{"type":"error","error":{"type":"api_error","message":"nginx upstream http://anthropic-proxy.default.svc:8080 failed"}}`)
+
+	perr := c.classify(http.StatusBadGateway, body, "")
+	if perr.Kind != llmtypes.KindUpstream {
+		t.Fatalf("Kind = %q, want %q", perr.Kind, llmtypes.KindUpstream)
+	}
+	if perr.Message != "upstream unavailable" {
+		t.Fatalf("Message = %q, want sanitized upstream message", perr.Message)
+	}
+	for _, needle := range []string{"anthropic-proxy", ".svc", ":8080", "nginx upstream"} {
+		if strings.Contains(perr.Message, needle) {
+			t.Fatalf("Message leaked %q: %q", needle, perr.Message)
+		}
+	}
+	if string(perr.Raw) != string(body) {
+		t.Fatalf("Raw = %q, want original body preserved", string(perr.Raw))
 	}
 }
 

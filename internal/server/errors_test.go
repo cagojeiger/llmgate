@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -36,6 +37,7 @@ func TestErrorPayload_TransportKindsCollapseToGeneric(t *testing.T) {
 			err: &llmtypes.Error{
 				Kind:    llmtypes.KindNetwork,
 				Message: "post chat: dial tcp 13.226.42.85:443: connect: connection refused",
+				Cause:   errors.New("dial tcp 13.226.42.85:443: connect: connection refused"),
 			},
 			wantStatus:  http.StatusBadGateway,
 			wantMessage: "upstream unavailable",
@@ -45,15 +47,17 @@ func TestErrorPayload_TransportKindsCollapseToGeneric(t *testing.T) {
 			err: &llmtypes.Error{
 				Kind:    llmtypes.KindTimeout,
 				Message: "post chat: Post \"https://opencode.ai/zen/go/v1/chat/completions\": context deadline exceeded",
+				Cause:   errors.New("context deadline exceeded"),
 			},
 			wantStatus:  http.StatusBadGateway,
 			wantMessage: "upstream timeout",
 		},
 		{
-			name: "empty kind erases vendor pod identifier",
+			name: "empty kind from sse_reader scanner erases vendor pod identifier",
 			err: &llmtypes.Error{
 				Kind:    llmtypes.KindEmpty,
 				Message: "no completion from upstream pod 10.244.3.7",
+				Cause:   errors.New("read tcp 10.244.3.7:443: connection reset"),
 			},
 			wantStatus:  http.StatusBadGateway,
 			wantMessage: "upstream unavailable",
@@ -105,15 +109,19 @@ func TestErrorPayload_TransportKindsCollapseToGeneric(t *testing.T) {
 
 // TestErrorPayload_AdapterClassifiedTransportKindsPreserveMessage guards
 // against accidentally collapsing adapter-shaped messages on transport
-// kinds. Provider adapters classify HTTP 408 → KindTimeout (and 502 /
-// 504 / etc. into the same kind family); on those, Message has been
-// parsed from the vendor envelope (no IPs, no raw connection error
-// strings) and StatusCode is preserved. The wire collapse must skip
-// them so callers retain the adapter's diagnostic.
+// kinds. Adapter origins fall into two shapes:
+//   - Vendor HTTP responses parsed from envelopes (408 → KindTimeout,
+//     502 / 504 / etc.). Message is vendor-shaped; StatusCode is set
+//     to the upstream HTTP status; Cause is nil.
+//   - Adapter-built diagnostics like "empty response" for HTTP 200
+//     with empty body. Message is a fixed string; StatusCode is 0;
+//     Cause is nil.
 //
 // Distinguishing signal: low-level transport faults
-// (upstream/http.go's LowLevelError, sse_reader's scanner.Err) leave
-// StatusCode at 0; adapters always set StatusCode.
+// (upstream/http.go's LowLevelError, sse_reader's scanner.Err) ALWAYS
+// wrap an underlying error in Cause; adapters never do. The wire
+// collapse keys on Cause presence, so both adapter shapes flow through
+// unchanged.
 func TestErrorPayload_AdapterClassifiedTransportKindsPreserveMessage(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -150,6 +158,20 @@ func TestErrorPayload_AdapterClassifiedTransportKindsPreserveMessage(t *testing.
 			},
 			wantStatus:  http.StatusBadGateway,
 			wantMessage: "vendor returned no completions",
+		},
+		{
+			// providers/openai/complete.go:42 and providers/anthropic/
+			// complete.go:42 build this on HTTP 200 with an empty body.
+			// StatusCode is 0 and Cause is nil — the discriminator is
+			// Cause, not StatusCode.
+			name: "empty diagnostic on HTTP 200 empty body preserves adapter string",
+			err: &llmtypes.Error{
+				Kind:     llmtypes.KindEmpty,
+				Provider: "opencode",
+				Message:  "empty response",
+			},
+			wantStatus:  http.StatusBadGateway,
+			wantMessage: "empty response",
 		},
 	}
 	for _, tc := range cases {

@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"math"
 	"net/http"
 	"strconv"
@@ -60,24 +61,28 @@ func errorPayload(err error) (int, time.Duration, []byte) {
 			//      LowLevelError or sse_reader's scanner.Err(). Message
 			//      is built from cause.Error() and may carry upstream
 			//      IPs, in-cluster hostnames, or DNS detail. Cause is
-			//      set; StatusCode is 0 (no upstream HTTP response).
-			//   2. Adapter-classified vendor responses (HTTP 408 →
-			//      KindTimeout, 502/504 → KindEmpty/KindNetwork by
-			//      vendor mapping). Message is parsed from the vendor
-			//      envelope, already vendor-shaped and safe to surface.
-			//      StatusCode is preserved (408 / 502 / 504 / ...).
+			//      ALWAYS set (the underlying connection error).
+			//   2. Adapter-classified diagnostics. Includes both vendor
+			//      HTTP responses (408 → KindTimeout, 502 / 504 → vendor
+			//      mapping) and adapter-built diagnostics like
+			//      "empty response" for HTTP 200 with empty body.
+			//      Message is built from a parsed envelope or fixed
+			//      adapter string; Cause is left nil because no
+			//      underlying error was wrapped.
 			//
-			// Sanitize only the transport branch (StatusCode == 0).
-			// The adapter branch keeps its diagnostic so callers retain
-			// the vendor's envelope message; upstream status surfacing
-			// to the wire is a separate decision for a later PR.
+			// Cause presence is the cleanest distinguishing signal:
+			// it's set whenever an underlying error was wrapped (always
+			// true for transport faults, never for adapter diagnostics).
+			// Sanitize only the wrapped branch so adapter diagnostics
+			// stay intact — that includes "empty response", "server
+			// timeout" parsed from a 408 envelope, etc.
 			//
-			// KindUpstream is also intentionally NOT collapsed here:
-			// that kind is always set by provider adapters with
+			// KindUpstream is intentionally NOT collapsed here: that
+			// kind is always set by provider adapters with
 			// deliberately-shaped messages — it never originates from
 			// the transport layer.
 			status = http.StatusBadGateway
-			if llmtypes.StatusCodeOf(err) == 0 {
+			if errors.Unwrap(err) != nil {
 				transportClass = true
 				if kind == llmtypes.KindTimeout {
 					message = "upstream timeout"

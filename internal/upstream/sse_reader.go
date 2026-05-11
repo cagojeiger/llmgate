@@ -112,26 +112,40 @@ func (r *SSEReader) Recv() (data []byte, err error) {
 	}
 
 	if err := r.scanner.Err(); err != nil {
-		// Transport-level fault. Even if `parts` is non-empty we
-		// intentionally do not flush them — partial bytes received
-		// before a connection drop may themselves be corrupt, so the
-		// error signal is the priority and any salvage attempt belongs
-		// to the adapter that knows how to validate the JSON shape.
+		// Even if `parts` is non-empty we intentionally do not flush
+		// them — partial bytes received before a connection drop may
+		// themselves be corrupt, so the error signal is the priority
+		// and any salvage attempt belongs to the adapter that knows
+		// how to validate the JSON shape.
 		//
-		// Classify as KindNetwork (or KindTimeout for deadline / net
-		// timeouts) so server/errors.go's transport-class collapse
-		// strips the cause detail before it reaches the wire.
-		// scanner.Err() bubbles up from the underlying connection's
-		// read error and may carry upstream IPs / hostnames / ports
-		// — KindUpstream pass-through would leak that into the SSE
-		// error frame.
-		kind := llmtypes.KindNetwork
-		if errors.Is(err, context.DeadlineExceeded) {
+		// scanner.Err() returns one of two flavors:
+		//   1. An error bubbled up from the underlying io.Reader (the
+		//      live HTTP connection): TCP/TLS read failure, peer
+		//      reset, deadline exceeded. Message can carry upstream
+		//      IPs / hostnames / ports.
+		//   2. A scanner-internal error (e.g. bufio.ErrTooLong when an
+		//      SSE frame exceeds the 10 MiB buffer cap). Message is a
+		//      bufio diagnostic with no transport detail and is
+		//      operationally useful to surface unchanged.
+		//
+		// Classify (1) as KindNetwork / KindTimeout so server/errors.go's
+		// transport-class collapse strips the cause detail before it
+		// reaches the wire. Default to KindUpstream for (2) so the
+		// diagnostic survives intact and fallback / circuit-breaker
+		// policy doesn't mistake a frame-size error for a
+		// connectivity failure.
+		kind := llmtypes.KindUpstream
+		switch {
+		case errors.Is(err, context.DeadlineExceeded):
 			kind = llmtypes.KindTimeout
-		} else {
+		default:
 			var netErr net.Error
-			if errors.As(err, &netErr) && netErr.Timeout() {
-				kind = llmtypes.KindTimeout
+			if errors.As(err, &netErr) {
+				if netErr.Timeout() {
+					kind = llmtypes.KindTimeout
+				} else {
+					kind = llmtypes.KindNetwork
+				}
 			}
 		}
 		return nil, &llmtypes.Error{Kind: kind, Message: err.Error(), Cause: err}

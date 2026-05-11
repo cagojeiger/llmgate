@@ -103,6 +103,77 @@ func TestErrorPayload_TransportKindsCollapseToGeneric(t *testing.T) {
 	}
 }
 
+// TestErrorPayload_AdapterClassifiedTransportKindsPreserveMessage guards
+// against accidentally collapsing adapter-shaped messages on transport
+// kinds. Provider adapters classify HTTP 408 → KindTimeout (and 502 /
+// 504 / etc. into the same kind family); on those, Message has been
+// parsed from the vendor envelope (no IPs, no raw connection error
+// strings) and StatusCode is preserved. The wire collapse must skip
+// them so callers retain the adapter's diagnostic.
+//
+// Distinguishing signal: low-level transport faults
+// (upstream/http.go's LowLevelError, sse_reader's scanner.Err) leave
+// StatusCode at 0; adapters always set StatusCode.
+func TestErrorPayload_AdapterClassifiedTransportKindsPreserveMessage(t *testing.T) {
+	cases := []struct {
+		name        string
+		err         *llmtypes.Error
+		wantStatus  int
+		wantMessage string
+	}{
+		{
+			name: "timeout from adapter HTTP 408 preserves vendor envelope",
+			err: &llmtypes.Error{
+				Kind:       llmtypes.KindTimeout,
+				StatusCode: http.StatusRequestTimeout,
+				Message:    "server timeout",
+			},
+			wantStatus:  http.StatusBadGateway,
+			wantMessage: "server timeout",
+		},
+		{
+			name: "network from adapter HTTP 502 preserves vendor envelope",
+			err: &llmtypes.Error{
+				Kind:       llmtypes.KindNetwork,
+				StatusCode: http.StatusBadGateway,
+				Message:    "vendor reported bad gateway",
+			},
+			wantStatus:  http.StatusBadGateway,
+			wantMessage: "vendor reported bad gateway",
+		},
+		{
+			name: "empty from adapter HTTP 504 preserves vendor envelope",
+			err: &llmtypes.Error{
+				Kind:       llmtypes.KindEmpty,
+				StatusCode: http.StatusGatewayTimeout,
+				Message:    "vendor returned no completions",
+			},
+			wantStatus:  http.StatusBadGateway,
+			wantMessage: "vendor returned no completions",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			status, _, payload := errorPayload(tc.err)
+			if status != tc.wantStatus {
+				t.Errorf("status = %d, want %d", status, tc.wantStatus)
+			}
+
+			var got map[string]any
+			if err := json.Unmarshal(payload, &got); err != nil {
+				t.Fatalf("unmarshal payload: %v (raw: %s)", err, payload)
+			}
+			errObj, ok := got["error"].(map[string]any)
+			if !ok {
+				t.Fatalf("payload missing error object: %s", payload)
+			}
+			if errObj["message"] != tc.wantMessage {
+				t.Errorf("wire message = %q, want %q (adapter-shaped messages must not be collapsed)", errObj["message"], tc.wantMessage)
+			}
+		})
+	}
+}
+
 // TestErrorPayload_NonTransportKindsPreserveMessage guards the inverse:
 // kinds where the message IS the contract (caller-actionable info) must
 // keep flowing to the wire so the caller can fix the request.

@@ -55,23 +55,35 @@ func errorPayload(err error) (int, time.Duration, []byte) {
 		case llmtypes.KindContentFilter:
 			status, code = http.StatusBadRequest, "content_filter"
 		case llmtypes.KindNetwork, llmtypes.KindTimeout, llmtypes.KindEmpty:
-			// Transport-class failures: the original cause is built
-			// from cause.Error() in upstream/http.go's LowLevelError
-			// and may carry upstream IPs, in-cluster hostnames, or DNS
-			// errors. Collapse to a fixed wire message so none of that
-			// leaves the gateway. Operator detail still rides on
-			// rec.Kind + the slog stream where the failure was observed.
+			// Two distinct sources land on these kinds:
+			//   1. Low-level transport faults via upstream/http.go's
+			//      LowLevelError or sse_reader's scanner.Err(). Message
+			//      is built from cause.Error() and may carry upstream
+			//      IPs, in-cluster hostnames, or DNS detail. Cause is
+			//      set; StatusCode is 0 (no upstream HTTP response).
+			//   2. Adapter-classified vendor responses (HTTP 408 →
+			//      KindTimeout, 502/504 → KindEmpty/KindNetwork by
+			//      vendor mapping). Message is parsed from the vendor
+			//      envelope, already vendor-shaped and safe to surface.
+			//      StatusCode is preserved (408 / 502 / 504 / ...).
 			//
-			// KindUpstream is intentionally NOT collapsed here: that
-			// kind is set by provider adapters with deliberately-shaped
-			// messages, and sanitizing vendor body fragments is the
-			// adapter's responsibility, not this layer's.
+			// Sanitize only the transport branch (StatusCode == 0).
+			// The adapter branch keeps its diagnostic so callers retain
+			// the vendor's envelope message; upstream status surfacing
+			// to the wire is a separate decision for a later PR.
+			//
+			// KindUpstream is also intentionally NOT collapsed here:
+			// that kind is always set by provider adapters with
+			// deliberately-shaped messages — it never originates from
+			// the transport layer.
 			status = http.StatusBadGateway
-			transportClass = true
-			if kind == llmtypes.KindTimeout {
-				message = "upstream timeout"
-			} else {
-				message = "upstream unavailable"
+			if llmtypes.StatusCodeOf(err) == 0 {
+				transportClass = true
+				if kind == llmtypes.KindTimeout {
+					message = "upstream timeout"
+				} else {
+					message = "upstream unavailable"
+				}
 			}
 		case llmtypes.KindUpstream:
 			status = http.StatusBadGateway

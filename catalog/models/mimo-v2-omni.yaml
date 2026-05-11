@@ -1,7 +1,0 @@
-# 멀티모달 (text/image/audio/video) 입력 특화
-id: mimo-v2-omni
-vendor: opencode
-protocol: openai
-base_url: https://opencode.ai/zen/go/v1
-auth_env: LLMGATE_OPENCODE_API_KEY
-auth_scheme: bearer

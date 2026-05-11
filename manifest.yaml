@@ -1,0 +1,26 @@
+final: true
+schema_version: 1
+generated_at: '2026-05-11T03:39:57+00:00'
+source: https://opencode.ai/docs/go
+summary:
+  local_count: 14
+  remote_count: 12
+  stale_count: 2
+  fresh_count: 0
+  action_count: 2
+  warning_count: 0
+actions:
+- kind: delete_model
+  model_id: mimo-v2-omni
+  target: catalog/models/mimo-v2-omni.yaml
+  reason: not present on opencode docs page
+  safety:
+    referenced_by_aliases: []
+- kind: delete_model
+  model_id: mimo-v2-pro
+  target: catalog/models/mimo-v2-pro.yaml
+  reason: not present on opencode docs page
+  safety:
+    referenced_by_aliases: []
+warnings: []
+

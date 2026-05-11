@@ -11,21 +11,8 @@ import (
 	"llmgate/internal/llmtypes"
 )
 
-// TestErrorPayload_TransportKindsCollapseToGeneric locks in the wire
-// contract for failures that originate below the LLM contract: the
-// JSON `message` field must NOT carry the original cause, because
-// upstream/http.go's LowLevelError builds Message by concatenating
-// cause.Error() — which can embed upstream IPs, in-cluster hostnames,
-// or DNS errors.
-//
-// Operator detail is unchanged — rec.Kind on the audit row + the slog
-// stream where the failure was observed still carry the full cause.
-// Only the wire surface is sanitized.
-//
-// KindUpstream is deliberately omitted: that kind is set by provider
-// adapters with deliberately-shaped messages, and sanitizing vendor
-// body fragments belongs to the adapter layer, not this one. See the
-// non-transport table below for the KindUpstream pass-through case.
+// Transport failures may carry IPs, hostnames, or DNS details in their
+// Cause; only the public wire message is collapsed here.
 func TestErrorPayload_TransportKindsCollapseToGeneric(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -84,10 +71,6 @@ func TestErrorPayload_TransportKindsCollapseToGeneric(t *testing.T) {
 				t.Errorf("wire message = %q, want %q", gotMsg, tc.wantMessage)
 			}
 
-			// Defense-in-depth: even if wantMessage matches, no
-			// fragment of the original cause should slip through.
-			// Catches a future regression that re-introduces
-			// concatenation.
 			leakNeedles := []string{
 				"13.226.42.85",
 				"opencode.ai",
@@ -108,21 +91,8 @@ func TestErrorPayload_TransportKindsCollapseToGeneric(t *testing.T) {
 	}
 }
 
-// TestErrorPayload_AdapterClassifiedTransportKindsPreserveMessage guards
-// against accidentally collapsing adapter-shaped messages on transport
-// kinds. Adapter origins fall into two shapes:
-//   - Vendor HTTP responses parsed from envelopes (408 → KindTimeout,
-//     502 / 504 / etc.). Message is vendor-shaped; StatusCode is set
-//     to the upstream HTTP status; Cause is nil.
-//   - Adapter-built diagnostics like "empty response" for HTTP 200
-//     with empty body. Message is a fixed string; StatusCode is 0;
-//     Cause is nil.
-//
-// Distinguishing signal: low-level transport faults
-// (upstream/http.go's LowLevelError, sse_reader's scanner.Err) ALWAYS
-// wrap an underlying error in Cause; adapters never do. The wire
-// collapse keys on Cause presence, so both adapter shapes flow through
-// unchanged.
+// Adapter-classified diagnostics on transport-like kinds have no Cause;
+// server-level collapse is reserved for low-level transport failures.
 func TestErrorPayload_AdapterClassifiedTransportKindsPreserveMessage(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -161,10 +131,6 @@ func TestErrorPayload_AdapterClassifiedTransportKindsPreserveMessage(t *testing.
 			wantMessage: "vendor returned no completions",
 		},
 		{
-			// providers/openai/complete.go:42 and providers/anthropic/
-			// complete.go:42 build this on HTTP 200 with an empty body.
-			// StatusCode is 0 and Cause is nil — the discriminator is
-			// Cause, not StatusCode.
 			name: "empty diagnostic on HTTP 200 empty body preserves adapter string",
 			err: &llmtypes.Error{
 				Kind:     llmtypes.KindEmpty,
@@ -191,17 +157,14 @@ func TestErrorPayload_AdapterClassifiedTransportKindsPreserveMessage(t *testing.
 				t.Fatalf("payload missing error object: %s", payload)
 			}
 			if errObj["message"] != tc.wantMessage {
-				t.Errorf("wire message = %q, want %q (adapter-shaped messages must not be collapsed)", errObj["message"], tc.wantMessage)
+				t.Errorf("wire message = %q, want %q", errObj["message"], tc.wantMessage)
 			}
 		})
 	}
 }
 
-// TestErrorPayload_NonTransportKindsPreserveMessage guards the inverse:
-// kinds where the message IS the contract (caller-actionable info) must
-// keep flowing to the wire so the caller can fix the request.
-// KindUpstream is included here because the message there is
-// adapter-shaped, not transport-cause concatenation.
+// Caller-actionable error kinds keep their message at this layer. Provider
+// adapters sanitize opaque upstream messages before they get here.
 func TestErrorPayload_NonTransportKindsPreserveMessage(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -240,7 +203,7 @@ func TestErrorPayload_NonTransportKindsPreserveMessage(t *testing.T) {
 			wantMessage: "exceeded 1000 RPM",
 		},
 		{
-			name:        "upstream preserves adapter-shaped message",
+			name:        "upstream preserves adapter-supplied public message",
 			err:         &llmtypes.Error{Kind: llmtypes.KindUpstream, Message: "vendor responded 503"},
 			wantStatus:  http.StatusBadGateway,
 			wantMessage: "vendor responded 503",
@@ -268,19 +231,9 @@ func TestErrorPayload_NonTransportKindsPreserveMessage(t *testing.T) {
 	}
 }
 
-// TestErrorPayload_WrappedErrorsRoutedByChainCause guards the
-// chain-walk contract for the Cause gate. errors that have been
-// re-wrapped (fmt.Errorf("…: %w", typedErr)) at any layer must still
-// route by the chain-found *llmtypes.Error's Cause, not by the
-// outermost wrapper's Unwrap. This was a real regression in an
-// earlier iteration that used errors.Unwrap on the top-level err and
-// therefore mis-classified once-wrapped adapter errors as transport.
+// Wrapped errors still route by the chain-found llmtypes.Error Cause.
 func TestErrorPayload_WrappedErrorsRoutedByChainCause(t *testing.T) {
-	t.Run("wrapped adapter diagnostic stays adapter-shaped", func(t *testing.T) {
-		// Adapter classified an HTTP 200 empty body, then a router
-		// layer wrapped the typed error for context. Cause on the
-		// inner *llmtypes.Error is still nil — must surface the
-		// adapter message, not "upstream unavailable".
+	t.Run("wrapped adapter diagnostic keeps public message", func(t *testing.T) {
 		inner := &llmtypes.Error{
 			Kind:     llmtypes.KindEmpty,
 			Provider: "opencode",
@@ -300,10 +253,6 @@ func TestErrorPayload_WrappedErrorsRoutedByChainCause(t *testing.T) {
 	})
 
 	t.Run("wrapped transport fault still collapses", func(t *testing.T) {
-		// Transport fault (LowLevelError-shape) wrapped once more by
-		// a routing layer. Inner *llmtypes.Error.Cause is set —
-		// must still collapse to the generic wire message rather
-		// than leaking the wrapper or cause detail.
 		inner := &llmtypes.Error{
 			Kind:    llmtypes.KindNetwork,
 			Message: "post chat: dial tcp 13.226.42.85:443: connect: connection refused",

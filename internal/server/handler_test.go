@@ -688,6 +688,81 @@ func TestHandler_Stream_PreStreamServiceError(t *testing.T) {
 	}
 }
 
+// TestHandler_PanicInComplete_StampsAuditAndReturns500 locks in the
+// audit-always invariant (ADR 003) for the panic path: when the
+// handler's downstream service panics, the deferred audit record
+// must surface as KindPanic / status 500 rather than at its
+// last-assigned (often empty / 0) values, so panic spikes are
+// observable in the audit stream and aren't indistinguishable from
+// other failures during forensics.
+//
+// Also pins the wire surface — generic 500 envelope, no panic value
+// or stack leakage to the caller. Panic internals only land in the
+// slog stream where operators expect them.
+func TestHandler_PanicInComplete_StampsAuditAndReturns500(t *testing.T) {
+	rec, recorder := newCaptureRecorder()
+	svc := &fakeService{
+		vendor: "opencode",
+		buildResult: func(req *llmtypes.Request) *llmrouter.RouteResult {
+			panic("boom in complete")
+		},
+	}
+	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+
+	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", w.Code)
+	}
+	got := rec.last(t)
+	if got.Kind != llmtypes.KindPanic {
+		t.Errorf("Kind = %q, want %q (audit-always invariant)", got.Kind, llmtypes.KindPanic)
+	}
+	if got.StatusCode != http.StatusInternalServerError {
+		t.Errorf("StatusCode = %d, want 500", got.StatusCode)
+	}
+	if strings.Contains(w.Body.String(), "boom") {
+		t.Errorf("wire body leaked panic value: %s", w.Body.String())
+	}
+}
+
+// TestHandler_PanicInStream_StampsAuditAndReturns500 covers the same
+// invariant on the streaming entry path. The panic happens before
+// any SSE bytes are flushed, so the wire status is a clean 500;
+// audit still gets KindPanic.
+func TestHandler_PanicInStream_StampsAuditAndReturns500(t *testing.T) {
+	rec, recorder := newCaptureRecorder()
+	svc := &fakeService{
+		vendor: "opencode",
+		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
+			panic("boom in stream")
+		},
+	}
+	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+
+	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", w.Code)
+	}
+	got := rec.last(t)
+	if got.Kind != llmtypes.KindPanic {
+		t.Errorf("Kind = %q, want %q", got.Kind, llmtypes.KindPanic)
+	}
+	if got.StatusCode != http.StatusInternalServerError {
+		t.Errorf("StatusCode = %d, want 500", got.StatusCode)
+	}
+	if strings.Contains(w.Body.String(), "boom") {
+		t.Errorf("wire body leaked panic value: %s", w.Body.String())
+	}
+}
+
 // fakeService implements ChatService for handler tests. buildResult /
 // buildStreamResult let each test case shape the RouteResult —
 // including pre-populated Attempts — so we exercise the audit-copy

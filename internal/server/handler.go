@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"time"
 
 	"llmgate/internal/audit"
@@ -71,6 +72,39 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		rec.DurationMS = time.Since(start).Milliseconds()
 		h.recorder.Record(ctx, rec)
+	}()
+	// Self-contained panic guard. Stamps rec.Kind = KindPanic on the
+	// audit record so the audit-always invariant (ADR 003) holds even
+	// when handler logic panics — without this, the deferred Record
+	// above would still fire but with rec.Kind / rec.StatusCode at
+	// their last-assigned values (often empty / 0), making panic
+	// spikes invisible in the audit stream and indistinguishable from
+	// other failures during forensics.
+	//
+	// Registered AFTER the audit defer so it runs FIRST (LIFO):
+	// stamp first → audit defer reads the stamped record afterward.
+	//
+	// Best-effort 500 response. If the response has already started
+	// (mid-stream SSE), the underlying ResponseWriter ignores further
+	// headers/body — the audit row is still stamped, which is the
+	// invariant. The wire message is intentionally generic so panic
+	// internals don't reach the caller; the panic value + full stack
+	// trace go to slog (ERROR) for operator visibility.
+	defer func() {
+		p := recover()
+		if p == nil {
+			return
+		}
+		rec.Kind = llmtypes.KindPanic
+		if rec.StatusCode == 0 {
+			rec.StatusCode = http.StatusInternalServerError
+		}
+		h.log.LogAttrs(ctx, slog.LevelError, "handler panic",
+			slog.String("request_id", rec.RequestID),
+			slog.Any("panic", p),
+			slog.String("stack", string(debug.Stack())),
+		)
+		writeError(w, &llmtypes.Error{Kind: llmtypes.KindUnknown, Message: "internal server error"})
 	}()
 
 	if consumer.AuthError != "" {

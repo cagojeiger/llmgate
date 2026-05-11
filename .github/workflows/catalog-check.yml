@@ -1,0 +1,108 @@
+name: catalog drift check
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0'   # 매주 일요일 09:00 KST (UTC 00:00)
+
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: |
+          pip install -r scripts/catalog_diff/requirements.txt
+          pip install ruamel.yaml
+
+      - name: Run catalog-diff agent
+        id: agent
+        env:
+          LLMGATE_CONSUMER_KEY: ${{ secrets.LLMGATE_CONSUMER_KEY }}
+        run: |
+          set +e
+          python scripts/catalog_diff/main.py -v > manifest.yaml
+          echo "exit=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Show manifest in step summary
+        run: |
+          {
+            echo "## Catalog drift manifest"
+            echo
+            echo '```yaml'
+            cat manifest.yaml
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # exit 1: safe changes -> apply + (create-or-update) PR
+      - name: Apply manifest
+        if: steps.agent.outputs.exit == '1'
+        run: python scripts/catalog_diff/apply.py manifest.yaml
+
+      - name: Create or update PR
+        if: steps.agent.outputs.exit == '1'
+        id: pr
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: chore/catalog-drift
+          delete-branch: true
+          title: "chore(catalog): auto-sync with opencode docs"
+          body-path: pr-body.md
+          commit-message: "chore(catalog): auto-sync with opencode docs"
+
+      - name: Slack notify (PR)
+        if: steps.agent.outputs.exit == '1' && steps.pr.outputs.pull-request-number != ''
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          PR_URL: ${{ steps.pr.outputs.pull-request-url }}
+          PR_NUM: ${{ steps.pr.outputs.pull-request-number }}
+        run: |
+          n=$(python -c "import yaml; print(yaml.safe_load(open('manifest.yaml'))['summary']['action_count'])")
+          payload=$(jq -n --arg url "$PR_URL" --arg num "$PR_NUM" --arg n "$n" \
+            '{text: ("catalog drift PR: <" + $url + "|#" + $num + "> (" + $n + " actions)")}')
+          curl -sS -X POST -H 'Content-Type: application/json' -d "$payload" "$SLACK_WEBHOOK_URL"
+
+      # exit 3: warnings -> issue + Slack
+      - name: Create review issue
+        if: steps.agent.outputs.exit == '3'
+        id: issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo "Auto-detected drift requires manual review. See manifest below."
+            echo
+            echo '```yaml'
+            cat manifest.yaml
+            echo '```'
+          } > issue-body.md
+          url=$(gh issue create \
+            --title "catalog drift needs manual review" \
+            --body-file issue-body.md)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Slack notify (issue)
+        if: steps.agent.outputs.exit == '3'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          ISSUE_URL: ${{ steps.issue.outputs.url }}
+        run: |
+          payload=$(jq -n --arg url "$ISSUE_URL" \
+            '{text: ("catalog drift needs manual review: <" + $url + "|issue>")}')
+          curl -sS -X POST -H 'Content-Type: application/json' -d "$payload" "$SLACK_WEBHOOK_URL"
+
+      # exit 2: runtime error
+      - name: Fail on runtime error
+        if: steps.agent.outputs.exit == '2'
+        run: |
+          echo "agent runtime error (exit 2)" >&2
+          exit 1

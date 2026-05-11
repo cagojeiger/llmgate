@@ -91,44 +91,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// internals don't reach the caller; the panic value + full stack
 	// trace go to slog (ERROR) for operator visibility.
 	defer func() {
-		p := recover()
-		if p == nil {
-			return
+		if p := recover(); p != nil {
+			h.recoverPanic(ctx, w, rec, p)
 		}
-		// http.ErrAbortHandler is net/http's documented sentinel: the
-		// handler intentionally panicked to abort the response without
-		// writing anything further (chi.Recoverer also lets this one
-		// through). Re-panic so the standard abort path runs as
-		// intended — and do NOT stamp it as KindPanic in the audit
-		// stream, since it is an intentional protocol signal rather
-		// than a fault. The audit defer above still fires (audit-always
-		// invariant), but with the kind left at whatever the request
-		// reached before the abort.
-		if p == http.ErrAbortHandler {
-			panic(p)
-		}
-		rec.Kind = llmtypes.KindPanic
-		if rec.StatusCode == 0 {
-			rec.StatusCode = http.StatusInternalServerError
-		}
-		h.log.LogAttrs(ctx, slog.LevelError, "handler panic",
-			slog.String("request_id", rec.RequestID),
-			slog.Any("panic", p),
-			slog.String("stack", string(debug.Stack())),
-		)
-		// If the response has already started — the typical case for
-		// a streaming panic mid-Run, when SSE headers (200, text/
-		// event-stream) are already flushed — net/http silently drops
-		// a second WriteHeader but still sends raw body bytes. Writing
-		// our JSON error envelope on top of an in-flight SSE stream
-		// would corrupt the framing the client is decoding. Skip the
-		// body write in that case; the audit row is still stamped,
-		// which is the invariant. The slog ERROR above carries the
-		// full diagnostic for operators.
-		if cw, ok := w.(*countingWriter); ok && cw.wroteHeader {
-			return
-		}
-		writeError(w, &llmtypes.Error{Kind: llmtypes.KindUnknown, Message: "internal server error"})
 	}()
 
 	if consumer.AuthError != "" {
@@ -169,6 +134,53 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.serveComplete(w, r, req, rec)
+}
+
+// recoverPanic is the body of the ServeHTTP panic-recover defer.
+// Extracted as a method so unit tests can drive it directly with a
+// pre-stamped rec — in particular, the streaming-mid-Run scenario
+// where streamRelay.Run already stamped rec.StatusCode = 200 and we
+// must override it to 500.
+//
+// Behaviour:
+//
+//   - http.ErrAbortHandler: re-panic. net/http's documented sentinel
+//     for an intentional connection abort (chi.Recoverer also lets
+//     this one through). Audit row stays as-is — abort is a protocol
+//     signal, not a fault.
+//   - Any other panic value: stamp KindPanic + StatusCode 500 on the
+//     audit record (always — overrides any earlier stamp like the
+//     SSE-headers-flushed 200 from streamRelay), log panic + stack at
+//     slog ERROR, and best-effort write a generic 500 envelope.
+//   - If the wire response has already started (countingWriter says
+//     wroteHeader == true, the typical mid-stream case), skip the
+//     body write so the JSON envelope doesn't corrupt the in-flight
+//     SSE framing. Audit-always invariant is satisfied either way.
+func (h *Handler) recoverPanic(ctx context.Context, w http.ResponseWriter, rec *audit.Record, p any) {
+	if p == http.ErrAbortHandler {
+		panic(p)
+	}
+	rec.Kind = llmtypes.KindPanic
+	// Unconditional 500. streamRelay.Run sets rec.StatusCode = 200
+	// when SSE headers flush; without overriding here, a mid-stream
+	// panic would persist that 200 in audit and look like a success
+	// in status-keyed dashboards / alerts. The wire side is already
+	// past the header point, but the audit row records the OUTCOME,
+	// not the wire status.
+	rec.StatusCode = http.StatusInternalServerError
+	h.log.LogAttrs(ctx, slog.LevelError, "handler panic",
+		slog.String("request_id", rec.RequestID),
+		slog.Any("panic", p),
+		slog.String("stack", string(debug.Stack())),
+	)
+	// SSE already in flight: don't write JSON body on top of the
+	// stream. net/http silently drops a second WriteHeader but
+	// still flushes body bytes — they would land raw inside the SSE
+	// stream the client is decoding.
+	if cw, ok := w.(*countingWriter); ok && cw.wroteHeader {
+		return
+	}
+	writeError(w, &llmtypes.Error{Kind: llmtypes.KindUnknown, Message: "internal server error"})
 }
 
 // adoptRoute copies routing metadata onto rec.

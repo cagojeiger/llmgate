@@ -858,6 +858,46 @@ func TestHandler_AbortHandlerPanic_Repropagates_NotStamped(t *testing.T) {
 	}
 }
 
+// TestHandler_recoverPanic_OverridesPreStampedStatus locks in the
+// audit-status invariant for the streaming-mid-Run scenario:
+// streamRelay.Run sets rec.StatusCode = 200 when SSE headers flush,
+// so by the time a mid-stream panic reaches the recover defer, rec
+// already carries a "success" status. The recover MUST override it
+// to 500 — otherwise dashboards / alerts keyed on status would see
+// the failure as a success.
+//
+// We exercise recoverPanic directly because the streaming Recv path
+// dispatches into a separate goroutine that recover() cannot reach,
+// making an end-to-end mid-stream panic impossible to simulate from
+// ServeHTTP. Driving the method directly lets us pre-stamp the
+// "after streamRelay flushed" state and assert the override.
+func TestHandler_recoverPanic_OverridesPreStampedStatus(t *testing.T) {
+	_, recorder := newCaptureRecorder()
+	h := NewHandler(&fakeService{vendor: "opencode"}, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+
+	// Pre-stamped state: streamRelay.Run already ran sink.WriteHeaders()
+	// and set rec.StatusCode = 200, then a panic hit later in the
+	// loop (sink.Send / json.Marshal / etc).
+	rec := &audit.Record{
+		RequestID:  "test-req-id",
+		StatusCode: http.StatusOK,
+	}
+	inner := httptest.NewRecorder()
+	cw := &countingWriter{ResponseWriter: inner, status: http.StatusOK, wroteHeader: true}
+
+	h.recoverPanic(context.Background(), cw, rec, "mid-stream boom")
+
+	if rec.Kind != llmtypes.KindPanic {
+		t.Errorf("Kind = %q, want %q", rec.Kind, llmtypes.KindPanic)
+	}
+	if rec.StatusCode != http.StatusInternalServerError {
+		t.Errorf("StatusCode = %d, want 500 — must override pre-stamped 200 so a panic is not recorded as success", rec.StatusCode)
+	}
+	if inner.Body.Len() != 0 {
+		t.Errorf("wire body = %q, want empty (already-flushed response must not get JSON written)", inner.Body.String())
+	}
+}
+
 // fakeService implements ChatService for handler tests. buildResult /
 // buildStreamResult let each test case shape the RouteResult —
 // including pre-populated Attempts — so we exercise the audit-copy

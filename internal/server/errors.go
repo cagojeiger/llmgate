@@ -41,6 +41,7 @@ func errorPayload(err error) (int, time.Duration, []byte) {
 	var code any
 	retryAfter := llmtypes.RetryAfterOf(err)
 
+	transportClass := false
 	if err != nil {
 		switch kind {
 		case llmtypes.KindAuth:
@@ -53,12 +54,52 @@ func errorPayload(err error) (int, time.Duration, []byte) {
 			status, code = http.StatusBadRequest, "context_length_exceeded"
 		case llmtypes.KindContentFilter:
 			status, code = http.StatusBadRequest, "content_filter"
-		case llmtypes.KindUpstream, llmtypes.KindNetwork, llmtypes.KindTimeout, llmtypes.KindEmpty:
+		case llmtypes.KindNetwork, llmtypes.KindTimeout, llmtypes.KindEmpty:
+			// Two distinct sources land on these kinds:
+			//   1. Low-level transport faults via upstream/http.go's
+			//      LowLevelError or sse_reader's scanner.Err(). Message
+			//      is built from cause.Error() and may carry upstream
+			//      IPs, in-cluster hostnames, or DNS detail. Cause is
+			//      ALWAYS set (the underlying connection error).
+			//   2. Adapter-classified diagnostics. Includes both vendor
+			//      HTTP responses (408 → KindTimeout, 502 / 504 → vendor
+			//      mapping) and adapter-built diagnostics like
+			//      "empty response" for HTTP 200 with empty body.
+			//      Message is built from a parsed envelope or fixed
+			//      adapter string; Cause is left nil because no
+			//      underlying error was wrapped.
+			//
+			// Cause presence is the cleanest distinguishing signal:
+			// it's set whenever an underlying error was wrapped (always
+			// true for transport faults, never for adapter diagnostics).
+			// Sanitize only the wrapped branch so adapter diagnostics
+			// stay intact — that includes "empty response", "server
+			// timeout" parsed from a 408 envelope, etc.
+			//
+			// llmtypes.CauseOf walks the chain via errors.As, so a
+			// re-wrapped (fmt.Errorf("…: %w", typedErr)) adapter error
+			// is still recognized as adapter-origin and a multi-wrap
+			// transport error is still recognized as transport.
+			//
+			// KindUpstream is intentionally NOT collapsed here: that
+			// kind is always set by provider adapters with
+			// deliberately-shaped messages — it never originates from
+			// the transport layer.
+			status = http.StatusBadGateway
+			if llmtypes.CauseOf(err) != nil {
+				transportClass = true
+				if kind == llmtypes.KindTimeout {
+					message = "upstream timeout"
+				} else {
+					message = "upstream unavailable"
+				}
+			}
+		case llmtypes.KindUpstream:
 			status = http.StatusBadGateway
 		case llmtypes.KindClientClosed:
 			status = 499
 		}
-		if llmtypes.MessageOf(err) == "" {
+		if !transportClass && llmtypes.MessageOf(err) == "" {
 			message = http.StatusText(status)
 		}
 	}

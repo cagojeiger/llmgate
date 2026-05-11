@@ -3,6 +3,7 @@ package upstream
 import (
 	"errors"
 	"io"
+	"net"
 	"strings"
 	"testing"
 
@@ -175,12 +176,24 @@ func TestSSEReader_TruncatedAfterDataNoBlankLineDelivers(t *testing.T) {
 	}
 }
 
-func TestSSEReader_ScannerErrorBubblesAsUpstreamError(t *testing.T) {
-	// Hand-craft an io.Reader that errors mid-stream so we exercise the
-	// scanner.Err() path (distinct from natural EOF).
+func TestSSEReader_ScannerNetErrorClassifiedAsNetwork(t *testing.T) {
+	// Hand-craft an io.Reader that errors mid-stream with a real
+	// net.Error so we exercise the transport-fault classification
+	// path (distinct from natural EOF and from scanner-internal
+	// errors covered below).
+	//
+	// The error must surface as KindNetwork (not KindUpstream) so
+	// that server/errors.go's transport-class collapse strips the
+	// cause detail before it reaches the SSE error frame on the
+	// wire — net.OpError typically embeds the upstream IP / port.
 	src := &errReader{
 		data: []byte("data: one\n\ndata: two"),
-		err:  errors.New("connection reset"),
+		err: &net.OpError{
+			Op:   "read",
+			Net:  "tcp",
+			Addr: &net.TCPAddr{IP: net.ParseIP("13.226.42.85"), Port: 443},
+			Err:  errors.New("connection reset by peer"),
+		},
 	}
 	reader := NewSSEReader(io.NopCloser(src))
 
@@ -198,8 +211,45 @@ func TestSSEReader_ScannerErrorBubblesAsUpstreamError(t *testing.T) {
 	if !errors.As(err, &perr) {
 		t.Fatalf("err type = %T, want *llmtypes.Error", err)
 	}
+	if perr.Kind != llmtypes.KindNetwork {
+		t.Errorf("Kind = %s, want %s — KindUpstream pass-through would leak transport detail through server/errors.go", perr.Kind, llmtypes.KindNetwork)
+	}
+	// Cause is preserved so audit/slog operators can still see what
+	// happened; only the wire surface is sanitized downstream.
+	if perr.Cause == nil {
+		t.Errorf("Cause = nil, want preserved underlying error for audit visibility")
+	}
+}
+
+func TestSSEReader_ScannerInternalErrorClassifiedAsUpstream(t *testing.T) {
+	// Non-net.Error scanner faults (e.g. bufio.ErrTooLong from an SSE
+	// frame above the 10 MiB buffer cap) are scanner-internal —
+	// nothing happened on the wire. Default classification is
+	// KindUpstream so:
+	//   - the frame-size diagnostic survives to the wire intact
+	//     instead of being collapsed to "upstream unavailable", and
+	//   - fallback / circuit-breaker policy doesn't mistake a
+	//     buffer-cap problem for a connectivity failure that would
+	//     trip the breaker on a healthy upstream.
+	src := &errReader{
+		data: []byte("data: one\n\n"),
+		err:  errors.New("bufio.Scanner: token too long"),
+	}
+	reader := NewSSEReader(io.NopCloser(src))
+
+	if _, err := reader.Recv(); err != nil {
+		t.Fatalf("first Recv: %v", err)
+	}
+	_, err := reader.Recv()
+	var perr *llmtypes.Error
+	if !errors.As(err, &perr) {
+		t.Fatalf("err type = %T, want *llmtypes.Error", err)
+	}
 	if perr.Kind != llmtypes.KindUpstream {
-		t.Errorf("Kind = %s, want %s", perr.Kind, llmtypes.KindUpstream)
+		t.Errorf("Kind = %s, want %s for scanner-internal error", perr.Kind, llmtypes.KindUpstream)
+	}
+	if perr.Message != "bufio.Scanner: token too long" {
+		t.Errorf("Message = %q, want adapter-shaped diagnostic preserved verbatim", perr.Message)
 	}
 }
 

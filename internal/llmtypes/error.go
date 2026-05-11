@@ -92,6 +92,23 @@ func RetryAfterOf(err error) time.Duration {
 	return 0
 }
 
+// CauseOf returns the wrapped Cause of the chain-found *Error, or nil
+// if the chain has no *Error or its Cause is nil. Pairs with the other
+// *Of helpers so downstream layers don't repeat type asserts when they
+// need to distinguish errors that wrap an underlying error (always true
+// for low-level transport faults built via upstream/http.go's
+// LowLevelError) from errors built without one (true for adapter
+// classified diagnostics like "empty response" or HTTP 408 envelopes).
+// Works through fmt.Errorf("...: %w", err) wrappers, so a re-wrapped
+// adapter error is still recognized as adapter-origin.
+func CauseOf(err error) error {
+	var perr *Error
+	if errors.As(err, &perr) {
+		return perr.Cause
+	}
+	return nil
+}
+
 // MessageOf returns the provider-facing message, falling back to err.Error.
 func MessageOf(err error) string {
 	var perr *Error

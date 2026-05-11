@@ -8,14 +8,15 @@ on:
 jobs:
   diff:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
       pull-requests: write
       issues: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -51,7 +52,7 @@ jobs:
       - name: Create or update PR
         if: steps.agent.outputs.exit == '1'
         id: pr
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v8
         with:
           branch: chore/catalog-drift
           delete-branch: true
@@ -60,17 +61,24 @@ jobs:
           commit-message: "chore(catalog): auto-sync with opencode docs"
           add-paths: catalog/
 
-      - name: Slack notify (PR)
-        if: steps.agent.outputs.exit == '1' && steps.pr.outputs.pull-request-number != ''
+      - name: Notify Slack (PR)
+        if: steps.agent.outputs.exit == '1' && steps.pr.outputs.pull-request-number != '' && env.SLACK_WEBHOOK_URL != ''
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          STATUS: ${{ job.status }}
           PR_URL: ${{ steps.pr.outputs.pull-request-url }}
           PR_NUM: ${{ steps.pr.outputs.pull-request-number }}
+          TRIGGER: ${{ github.event_name }}
+          ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          n=$(python -c "import yaml; print(yaml.safe_load(open('manifest.yaml'))['summary']['action_count'])")
-          payload=$(jq -n --arg url "$PR_URL" --arg num "$PR_NUM" --arg n "$n" \
-            '{text: ("catalog drift PR: <" + $url + "|#" + $num + "> (" + $n + " actions)")}')
-          curl -sS -X POST -H 'Content-Type: application/json' -d "$payload" "$SLACK_WEBHOOK_URL"
+          icon=":white_check_mark:"; [ "$STATUS" != "success" ] && icon=":x:"
+          NL=$'\n'
+          n=$(python3 -c "import yaml; print(yaml.safe_load(open('manifest.yaml'))['summary']['action_count'])")
+          w=$(python3 -c "import yaml; print(yaml.safe_load(open('manifest.yaml'))['summary']['warning_count'])")
+          text="${icon} *llmgate catalog drift* — PR opened${NL}• trigger: ${TRIGGER} by ${ACTOR}${NL}• ${n} actions, ${w} warnings${NL}• <${PR_URL}|PR #${PR_NUM}>${NL}${RUN_URL}"
+          jq -nc --arg t "$text" '{text:$t}' \
+            | curl -fsS -X POST -H 'Content-Type: application/json' --data @- "$SLACK_WEBHOOK_URL"
 
       # exit 3: warnings -> issue + Slack
       - name: Create review issue
@@ -91,15 +99,19 @@ jobs:
             --body-file issue-body.md)
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
-      - name: Slack notify (issue)
-        if: steps.agent.outputs.exit == '3'
+      - name: Notify Slack (issue)
+        if: steps.agent.outputs.exit == '3' && env.SLACK_WEBHOOK_URL != ''
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           ISSUE_URL: ${{ steps.issue.outputs.url }}
+          TRIGGER: ${{ github.event_name }}
+          ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          payload=$(jq -n --arg url "$ISSUE_URL" \
-            '{text: ("catalog drift needs manual review: <" + $url + "|issue>")}')
-          curl -sS -X POST -H 'Content-Type: application/json' -d "$payload" "$SLACK_WEBHOOK_URL"
+          NL=$'\n'
+          text=":warning: *llmgate catalog drift* — needs manual review${NL}• trigger: ${TRIGGER} by ${ACTOR}${NL}• warnings detected${NL}• <${ISSUE_URL}|review issue>${NL}${RUN_URL}"
+          jq -nc --arg t "$text" '{text:$t}' \
+            | curl -fsS -X POST -H 'Content-Type: application/json' --data @- "$SLACK_WEBHOOK_URL"
 
       # exit 2: runtime error
       - name: Fail on runtime error

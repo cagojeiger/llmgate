@@ -88,11 +88,14 @@ jobs:
                   step.write(f"- `{n}`\n")
           PY
 
+      # Slack fires only when pytest failed — green runs stay silent. The
+      # 'Run pytest' step has continue-on-error so we can't use failure() here;
+      # the summary step's status output is the source of truth (also catches
+      # the no-report build-failure path).
       - name: Notify Slack
-        if: always() && env.SLACK_WEBHOOK_URL != ''
+        if: env.SLACK_WEBHOOK_URL != '' && steps.summary.outputs.status != 'success'
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          STATUS: ${{ steps.summary.outputs.status }}
           SUMMARY: ${{ steps.summary.outputs.summary }}
           FAILED_LIST: ${{ steps.summary.outputs.failed_list }}
           TRIGGER: ${{ github.event_name }}
@@ -100,10 +103,9 @@ jobs:
           BRANCH: ${{ github.ref_name }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          icon=":white_check_mark:"; [ "$STATUS" != "success" ] && icon=":x:"
           NL=$'\n'
-          text="${icon} *llmgate e2e-live* — ${STATUS}${NL}• trigger: ${TRIGGER} by ${ACTOR} (${BRANCH})${NL}• ${SUMMARY}"
-          if [ -n "$FAILED_LIST" ] && [ "$STATUS" != "success" ]; then
+          text=":x: *llmgate e2e-live* — failed${NL}• trigger: ${TRIGGER} by ${ACTOR} (${BRANCH})${NL}• ${SUMMARY}"
+          if [ -n "$FAILED_LIST" ]; then
             text="${text}${NL}*failed:*${NL}${FAILED_LIST}"
           fi
           text="${text}${NL}${RUN_URL}"

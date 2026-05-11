@@ -73,17 +73,18 @@ jobs:
           git push origin "$tag"
           gh release create "$tag" --title "$tag" --generate-notes
 
+      # Slack fires on failure only. Successful releases announce themselves
+      # via the GitHub Release page + GHCR tag + ArgoCD auto-sync — Slack is
+      # reserved for "image / tag / release may be in a partial state, look".
       - name: Notify Slack
-        if: always() && env.SLACK_WEBHOOK_URL != ''
+        if: failure() && env.SLACK_WEBHOOK_URL != ''
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          STATUS: ${{ job.status }}
           VERSION: ${{ steps.ver.outputs.version }}
-          IMAGE_REF: ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ steps.ver.outputs.version }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          icon=":white_check_mark:"; [ "$STATUS" != "success" ] && icon=":x:"
           NL=$'\n'
-          text="${icon} *llmgate release* — v${VERSION} (${STATUS})${NL}image: ${IMAGE_REF}${NL}${RUN_URL}"
+          ver="${VERSION:-?}"
+          text=":x: *llmgate release* — v${ver} failed${NL}${RUN_URL}"
           jq -nc --arg t "$text" '{text:$t}' \
             | curl -fsS -X POST -H 'Content-Type: application/json' --data @- "$SLACK_WEBHOOK_URL"

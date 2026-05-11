@@ -151,3 +151,17 @@ func BadRequest(providerName, message string, cause error, raw []byte) *llmtypes
 		Raw:      FirstBytes(raw),
 	}
 }
+
+// PublicProviderMessage returns the message safe to expose on the OpenAI
+// wire for provider-classified errors. Provider adapters should call this
+// after kind classification: caller-actionable kinds keep their vendor
+// envelope text, while opaque upstream failures collapse so raw vendor
+// bodies, HTML error pages, hostnames, or stack details stay out of the
+// response. The original body should still be preserved on llmtypes.Error.Raw
+// for operator diagnostics.
+func PublicProviderMessage(kind llmtypes.ErrorKind, message string) string {
+	if kind == llmtypes.KindUpstream {
+		return "upstream unavailable"
+	}
+	return message
+}

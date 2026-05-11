@@ -67,7 +67,7 @@ func (s *stream) Recv() (*llmtypes.Event, error) {
 		return nil, &llmtypes.Error{
 			Kind:     llmtypes.KindUpstream,
 			Provider: s.ProviderName,
-			Message:  "decode stream event: " + err.Error(),
+			Message:  "upstream returned invalid response",
 			Cause:    err,
 			Raw:      upstream.FirstBytes(data),
 		}
@@ -119,10 +119,11 @@ func parseStreamError(data []byte, providerName string) *llmtypes.Error {
 	if env.Message == "" {
 		return nil
 	}
+	kind := kindFromOpenAIError(0, env)
 	return &llmtypes.Error{
-		Kind:     kindFromOpenAIError(0, env),
+		Kind:     kind,
 		Provider: providerName,
-		Message:  env.Message,
+		Message:  upstream.PublicProviderMessage(kind, env.Message),
 		Raw:      upstream.FirstBytes(data),
 	}
 }

@@ -47,7 +47,7 @@ func (c *Client) Complete(ctx context.Context, req *llmtypes.Request) (*llmtypes
 		return nil, &llmtypes.Error{
 			Kind:     llmtypes.KindUpstream,
 			Provider: c.cfg.Name,
-			Message:  "decode response: " + err.Error(),
+			Message:  "upstream returned invalid response",
 			Cause:    err,
 			Raw:      upstream.FirstBytes(raw),
 		}

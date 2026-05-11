@@ -151,8 +151,37 @@ func TestComplete_UpstreamErrorNonJSON(t *testing.T) {
 	if perr.Kind != llmtypes.KindUpstream {
 		t.Errorf("Kind = %q, want %q", perr.Kind, llmtypes.KindUpstream)
 	}
-	if !strings.Contains(perr.Message, "upstream gateway down") {
-		t.Errorf("Message = %q, want substring 'upstream gateway down'", perr.Message)
+	if perr.Message != "upstream unavailable" {
+		t.Errorf("Message = %q, want sanitized upstream message", perr.Message)
+	}
+	if !strings.Contains(string(perr.Raw), "upstream gateway down") {
+		t.Errorf("Raw = %q, want original upstream body preserved for operators", string(perr.Raw))
+	}
+}
+
+func TestComplete_InvalidSuccessBodySanitizesDecodeDetail(t *testing.T) {
+	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`<html>internal stack from upstream</html>`))
+	}))
+	defer server.Close()
+
+	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "k", HTTPClient: server.Client, Name: "opencode"})
+	_, err := c.Complete(context.Background(), &llmtypes.Request{
+		Model:    "deepseek-v4-flash",
+		Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
+	})
+	perr := requireProviderError(t, err)
+	if perr.Kind != llmtypes.KindUpstream {
+		t.Fatalf("Kind = %q, want %q", perr.Kind, llmtypes.KindUpstream)
+	}
+	if perr.Message != "upstream returned invalid response" {
+		t.Fatalf("Message = %q, want sanitized invalid response", perr.Message)
+	}
+	if strings.Contains(perr.Message, "<html>") || strings.Contains(perr.Message, "invalid character") {
+		t.Fatalf("Message leaked parser/body detail: %q", perr.Message)
+	}
+	if !strings.Contains(string(perr.Raw), "internal stack") {
+		t.Fatalf("Raw = %q, want original invalid body preserved", string(perr.Raw))
 	}
 }
 
@@ -316,8 +345,32 @@ func TestCompleteStream_StreamErrorMidFlight(t *testing.T) {
 	if perr.Kind != llmtypes.KindUpstream {
 		t.Fatalf("Kind = %q, want %q", perr.Kind, llmtypes.KindUpstream)
 	}
-	if !strings.Contains(perr.Message, "stream exploded") {
-		t.Fatalf("Message = %q, want stream exploded", perr.Message)
+	if perr.Message != "upstream unavailable" {
+		t.Fatalf("Message = %q, want sanitized upstream message", perr.Message)
+	}
+	if !strings.Contains(string(perr.Raw), "stream exploded") {
+		t.Fatalf("Raw = %q, want original stream error preserved", string(perr.Raw))
+	}
+}
+
+func TestClassify_UpstreamMessageSanitizedPreservesRaw(t *testing.T) {
+	c := mustNew(t, Config{BaseURL: "http://example.invalid", APIKey: "k", Name: "opencode"})
+	body := []byte(`{"error":{"message":"nginx upstream http://internal-opencode.svc.cluster.local:8080 failed","type":"server_error"}}`)
+
+	perr := c.classify(http.StatusBadGateway, body, "")
+	if perr.Kind != llmtypes.KindUpstream {
+		t.Fatalf("Kind = %q, want %q", perr.Kind, llmtypes.KindUpstream)
+	}
+	if perr.Message != "upstream unavailable" {
+		t.Fatalf("Message = %q, want sanitized upstream message", perr.Message)
+	}
+	for _, needle := range []string{"internal-opencode", ".svc", ":8080", "nginx upstream"} {
+		if strings.Contains(perr.Message, needle) {
+			t.Fatalf("Message leaked %q: %q", needle, perr.Message)
+		}
+	}
+	if string(perr.Raw) != string(body) {
+		t.Fatalf("Raw = %q, want original body preserved", string(perr.Raw))
 	}
 }
 

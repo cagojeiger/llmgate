@@ -28,11 +28,12 @@ func (c *Client) classify(status int, body []byte, retryAfterHeader string) *llm
 	}
 
 	env.Message = message
+	kind := kindFromOpenAIError(status, env)
 
 	return &llmtypes.Error{
-		Kind:       kindFromOpenAIError(status, env),
+		Kind:       kind,
 		Provider:   c.cfg.Name,
-		Message:    message,
+		Message:    upstream.PublicProviderMessage(kind, message),
 		StatusCode: status,
 		RetryAfter: upstream.ParseRetryAfter(retryAfterHeader),
 		Raw:        upstream.FirstBytes(body),

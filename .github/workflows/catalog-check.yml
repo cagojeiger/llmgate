@@ -135,7 +135,11 @@ jobs:
 
   notify:
     needs: [detect, apply-and-pr, review-issue]
-    if: always() && needs.detect.outputs.exit-code != '0' && needs.detect.outputs.exit-code != '2'
+    # Slack fires on every non-zero exit (1 = PR opened, 2 = agent crashed,
+    # 3 = needs manual review). Exit 0 = no drift = silent. always() is
+    # required so the job runs even when apply-and-pr / review-issue were
+    # skipped due to their own conditional gates.
+    if: always() && needs.detect.outputs.exit-code != '0'
     runs-on: ubuntu-latest
     timeout-minutes: 3
     permissions:
@@ -156,6 +160,7 @@ jobs:
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           EXIT_CODE: ${{ needs.detect.outputs.exit-code }}
+          APPLY_RESULT: ${{ needs.apply-and-pr.result }}
           PR_URL: ${{ needs.apply-and-pr.outputs.pr-url }}
           PR_NUM: ${{ needs.apply-and-pr.outputs.pr-number }}
           ISSUE_URL: ${{ needs.review-issue.outputs.url }}
@@ -164,18 +169,33 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           NL=$'\n'
-          if [ "$EXIT_CODE" = "1" ]; then
-            n=$(python3 -c "import yaml; print(yaml.safe_load(open('manifest.yaml'))['summary']['action_count'])")
-            w=$(python3 -c "import yaml; print(yaml.safe_load(open('manifest.yaml'))['summary']['warning_count'])")
-            text=":white_check_mark: *llmgate catalog drift* — PR opened${NL}• trigger: ${TRIGGER} by ${ACTOR}${NL}• ${n} actions, ${w} warnings${NL}• <${PR_URL}|PR #${PR_NUM}>${NL}${RUN_URL}"
-          elif [ "$EXIT_CODE" = "3" ]; then
-            text=":warning: *llmgate catalog drift* — needs manual review${NL}• trigger: ${TRIGGER} by ${ACTOR}${NL}• warnings detected${NL}• <${ISSUE_URL}|review issue>${NL}${RUN_URL}"
-          else
-            text=":grey_question: *llmgate catalog drift* — unexpected exit ${EXIT_CODE}${NL}${RUN_URL}"
-          fi
+          case "$EXIT_CODE" in
+            1)
+              if [ "$APPLY_RESULT" != "success" ] || [ -z "$PR_URL" ]; then
+                # Drift was detected but apply-and-pr never produced a PR — peter-evans
+                # failure, permissions issue, or no-op diff after apply. Surface as red.
+                text=":x: *llmgate catalog drift* — detected but PR creation failed${NL}• trigger: ${TRIGGER} by ${ACTOR}${NL}• apply-and-pr result: ${APPLY_RESULT:-unknown}${NL}${RUN_URL}"
+              else
+                n=$(python3 -c "import yaml; print(yaml.safe_load(open('manifest.yaml'))['summary']['action_count'])")
+                w=$(python3 -c "import yaml; print(yaml.safe_load(open('manifest.yaml'))['summary']['warning_count'])")
+                text=":white_check_mark: *llmgate catalog drift* — PR opened${NL}• trigger: ${TRIGGER} by ${ACTOR}${NL}• ${n} actions, ${w} warnings${NL}• <${PR_URL}|PR #${PR_NUM}>${NL}${RUN_URL}"
+              fi
+              ;;
+            2)
+              text=":x: *llmgate catalog drift* — agent runtime error${NL}• trigger: ${TRIGGER} by ${ACTOR}${NL}${RUN_URL}"
+              ;;
+            3)
+              text=":warning: *llmgate catalog drift* — needs manual review${NL}• trigger: ${TRIGGER} by ${ACTOR}${NL}• warnings detected${NL}• <${ISSUE_URL}|review issue>${NL}${RUN_URL}"
+              ;;
+            *)
+              text=":grey_question: *llmgate catalog drift* — unexpected exit ${EXIT_CODE:-empty}${NL}${RUN_URL}"
+              ;;
+          esac
           jq -nc --arg t "$text" '{text:$t}' \
             | curl -fsS -X POST -H 'Content-Type: application/json' --data @- "$SLACK_WEBHOOK_URL"
 
+  # Keep the workflow run red on agent runtime errors so branch protection /
+  # the Actions tab status reflect reality even if Slack is silent (no webhook).
   fail-on-error:
     needs: detect
     if: needs.detect.outputs.exit-code == '2'

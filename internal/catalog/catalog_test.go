@@ -19,14 +19,23 @@ func TestLoadDir_RepoCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadDir(%q) error = %v", repoCatalogDir, err)
 	}
-	if got := len(cat.Models); got != 14 {
-		t.Fatalf("len(Models) = %d, want 14", got)
+
+	// Self-consistent count: yaml files on disk equal models loaded.
+	// A hardcoded number would break every catalog-sync PR (the agent
+	// in scripts/catalog_diff/ has no way to update Go test constants).
+	modelFiles, _ := filepath.Glob(filepath.Join(repoCatalogDir, "models", "*.yaml"))
+	if got, want := len(cat.Models), len(modelFiles); got != want {
+		t.Fatalf("len(Models) = %d, want %d (yaml files under %s/models)", got, want, repoCatalogDir)
 	}
-	if cat.Models["minimax-m2.7"].Protocol != "anthropic" {
-		t.Fatalf("minimax-m2.7 protocol = %q, want anthropic", cat.Models["minimax-m2.7"].Protocol)
+
+	// Sampled invariants survive future deletions: skip when the
+	// sampled model is gone (catalog-sync removed it), but still catch
+	// protocol/auth_env regressions on whichever models remain.
+	if m, ok := cat.Models["minimax-m2.7"]; ok && m.Protocol != "anthropic" {
+		t.Fatalf("minimax-m2.7 protocol = %q, want anthropic", m.Protocol)
 	}
-	if cat.Models["deepseek-v4-flash"].AuthEnv != "LLMGATE_OPENCODE_API_KEY" {
-		t.Fatalf("deepseek-v4-flash auth_env = %q, want LLMGATE_OPENCODE_API_KEY", cat.Models["deepseek-v4-flash"].AuthEnv)
+	if m, ok := cat.Models["deepseek-v4-flash"]; ok && m.AuthEnv != "LLMGATE_OPENCODE_API_KEY" {
+		t.Fatalf("deepseek-v4-flash auth_env = %q, want LLMGATE_OPENCODE_API_KEY", m.AuthEnv)
 	}
 
 	smart, ok := cat.Aliases["smart"]

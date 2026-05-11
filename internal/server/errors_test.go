@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -265,4 +266,63 @@ func TestErrorPayload_NonTransportKindsPreserveMessage(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestErrorPayload_WrappedErrorsRoutedByChainCause guards the
+// chain-walk contract for the Cause gate. errors that have been
+// re-wrapped (fmt.Errorf("…: %w", typedErr)) at any layer must still
+// route by the chain-found *llmtypes.Error's Cause, not by the
+// outermost wrapper's Unwrap. This was a real regression in an
+// earlier iteration that used errors.Unwrap on the top-level err and
+// therefore mis-classified once-wrapped adapter errors as transport.
+func TestErrorPayload_WrappedErrorsRoutedByChainCause(t *testing.T) {
+	t.Run("wrapped adapter diagnostic stays adapter-shaped", func(t *testing.T) {
+		// Adapter classified an HTTP 200 empty body, then a router
+		// layer wrapped the typed error for context. Cause on the
+		// inner *llmtypes.Error is still nil — must surface the
+		// adapter message, not "upstream unavailable".
+		inner := &llmtypes.Error{
+			Kind:     llmtypes.KindEmpty,
+			Provider: "opencode",
+			Message:  "empty response",
+		}
+		wrapped := fmt.Errorf("route deepseek-v4-flash: %w", inner)
+
+		_, _, payload := errorPayload(wrapped)
+		var got map[string]any
+		if err := json.Unmarshal(payload, &got); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		errObj := got["error"].(map[string]any)
+		if errObj["message"] != "empty response" {
+			t.Errorf("wire message = %q, want %q (adapter Cause=nil must survive a wrap)", errObj["message"], "empty response")
+		}
+	})
+
+	t.Run("wrapped transport fault still collapses", func(t *testing.T) {
+		// Transport fault (LowLevelError-shape) wrapped once more by
+		// a routing layer. Inner *llmtypes.Error.Cause is set —
+		// must still collapse to the generic wire message rather
+		// than leaking the wrapper or cause detail.
+		inner := &llmtypes.Error{
+			Kind:    llmtypes.KindNetwork,
+			Message: "post chat: dial tcp 13.226.42.85:443: connect: connection refused",
+			Cause:   errors.New("dial tcp 13.226.42.85:443: connect: connection refused"),
+		}
+		wrapped := fmt.Errorf("route deepseek-v4-flash: %w", inner)
+
+		_, _, payload := errorPayload(wrapped)
+		var got map[string]any
+		if err := json.Unmarshal(payload, &got); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		errObj := got["error"].(map[string]any)
+		gotMsg, _ := errObj["message"].(string)
+		if gotMsg != "upstream unavailable" {
+			t.Errorf("wire message = %q, want %q (wrapped transport must still collapse)", gotMsg, "upstream unavailable")
+		}
+		if strings.Contains(gotMsg, "13.226.42.85") {
+			t.Errorf("wire message leaked wrapped transport detail: %q", gotMsg)
+		}
+	})
 }

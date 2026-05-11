@@ -2,7 +2,6 @@ package server
 
 import (
 	"encoding/json"
-	"errors"
 	"math"
 	"net/http"
 	"strconv"
@@ -77,12 +76,17 @@ func errorPayload(err error) (int, time.Duration, []byte) {
 			// stay intact — that includes "empty response", "server
 			// timeout" parsed from a 408 envelope, etc.
 			//
+			// llmtypes.CauseOf walks the chain via errors.As, so a
+			// re-wrapped (fmt.Errorf("…: %w", typedErr)) adapter error
+			// is still recognized as adapter-origin and a multi-wrap
+			// transport error is still recognized as transport.
+			//
 			// KindUpstream is intentionally NOT collapsed here: that
 			// kind is always set by provider adapters with
 			// deliberately-shaped messages — it never originates from
 			// the transport layer.
 			status = http.StatusBadGateway
-			if errors.Unwrap(err) != nil {
+			if llmtypes.CauseOf(err) != nil {
 				transportClass = true
 				if kind == llmtypes.KindTimeout {
 					message = "upstream timeout"

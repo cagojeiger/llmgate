@@ -113,6 +113,7 @@ func TestAdoptError_ProviderErrorMapsKindAndStatus(t *testing.T) {
 		wantStatus int
 	}{
 		{"auth", llmtypes.KindAuth, http.StatusUnauthorized},
+		{"forbidden", llmtypes.KindForbidden, http.StatusForbidden},
 		{"rate_limit", llmtypes.KindRateLimit, http.StatusTooManyRequests},
 		{"bad_request", llmtypes.KindBadRequest, http.StatusBadRequest},
 		{"context_length", llmtypes.KindContextLength, http.StatusBadRequest},
@@ -131,6 +132,48 @@ func TestAdoptError_ProviderErrorMapsKindAndStatus(t *testing.T) {
 				t.Errorf("StatusCode = %d, want %d", rec.StatusCode, tc.wantStatus)
 			}
 		})
+	}
+}
+
+func TestHandler_AllowedAliasesRejectBeforeService(t *testing.T) {
+	rec, recorder := newCaptureRecorder()
+	serviceCalled := false
+	r := &fakeService{
+		buildResult: func(req *llmtypes.Request) *llmrouter.RouteResult {
+			serviceCalled = true
+			return &llmrouter.RouteResult{
+				Response: &llmtypes.Response{Model: req.Model},
+				Vendor:   "opencode",
+			}
+		},
+	}
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+
+	body := `{"model":"smart","messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	req = req.WithContext(context.WithValue(req.Context(), consumerCtxKey{}, &ConsumerInfo{
+		Name:           "alpha",
+		KeyID:          "12345678",
+		AllowedAliases: []string{"cheap"},
+	}))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body = %s", w.Code, w.Body.String())
+	}
+	if serviceCalled {
+		t.Fatal("service called for disallowed model")
+	}
+	got := rec.last(t)
+	if got.ConsumerName != "alpha" || got.ConsumerKeyID != "12345678" {
+		t.Fatalf("consumer audit = %q/%q, want alpha/12345678", got.ConsumerName, got.ConsumerKeyID)
+	}
+	if got.ModelRequested != "smart" {
+		t.Fatalf("ModelRequested = %q, want smart", got.ModelRequested)
+	}
+	if got.Kind != llmtypes.KindForbidden || got.StatusCode != http.StatusForbidden {
+		t.Fatalf("Kind/StatusCode = %q/%d, want forbidden/403", got.Kind, got.StatusCode)
 	}
 }
 

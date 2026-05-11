@@ -11,6 +11,7 @@ type ErrorKind string
 
 const (
 	KindAuth          ErrorKind = "auth"
+	KindForbidden     ErrorKind = "forbidden"
 	KindRateLimit     ErrorKind = "rate_limit"
 	KindBadRequest    ErrorKind = "bad_request"
 	KindContextLength ErrorKind = "context_length"

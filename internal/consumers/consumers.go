@@ -13,8 +13,9 @@
 // new hash, deploy, retire the old hash on a later deploy.
 //
 // Schema is intentionally flat (see ADR 003). Operator-facing notes belong
-// in yaml comments, not data fields. Permission / quota fields are
-// deliberately absent — those are post-processing concerns.
+// in yaml comments, not data fields. allowed_aliases is the optional
+// coarse-grained model guard; quota / budget fields remain post-processing
+// concerns.
 //
 // Boot is *closed by default*: missing directory or zero registered consumers
 // fails boot. There is no "anonymous allowed" mode — operators who want
@@ -52,12 +53,17 @@ const (
 // First char must be alphanumeric to avoid being mistaken for a CLI flag.
 var nameRule = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,` + fmt.Sprint(maxNameLen-1) + `}$`)
 
+var aliasRule = regexp.MustCompile(`^[a-z0-9][a-z0-9._+-]{0,127}$`)
+
 // Consumer is one caller registration. Name is the operator-chosen permanent
 // identifier (audit ties facts to this string). KeyHashes are the active
 // sha256 hashes of bearer tokens; multiple entries support rotation.
+// AllowedAliases is an optional allowlist for requested model names, usually
+// operator-defined aliases. Empty means unrestricted.
 type Consumer struct {
-	Name      string   `yaml:"name"`
-	KeyHashes []string `yaml:"key_hashes"`
+	Name           string   `yaml:"name"`
+	KeyHashes      []string `yaml:"key_hashes"`
+	AllowedAliases []string `yaml:"allowed_aliases,omitempty"`
 }
 
 // Store is the runtime view of the consumers directory: an O(1) hash → consumer
@@ -65,6 +71,12 @@ type Consumer struct {
 type Store struct {
 	byHash map[string]*Consumer
 	byName map[string]*Consumer
+}
+
+type LookupResult struct {
+	Name           string
+	KeyID          string
+	AllowedAliases []string
 }
 
 // LoadDir reads every *.yaml / *.yml file under dir and builds a Store.
@@ -126,6 +138,7 @@ func loadFS(fsys fs.FS, label string) (*Store, error) {
 		}
 		stored := c
 		stored.KeyHashes = append([]string(nil), c.KeyHashes...)
+		stored.AllowedAliases = append([]string(nil), c.AllowedAliases...)
 		store.byName[c.Name] = &stored
 
 		for _, h := range stored.KeyHashes {
@@ -162,6 +175,16 @@ func validateConsumer(c *Consumer) error {
 		}
 		seen[h] = struct{}{}
 	}
+	seenAliases := make(map[string]struct{}, len(c.AllowedAliases))
+	for _, alias := range c.AllowedAliases {
+		if !aliasRule.MatchString(alias) {
+			return fmt.Errorf("consumer %q: allowed_alias %q must match %s", c.Name, alias, aliasRule.String())
+		}
+		if _, dup := seenAliases[alias]; dup {
+			return fmt.Errorf("consumer %q: duplicate allowed_alias %q", c.Name, alias)
+		}
+		seenAliases[alias] = struct{}{}
+	}
 	return nil
 }
 
@@ -195,16 +218,30 @@ func (s *Store) Len() int {
 // and a short key id (first 8 hex chars of the matched hash) suitable for
 // audit. The raw key never appears in the returned values.
 func (s *Store) Lookup(rawKey string) (consumerName, keyID string, ok bool) {
-	if rawKey == "" {
+	info, ok := s.LookupInfo(rawKey)
+	if !ok {
 		return "", "", false
+	}
+	return info.Name, info.KeyID, true
+}
+
+// LookupInfo returns the matched consumer identity and optional policy fields.
+// The returned slices are copies so auth callers cannot mutate the Store.
+func (s *Store) LookupInfo(rawKey string) (LookupResult, bool) {
+	if s == nil || rawKey == "" {
+		return LookupResult{}, false
 	}
 	sum := sha256.Sum256([]byte(rawKey))
 	full := hashPrefix + hex.EncodeToString(sum[:])
 	c, found := s.byHash[full]
 	if !found {
-		return "", "", false
+		return LookupResult{}, false
 	}
-	return c.Name, hex.EncodeToString(sum[:keyIDLen/2]), true
+	return LookupResult{
+		Name:           c.Name,
+		KeyID:          hex.EncodeToString(sum[:keyIDLen/2]),
+		AllowedAliases: append([]string(nil), c.AllowedAliases...),
+	}, true
 }
 
 // shortHash trims a stored "sha256:..." string to the audit-safe first 8

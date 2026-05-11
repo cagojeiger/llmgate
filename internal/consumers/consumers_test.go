@@ -114,11 +114,62 @@ func TestLoadDir_EmptyDir(t *testing.T) {
 
 func TestLoadDir_StrictUnknownField(t *testing.T) {
 	dir := writeClientDir(t, map[string]string{
-		"alpha.yaml": "name: alpha\nkey_hashes:\n  - " + sha256Hash("k") + "\nallowed_aliases: [smart]\n",
+		"alpha.yaml": "name: alpha\nkey_hashes:\n  - " + sha256Hash("k") + "\nquota: 10\n",
 	})
 	_, err := LoadDir(dir)
-	if err == nil || !strings.Contains(err.Error(), "allowed_aliases") {
-		t.Fatalf("error = %v, want strict-parse error mentioning allowed_aliases", err)
+	if err == nil || !strings.Contains(err.Error(), "quota") {
+		t.Fatalf("error = %v, want strict-parse error mentioning quota", err)
+	}
+}
+
+func TestLoadDir_AllowedAliases(t *testing.T) {
+	raw := "raw-key"
+	dir := writeClientDir(t, map[string]string{
+		"alpha.yaml": "name: alpha\nkey_hashes:\n  - " + sha256Hash(raw) + "\nallowed_aliases:\n  - cheap\n  - worker\n  - qwen3.6-plus\n",
+	})
+	store, err := LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir error = %v", err)
+	}
+	c := store.byName["alpha"]
+	if c == nil {
+		t.Fatal("alpha registration missing")
+	}
+	want := []string{"cheap", "worker", "qwen3.6-plus"}
+	if strings.Join(c.AllowedAliases, ",") != strings.Join(want, ",") {
+		t.Fatalf("AllowedAliases = %#v, want %#v", c.AllowedAliases, want)
+	}
+
+	info, ok := store.LookupInfo(raw)
+	if !ok {
+		t.Fatal("LookupInfo(raw) miss")
+	}
+	if strings.Join(info.AllowedAliases, ",") != strings.Join(want, ",") {
+		t.Fatalf("LookupInfo AllowedAliases = %#v, want %#v", info.AllowedAliases, want)
+	}
+	info.AllowedAliases[0] = "mutated"
+	if store.byName["alpha"].AllowedAliases[0] != "cheap" {
+		t.Fatalf("LookupInfo returned store-owned slice: %#v", store.byName["alpha"].AllowedAliases)
+	}
+}
+
+func TestLoadDir_InvalidAllowedAliases(t *testing.T) {
+	cases := map[string]string{
+		"empty":     `""`,
+		"upper":     "Smart",
+		"slash":     "smart/pro",
+		"space":     "smart pro",
+		"duplicate": "cheap\n  - cheap",
+	}
+	for label, aliases := range cases {
+		t.Run(label, func(t *testing.T) {
+			dir := writeClientDir(t, map[string]string{
+				"alpha.yaml": "name: alpha\nkey_hashes:\n  - " + sha256Hash("k") + "\nallowed_aliases:\n  - " + aliases + "\n",
+			})
+			if _, err := LoadDir(dir); err == nil {
+				t.Fatalf("expected error for allowed_aliases case %q", label)
+			}
+		})
 	}
 }
 

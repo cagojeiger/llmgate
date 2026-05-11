@@ -37,11 +37,15 @@ func (r *recordingRecorder) Close() error { return nil }
 // keeps test isolation tight. Complete is what serveComplete calls;
 // stream is unused in these tests.
 type stubService struct {
-	resp *llmrouter.RouteResult
-	err  error
+	resp     *llmrouter.RouteResult
+	err      error
+	complete func(context.Context, *llmtypes.Request) (*llmrouter.RouteResult, error)
 }
 
-func (s *stubService) Complete(context.Context, *llmtypes.Request) (*llmrouter.RouteResult, error) {
+func (s *stubService) Complete(ctx context.Context, req *llmtypes.Request) (*llmrouter.RouteResult, error) {
+	if s.complete != nil {
+		return s.complete(ctx, req)
+	}
 	return s.resp, s.err
 }
 func (s *stubService) CompleteStream(context.Context, *llmtypes.Request) (*llmrouter.RouteResult, error) {
@@ -50,11 +54,17 @@ func (s *stubService) CompleteStream(context.Context, *llmtypes.Request) (*llmro
 
 // writeStoreYAML drops one consumer yaml into a temp dir and loads it,
 // returning the live store and the raw key the operator would issue.
-func writeStoreYAML(t *testing.T, name, rawKey string) *consumers.Store {
+func writeStoreYAML(t *testing.T, name, rawKey string, allowedAliases ...string) *consumers.Store {
 	t.Helper()
 	dir := t.TempDir()
 	sum := sha256.Sum256([]byte(rawKey))
 	yaml := "name: " + name + "\nkey_hashes:\n  - sha256:" + hex.EncodeToString(sum[:]) + "\n"
+	if len(allowedAliases) > 0 {
+		yaml += "allowed_aliases:\n"
+		for _, alias := range allowedAliases {
+			yaml += "  - " + alias + "\n"
+		}
+	}
 	path := filepath.Join(dir, name+".yaml")
 	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
 		t.Fatalf("write consumer yaml: %v", err)
@@ -111,7 +121,7 @@ func TestClassifyAuth_UnknownKey(t *testing.T) {
 }
 
 func TestClassifyAuth_KnownKey(t *testing.T) {
-	store := writeStoreYAML(t, "alpha", "good-key")
+	store := writeStoreYAML(t, "alpha", "good-key", "cheap", "worker")
 	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	r.Header.Set("Authorization", "Bearer good-key")
 	got := classifyAuth(r, store)
@@ -123,6 +133,9 @@ func TestClassifyAuth_KnownKey(t *testing.T) {
 	}
 	if len(got.KeyID) != 8 {
 		t.Errorf("KeyID = %q (len %d), want 8 hex chars", got.KeyID, len(got.KeyID))
+	}
+	if strings.Join(got.AllowedAliases, ",") != "cheap,worker" {
+		t.Errorf("AllowedAliases = %#v, want [cheap worker]", got.AllowedAliases)
 	}
 }
 
@@ -269,6 +282,55 @@ func TestServer_AuthIntegration(t *testing.T) {
 		if !strings.Contains(logged, want) {
 			t.Errorf("access log missing %s: %s", want, logged)
 		}
+	}
+}
+
+func TestServer_AllowedAliasesRejectDisallowedModel(t *testing.T) {
+	store := writeStoreYAML(t, "alpha", "good-key", "cheap")
+	rec := &recordingRecorder{}
+	logBuf := &bytes.Buffer{}
+	logger := slog.New(slog.NewJSONHandler(logBuf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	stubCalled := false
+	stub := &stubService{resp: &llmrouter.RouteResult{
+		Response: &llmtypes.Response{ID: "resp-1", Object: "chat.completion", Model: "smart"},
+	}}
+	stub.complete = func(context.Context, *llmtypes.Request) (*llmrouter.RouteResult, error) {
+		stubCalled = true
+		return stub.resp, nil
+	}
+	handler := NewHandler(stub, logger, rec, HandlerConfig{})
+	srv := New(&config.Server{Addr: ":0"}, logger, handler, store, NewProbeState())
+	ts := httptest.NewServer(srv.Handler)
+	defer ts.Close()
+
+	body := `{"model":"smart","messages":[{"role":"user","content":"hi"}]}`
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer good-key")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+	if stubCalled {
+		t.Fatal("service called for disallowed model")
+	}
+	if len(rec.records) != 1 {
+		t.Fatalf("records = %d, want 1", len(rec.records))
+	}
+	got := rec.records[0]
+	if got.ConsumerName != "alpha" || got.ModelRequested != "smart" {
+		t.Fatalf("audit identity/model = %q/%q, want alpha/smart", got.ConsumerName, got.ModelRequested)
+	}
+	if got.Kind != llmtypes.KindForbidden || got.StatusCode != http.StatusForbidden {
+		t.Fatalf("audit kind/status = %q/%d, want forbidden/403", got.Kind, got.StatusCode)
+	}
+	if !strings.Contains(logBuf.String(), `"consumer_name":"alpha"`) {
+		t.Fatalf("access log missing consumer_name: %s", logBuf.String())
 	}
 }
 

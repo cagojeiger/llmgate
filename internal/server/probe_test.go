@@ -106,6 +106,28 @@ func TestProbe_PublicWithoutAuth(t *testing.T) {
 	}
 }
 
+func TestProbe_BypassesMiddlewareChain(t *testing.T) {
+	// Probes are mounted outside the global middleware chain. Locking
+	// this in with a response-header check defends against an accidental
+	// `r.Use(requestIDMiddleware)` on the top-level router that would
+	// silently pull probes back into the access log / tracing surface.
+	probe := NewProbeState()
+	ts, cleanup := newTestServer(t, probe)
+	defer cleanup()
+
+	for _, path := range []string{"/healthz", "/healthz/live", "/healthz/ready"} {
+		resp, err := http.Get(ts.URL + path)
+		if err != nil {
+			t.Fatalf("Get %s: %v", path, err)
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		if got := resp.Header.Get("X-Request-Id"); got != "" {
+			t.Errorf("%s response carried X-Request-Id=%q; probes must bypass requestIDMiddleware", path, got)
+		}
+	}
+}
+
 func TestProbe_NilStateTreatedAsHealthy(t *testing.T) {
 	// server.New tolerates a nil ProbeState (used by some unit tests
 	// that don't care about probes). When state is nil the readiness

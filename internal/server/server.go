@@ -14,16 +14,14 @@ import (
 
 func New(cfg *config.Server, log *slog.Logger, h *Handler, store *consumers.Store, probe *ProbeState) *http.Server {
 	r := chi.NewRouter()
-	r.Use(requestIDMiddleware)
-	// consumerContextMiddleware must run before accessLogMiddleware so the
-	// access log's defer can read whatever the auth middleware later
-	// writes through the shared *ConsumerInfo pointer.
-	r.Use(consumerContextMiddleware)
-	r.Use(accessLogMiddleware(log))
-	r.Use(chimiddleware.Recoverer)
 
-	// Probe endpoints: intentionally unauthenticated so orchestrators
-	// (k8s probes, load balancers) work without a registered consumer.
+	// Probes sit *outside* the middleware chain. k8s liveness / readiness
+	// fire every few seconds and would otherwise dominate the access
+	// stream; the sidecar (Istio/Envoy) already records every inbound
+	// request, so dropping probes from the app-level access log costs
+	// no debugging visibility. Probe handlers are an atomic.Bool read +
+	// a Write — Recoverer is unnecessary, and skipping requestID /
+	// consumerContext keeps probe spans out of any tracing backend.
 	// Two semantics:
 	//   /healthz/live  — always 200 (process alive)
 	//   /healthz/ready — 503 once SIGTERM has been received so endpoint
@@ -34,11 +32,24 @@ func New(cfg *config.Server, log *slog.Logger, h *Handler, store *consumers.Stor
 	r.Get("/healthz", readyHandler)
 	r.Get("/healthz/live", liveness)
 	r.Get("/healthz/ready", readyHandler)
-	// Auth scope: only the chat endpoint sits behind auth, so probes
-	// stay public. Add new auth-required routes inside this Group.
+
+	// Business traffic carries the full middleware chain. Probes are
+	// already mounted above, so nothing in this group ever sees them.
 	r.Group(func(r chi.Router) {
-		r.Use(authMiddleware(store))
-		r.Post("/v1/chat/completions", h.ServeHTTP)
+		r.Use(requestIDMiddleware)
+		// consumerContextMiddleware must run before accessLogMiddleware so the
+		// access log's defer can read whatever the auth middleware later
+		// writes through the shared *ConsumerInfo pointer.
+		r.Use(consumerContextMiddleware)
+		r.Use(accessLogMiddleware(log))
+		r.Use(chimiddleware.Recoverer)
+
+		// Auth scope: only chat sits behind auth today. Future
+		// auth-required routes go inside this inner Group.
+		r.Group(func(r chi.Router) {
+			r.Use(authMiddleware(store))
+			r.Post("/v1/chat/completions", h.ServeHTTP)
+		})
 	})
 
 	return &http.Server{

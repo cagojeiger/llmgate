@@ -6,7 +6,7 @@
 `log` attr 로 갈래를 분리한다.
 
 ```
-log=access  → HTTP 전송 사실 (모든 경로, 한 줄/요청)
+log=access  → HTTP 전송 사실 (프로브 제외 모든 경로, 한 줄/요청)
 log=audit   → 게이트웨이 도메인 fact (chat 요청 한정, ADR 003 audit-always)
 ```
 

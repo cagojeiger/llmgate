@@ -20,6 +20,7 @@ const (
 	KindNetwork       ErrorKind = "network"
 	KindEmpty         ErrorKind = "empty_response"
 	KindClientClosed  ErrorKind = "client_closed"
+	KindPanic         ErrorKind = "panic"
 	KindUnknown       ErrorKind = "unknown"
 )
 

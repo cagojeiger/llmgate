@@ -688,6 +688,216 @@ func TestHandler_Stream_PreStreamServiceError(t *testing.T) {
 	}
 }
 
+// TestHandler_PanicInComplete_StampsAuditAndReturns500 locks in the
+// audit-always invariant (ADR 003) for the panic path: when the
+// handler's downstream service panics, the deferred audit record
+// must surface as KindPanic / status 500 rather than at its
+// last-assigned (often empty / 0) values, so panic spikes are
+// observable in the audit stream and aren't indistinguishable from
+// other failures during forensics.
+//
+// Also pins the wire surface — generic 500 envelope, no panic value
+// or stack leakage to the caller. Panic internals only land in the
+// slog stream where operators expect them.
+func TestHandler_PanicInComplete_StampsAuditAndReturns500(t *testing.T) {
+	rec, recorder := newCaptureRecorder()
+	svc := &fakeService{
+		vendor: "opencode",
+		buildResult: func(req *llmtypes.Request) *llmrouter.RouteResult {
+			panic("boom in complete")
+		},
+	}
+	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+
+	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", w.Code)
+	}
+	got := rec.last(t)
+	if got.Kind != llmtypes.KindPanic {
+		t.Errorf("Kind = %q, want %q (audit-always invariant)", got.Kind, llmtypes.KindPanic)
+	}
+	if got.StatusCode != http.StatusInternalServerError {
+		t.Errorf("StatusCode = %d, want 500", got.StatusCode)
+	}
+	if strings.Contains(w.Body.String(), "boom") {
+		t.Errorf("wire body leaked panic value: %s", w.Body.String())
+	}
+}
+
+// TestHandler_PanicInStream_StampsAuditAndReturns500 covers the same
+// invariant on the streaming entry path. The panic happens before
+// any SSE bytes are flushed, so the wire status is a clean 500;
+// audit still gets KindPanic.
+func TestHandler_PanicInStream_StampsAuditAndReturns500(t *testing.T) {
+	rec, recorder := newCaptureRecorder()
+	svc := &fakeService{
+		vendor: "opencode",
+		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
+			panic("boom in stream")
+		},
+	}
+	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+
+	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", w.Code)
+	}
+	got := rec.last(t)
+	if got.Kind != llmtypes.KindPanic {
+		t.Errorf("Kind = %q, want %q", got.Kind, llmtypes.KindPanic)
+	}
+	if got.StatusCode != http.StatusInternalServerError {
+		t.Errorf("StatusCode = %d, want 500", got.StatusCode)
+	}
+	if strings.Contains(w.Body.String(), "boom") {
+		t.Errorf("wire body leaked panic value: %s", w.Body.String())
+	}
+}
+
+// TestHandler_PanicAfterResponseStarted_DoesNotCorruptWireBody locks
+// in the SSE-safety contract for the panic recover path: when the
+// response has already started (typical mid-stream panic where SSE
+// headers are flushed and chunks are in flight on the wire), the
+// recover defer must NOT write the JSON error envelope. net/http
+// silently drops a second WriteHeader, but still sends the body
+// bytes — they would land raw in the SSE stream the client is
+// decoding and corrupt the framing.
+//
+// We simulate "response started" by handing the handler a
+// countingWriter whose wroteHeader is already true. The audit row
+// must still be stamped (audit-always invariant), and the wire body
+// must be empty (no JSON envelope written on top of the stream).
+func TestHandler_PanicAfterResponseStarted_DoesNotCorruptWireBody(t *testing.T) {
+	rec, recorder := newCaptureRecorder()
+	svc := &fakeService{
+		vendor: "opencode",
+		buildResult: func(req *llmtypes.Request) *llmrouter.RouteResult {
+			panic("late boom")
+		},
+	}
+	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+
+	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+
+	// Inner recorder captures any wire writes the handler attempts.
+	inner := httptest.NewRecorder()
+	// Wrap with countingWriter pre-set to "header already flushed",
+	// which is the state the access-log middleware presents to the
+	// handler after streamRelay has emitted its 200 SSE headers.
+	cw := &countingWriter{ResponseWriter: inner, status: http.StatusOK, wroteHeader: true}
+
+	h.ServeHTTP(cw, req)
+
+	// Audit-always invariant still holds — KindPanic + 500 stamped
+	// even though the wire response was already in flight.
+	got := rec.last(t)
+	if got.Kind != llmtypes.KindPanic {
+		t.Errorf("Kind = %q, want %q", got.Kind, llmtypes.KindPanic)
+	}
+	if got.StatusCode != http.StatusInternalServerError {
+		t.Errorf("StatusCode = %d, want 500", got.StatusCode)
+	}
+
+	// Wire body must be untouched — no JSON envelope smuggled into
+	// the in-flight stream.
+	if inner.Body.Len() != 0 {
+		t.Errorf("wire body = %q, want empty (mid-stream panic must not write body)", inner.Body.String())
+	}
+}
+
+// TestHandler_AbortHandlerPanic_Repropagates_NotStamped locks in the
+// http.ErrAbortHandler exception in the panic recover path:
+// `panic(http.ErrAbortHandler)` is net/http's documented sentinel
+// for an intentional abort (the handler chose to drop the connection
+// without writing further). Swallowing it would (a) silently change
+// the abort semantics callers rely on, and (b) mis-label an
+// intentional protocol signal as a "panic" in the audit stream.
+//
+// The recover defer must re-panic in this case so the standard abort
+// path runs, and must NOT stamp KindPanic on the audit row.
+func TestHandler_AbortHandlerPanic_Repropagates_NotStamped(t *testing.T) {
+	rec, recorder := newCaptureRecorder()
+	svc := &fakeService{
+		vendor: "opencode",
+		buildResult: func(req *llmtypes.Request) *llmrouter.RouteResult {
+			panic(http.ErrAbortHandler)
+		},
+	}
+	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+
+	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	func() {
+		defer func() {
+			r := recover()
+			if r != http.ErrAbortHandler {
+				t.Fatalf("recovered = %v, want http.ErrAbortHandler propagated upward", r)
+			}
+		}()
+		h.ServeHTTP(w, req)
+	}()
+
+	// Audit row still exists (audit-always invariant) but must NOT
+	// be tagged as panic — the abort sentinel is an intentional
+	// protocol signal, not a fault.
+	got := rec.last(t)
+	if got.Kind == llmtypes.KindPanic {
+		t.Errorf("Kind = %q, want non-panic for intentional http.ErrAbortHandler abort", got.Kind)
+	}
+}
+
+// TestHandler_recoverPanic_OverridesPreStampedStatus locks in the
+// audit-status invariant for the streaming-mid-Run scenario:
+// streamRelay.Run sets rec.StatusCode = 200 when SSE headers flush,
+// so by the time a mid-stream panic reaches the recover defer, rec
+// already carries a "success" status. The recover MUST override it
+// to 500 — otherwise dashboards / alerts keyed on status would see
+// the failure as a success.
+//
+// We exercise recoverPanic directly because the streaming Recv path
+// dispatches into a separate goroutine that recover() cannot reach,
+// making an end-to-end mid-stream panic impossible to simulate from
+// ServeHTTP. Driving the method directly lets us pre-stamp the
+// "after streamRelay flushed" state and assert the override.
+func TestHandler_recoverPanic_OverridesPreStampedStatus(t *testing.T) {
+	_, recorder := newCaptureRecorder()
+	h := NewHandler(&fakeService{vendor: "opencode"}, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+
+	// Pre-stamped state: streamRelay.Run already ran sink.WriteHeaders()
+	// and set rec.StatusCode = 200, then a panic hit later in the
+	// loop (sink.Send / json.Marshal / etc).
+	rec := &audit.Record{
+		RequestID:  "test-req-id",
+		StatusCode: http.StatusOK,
+	}
+	inner := httptest.NewRecorder()
+	cw := &countingWriter{ResponseWriter: inner, status: http.StatusOK, wroteHeader: true}
+
+	h.recoverPanic(context.Background(), cw, rec, "mid-stream boom")
+
+	if rec.Kind != llmtypes.KindPanic {
+		t.Errorf("Kind = %q, want %q", rec.Kind, llmtypes.KindPanic)
+	}
+	if rec.StatusCode != http.StatusInternalServerError {
+		t.Errorf("StatusCode = %d, want 500 — must override pre-stamped 200 so a panic is not recorded as success", rec.StatusCode)
+	}
+	if inner.Body.Len() != 0 {
+		t.Errorf("wire body = %q, want empty (already-flushed response must not get JSON written)", inner.Body.String())
+	}
+}
+
 // fakeService implements ChatService for handler tests. buildResult /
 // buildStreamResult let each test case shape the RouteResult —
 // including pre-populated Attempts — so we exercise the audit-copy

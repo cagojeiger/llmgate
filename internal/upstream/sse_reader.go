@@ -3,7 +3,10 @@ package upstream
 import (
 	"bufio"
 	"bytes"
+	"context"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 
@@ -114,7 +117,24 @@ func (r *SSEReader) Recv() (data []byte, err error) {
 		// before a connection drop may themselves be corrupt, so the
 		// error signal is the priority and any salvage attempt belongs
 		// to the adapter that knows how to validate the JSON shape.
-		return nil, &llmtypes.Error{Kind: llmtypes.KindUpstream, Message: err.Error(), Cause: err}
+		//
+		// Classify as KindNetwork (or KindTimeout for deadline / net
+		// timeouts) so server/errors.go's transport-class collapse
+		// strips the cause detail before it reaches the wire.
+		// scanner.Err() bubbles up from the underlying connection's
+		// read error and may carry upstream IPs / hostnames / ports
+		// — KindUpstream pass-through would leak that into the SSE
+		// error frame.
+		kind := llmtypes.KindNetwork
+		if errors.Is(err, context.DeadlineExceeded) {
+			kind = llmtypes.KindTimeout
+		} else {
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
+				kind = llmtypes.KindTimeout
+			}
+		}
+		return nil, &llmtypes.Error{Kind: kind, Message: err.Error(), Cause: err}
 	}
 	// Natural EOF (clean stream end). If parts were buffered (e.g.
 	// upstream finished delivering `data: ...` lines but the trailing

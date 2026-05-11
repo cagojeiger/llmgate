@@ -175,12 +175,18 @@ func TestSSEReader_TruncatedAfterDataNoBlankLineDelivers(t *testing.T) {
 	}
 }
 
-func TestSSEReader_ScannerErrorBubblesAsUpstreamError(t *testing.T) {
+func TestSSEReader_ScannerErrorBubblesAsNetworkError(t *testing.T) {
 	// Hand-craft an io.Reader that errors mid-stream so we exercise the
 	// scanner.Err() path (distinct from natural EOF).
+	//
+	// The error must surface as KindNetwork (not KindUpstream) so that
+	// server/errors.go's transport-class collapse strips the cause
+	// detail before it reaches the SSE error frame on the wire.
+	// scanner.Err() bubbles up from the underlying connection and the
+	// raw message can embed upstream IPs / hostnames / ports.
 	src := &errReader{
 		data: []byte("data: one\n\ndata: two"),
-		err:  errors.New("connection reset"),
+		err:  errors.New("read tcp 13.226.42.85:443: connection reset by peer"),
 	}
 	reader := NewSSEReader(io.NopCloser(src))
 
@@ -198,8 +204,13 @@ func TestSSEReader_ScannerErrorBubblesAsUpstreamError(t *testing.T) {
 	if !errors.As(err, &perr) {
 		t.Fatalf("err type = %T, want *llmtypes.Error", err)
 	}
-	if perr.Kind != llmtypes.KindUpstream {
-		t.Errorf("Kind = %s, want %s", perr.Kind, llmtypes.KindUpstream)
+	if perr.Kind != llmtypes.KindNetwork {
+		t.Errorf("Kind = %s, want %s — KindUpstream pass-through would leak transport detail through server/errors.go", perr.Kind, llmtypes.KindNetwork)
+	}
+	// Cause is preserved so audit/slog operators can still see what
+	// happened; only the wire surface is sanitized downstream.
+	if perr.Cause == nil {
+		t.Errorf("Cause = nil, want preserved underlying error for audit visibility")
 	}
 }
 

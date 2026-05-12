@@ -35,6 +35,38 @@ func TestExtraRoundTripMessage(t *testing.T) {
 	roundTripEqual[Message](t, input)
 }
 
+func TestMessageStructuredContentRoundTrip(t *testing.T) {
+	input := `{
+		"role":"user",
+		"content":[
+			{"type":"text","text":"what is in this image?"},
+			{"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA"}}
+		],
+		"cache_control":{"type":"ephemeral"}
+	}`
+
+	var msg Message
+	if err := json.Unmarshal([]byte(input), &msg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if msg.Content != "" {
+		t.Fatalf("Content = %q, want empty text field for structured content", msg.Content)
+	}
+	if len(msg.ContentRaw) == 0 {
+		t.Fatal("ContentRaw is empty, want structured content preserved")
+	}
+
+	output, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	want := decodeNormalizedJSON(t, []byte(input))
+	got := decodeNormalizedJSON(t, output)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("round trip mismatch\nwant: %s\ngot:  %s", mustCompact(input), output)
+	}
+}
+
 func TestExtraRoundTripResponse(t *testing.T) {
 	input := `{
 		"id":"chat-1",

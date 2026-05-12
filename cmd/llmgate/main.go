@@ -181,6 +181,10 @@ func buildRouterInputs(cat *catalog.Catalog, factories map[llmtypes.Protocol]pro
 func openaiFactory(m *catalog.Model) (llmtypes.Provider, error) {
 	apiKey, err := readAuthKey(m)
 	if err != nil {
+		var missing *missingAuthKeyError
+		if errors.As(err, &missing) {
+			return missingAuthProviderFor(m, missing.Env), nil
+		}
 		return nil, err
 	}
 	return openai.New(openai.Config{
@@ -194,6 +198,10 @@ func openaiFactory(m *catalog.Model) (llmtypes.Provider, error) {
 func anthropicFactory(m *catalog.Model) (llmtypes.Provider, error) {
 	apiKey, err := readAuthKey(m)
 	if err != nil {
+		var missing *missingAuthKeyError
+		if errors.As(err, &missing) {
+			return missingAuthProviderFor(m, missing.Env), nil
+		}
 		return nil, err
 	}
 	return anthropic.New(anthropic.Config{
@@ -215,9 +223,46 @@ func readAuthKey(m *catalog.Model) (string, error) {
 	}
 	v := os.Getenv(envKey)
 	if v == "" {
-		return "", fmt.Errorf("model %q: env %s is unset", m.ID, envKey)
+		return "", &missingAuthKeyError{Model: m.ID, Env: envKey}
 	}
 	return v, nil
+}
+
+type missingAuthKeyError struct {
+	Model string
+	Env   string
+}
+
+func (e *missingAuthKeyError) Error() string {
+	return fmt.Sprintf("model %q: env %s is unset", e.Model, e.Env)
+}
+
+type missingAuthProvider struct {
+	name  string
+	model string
+	env   string
+}
+
+func missingAuthProviderFor(m *catalog.Model, env string) llmtypes.Provider {
+	return &missingAuthProvider{name: m.Vendor, model: m.ID, env: env}
+}
+
+func (p *missingAuthProvider) Name() string { return p.name }
+
+func (p *missingAuthProvider) Complete(context.Context, *llmtypes.Request) (*llmtypes.Response, error) {
+	return nil, p.err()
+}
+
+func (p *missingAuthProvider) CompleteStream(context.Context, *llmtypes.Request) (llmtypes.Stream, error) {
+	return nil, p.err()
+}
+
+func (p *missingAuthProvider) err() error {
+	return &llmtypes.Error{
+		Kind:     llmtypes.KindAuth,
+		Provider: p.name,
+		Message:  fmt.Sprintf("model %q is unavailable because env %s is unset", p.model, p.env),
+	}
 }
 
 // shutdown drains in-flight requests until either the server reports

@@ -26,6 +26,7 @@ func resetEnv(t *testing.T) {
 		"LLMGATE_REQUEST_TIMEOUT",
 		"LLMGATE_COMPLETE_TIMEOUT",
 		"LLMGATE_STREAM_IDLE_TIMEOUT",
+		"LLMGATE_MAX_CHAT_REQUEST_BYTES",
 	} {
 		t.Setenv(k, "")
 	}
@@ -70,6 +71,9 @@ func TestLoadServer_Defaults(t *testing.T) {
 	}
 	if cfg.StreamIdleTimeout != time.Minute {
 		t.Errorf("StreamIdleTimeout = %v, want 1m", cfg.StreamIdleTimeout)
+	}
+	if cfg.MaxChatRequestBytes != 8<<20 {
+		t.Errorf("MaxChatRequestBytes = %d, want 8MiB", cfg.MaxChatRequestBytes)
 	}
 }
 
@@ -169,6 +173,19 @@ func TestLoadServer_StreamIdleTimeoutOverride(t *testing.T) {
 	}
 }
 
+func TestLoadServer_MaxChatRequestBytesOverride(t *testing.T) {
+	resetEnv(t)
+	t.Setenv("LLMGATE_MAX_CHAT_REQUEST_BYTES", "2097152")
+
+	cfg, err := LoadServer()
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if cfg.MaxChatRequestBytes != 2<<20 {
+		t.Errorf("MaxChatRequestBytes = %d, want 2MiB", cfg.MaxChatRequestBytes)
+	}
+}
+
 func TestLoadServer_RejectsInvalidCircuitJitter(t *testing.T) {
 	resetEnv(t)
 	t.Setenv("LLMGATE_CIRCUIT_JITTER", "1.5")
@@ -239,5 +256,18 @@ func TestLoadServer_RejectsUnknownLogLevel(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "LLMGATE_LOG_LEVEL") {
 		t.Errorf("err = %v, want mention of the failing key", err)
+	}
+}
+
+func TestLoadServer_RejectsNonPositiveMaxChatRequestBytes(t *testing.T) {
+	resetEnv(t)
+	t.Setenv("LLMGATE_MAX_CHAT_REQUEST_BYTES", "0")
+
+	_, err := LoadServer()
+	if err == nil {
+		t.Fatal("LoadServer: want error for non-positive max request bytes")
+	}
+	if !strings.Contains(err.Error(), "LLMGATE_MAX_CHAT_REQUEST_BYTES") {
+		t.Errorf("err = %v, want mention of failing key", err)
 	}
 }

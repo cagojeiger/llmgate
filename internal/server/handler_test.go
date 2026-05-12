@@ -177,6 +177,41 @@ func TestHandler_AllowedAliasesRejectBeforeService(t *testing.T) {
 	}
 }
 
+func TestHandler_MaxRequestBytesOverride(t *testing.T) {
+	rec, recorder := newCaptureRecorder()
+	r := &fakeService{
+		buildResult: func(req *llmtypes.Request) *llmrouter.RouteResult {
+			return &llmrouter.RouteResult{
+				Response: &llmtypes.Response{
+					Model:   req.Model,
+					Choices: []llmtypes.Choice{{Index: 0, Message: llmtypes.Message{Role: "assistant", Content: "ok"}}},
+				},
+				Vendor:    "opencode",
+				ModelUsed: req.Model,
+			}
+		},
+	}
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{
+		MaxRequestBytes: 32,
+	})
+
+	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body = %s", w.Code, w.Body.String())
+	}
+	got := rec.last(t)
+	if got.Kind != llmtypes.KindBadRequest || got.StatusCode != http.StatusBadRequest {
+		t.Fatalf("Kind/StatusCode = %q/%d, want bad_request/400", got.Kind, got.StatusCode)
+	}
+	if !strings.Contains(w.Body.String(), "request body too large") {
+		t.Fatalf("body = %s, want request body too large", w.Body.String())
+	}
+}
+
 func TestAdoptError_NonProviderError_Falls500Unknown(t *testing.T) {
 	rec := &audit.Record{}
 	adoptError(rec, io.ErrUnexpectedEOF)

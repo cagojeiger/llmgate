@@ -15,7 +15,7 @@ import (
 	"llmgate/internal/llmtypes"
 )
 
-const maxChatRequestBytes = 1 << 20
+const defaultMaxChatRequestBytes int64 = 8 << 20
 
 // ChatService is the upstream contract Handler needs.
 type ChatService interface {
@@ -24,16 +24,18 @@ type ChatService interface {
 }
 
 type Handler struct {
-	service        ChatService
-	log            *slog.Logger
-	recorder       audit.Recorder
-	requestTimeout time.Duration
-	stream         *streamRelay
+	service         ChatService
+	log             *slog.Logger
+	recorder        audit.Recorder
+	requestTimeout  time.Duration
+	maxRequestBytes int64
+	stream          *streamRelay
 }
 
 type HandlerConfig struct {
 	RequestTimeout    time.Duration
 	StreamIdleTimeout time.Duration
+	MaxRequestBytes   int64
 }
 
 func NewHandler(service ChatService, log *slog.Logger, recorder audit.Recorder, cfg HandlerConfig) *Handler {
@@ -43,12 +45,17 @@ func NewHandler(service ChatService, log *slog.Logger, recorder audit.Recorder, 
 	if recorder == nil {
 		recorder = audit.Nop{}
 	}
+	maxRequestBytes := cfg.MaxRequestBytes
+	if maxRequestBytes <= 0 {
+		maxRequestBytes = defaultMaxChatRequestBytes
+	}
 	return &Handler{
-		service:        service,
-		log:            log,
-		recorder:       recorder,
-		requestTimeout: cfg.RequestTimeout,
-		stream:         newStreamRelay(log, cfg.StreamIdleTimeout),
+		service:         service,
+		log:             log,
+		recorder:        recorder,
+		requestTimeout:  cfg.RequestTimeout,
+		maxRequestBytes: maxRequestBytes,
+		stream:          newStreamRelay(log, cfg.StreamIdleTimeout),
 	}
 }
 
@@ -96,7 +103,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxChatRequestBytes))
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, h.maxRequestBytes))
 	if err != nil {
 		perr := &llmtypes.Error{Kind: llmtypes.KindBadRequest, Message: "read request body: " + err.Error()}
 		adoptError(rec, perr)

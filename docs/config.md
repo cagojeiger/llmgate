@@ -19,6 +19,7 @@
 | `LLMGATE_CATALOG` | `./catalog` | catalog 디렉토리 (부재 → fail) |
 | `LLMGATE_CONSUMERS` | `./consumers` | consumers 디렉토리 (부재 → fail) |
 | `LLMGATE_SHUTDOWN_DRAIN_TIMEOUT` | `5m` | drain 최대 wall-clock, 이후 force close |
+| `LLMGATE_MAX_CHAT_REQUEST_BYTES` | `8388608` | `/v1/chat/completions` 요청 JSON 최대 바이트. base64 이미지 입력용 |
 
 vendor 별 API 키는 `LLMGATE_<VENDOR>_API_KEY` 패턴 (예: `LLMGATE_OPENCODE_API_KEY`,
 `LLMGATE_OPENROUTER_API_KEY`).

@@ -111,6 +111,7 @@ func run() error {
 	handler := server.NewHandler(svc, logger, recorder, server.HandlerConfig{
 		RequestTimeout:    cfg.RequestTimeout,
 		StreamIdleTimeout: cfg.StreamIdleTimeout,
+		MaxRequestBytes:   cfg.MaxChatRequestBytes,
 	})
 	probe := server.NewProbeState()
 	srv := server.New(cfg, accessLog, handler, consumerStore, probe)

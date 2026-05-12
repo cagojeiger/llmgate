@@ -18,6 +18,26 @@ curl http://localhost:8080/v1/chat/completions \
   -d '{"model":"smart","messages":[{"role":"user","content":"hi"}]}'
 ```
 
+OpenAI SDK image input works through OpenAI-compatible providers such as
+OpenRouter:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080/v1", api_key="example-key-001")
+resp = client.chat.completions.create(
+    model="google/gemini-3.1-flash-lite",
+    messages=[{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "What color is this image?"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}},
+        ],
+    }],
+)
+print(resp.choices[0].message.content)
+```
+
 ## Test
 
 ```bash

@@ -21,14 +21,15 @@ type Server struct {
 	LogLevel             slog.Level
 
 	// Routing fallback, breaker, and timeout settings.
-	FallbackOn        []string
-	CircuitFailures   int
-	CircuitOpen       time.Duration
-	CircuitMaxOpen    time.Duration
-	CircuitJitter     float64
-	RequestTimeout    time.Duration
-	CompleteTimeout   time.Duration
-	StreamIdleTimeout time.Duration
+	FallbackOn          []string
+	CircuitFailures     int
+	CircuitOpen         time.Duration
+	CircuitMaxOpen      time.Duration
+	CircuitJitter       float64
+	RequestTimeout      time.Duration
+	CompleteTimeout     time.Duration
+	StreamIdleTimeout   time.Duration
+	MaxChatRequestBytes int64
 }
 
 func LoadServer() (*Server, error) {
@@ -68,6 +69,10 @@ func LoadServer() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	maxChatRequestBytes, err := positiveInt64("LLMGATE_MAX_CHAT_REQUEST_BYTES", "8388608")
+	if err != nil {
+		return nil, err
+	}
 
 	return &Server{
 		Addr:                 orDefault("LLMGATE_ADDR", ":8080"),
@@ -81,6 +86,7 @@ func LoadServer() (*Server, error) {
 		RequestTimeout:       requestTimeout,
 		CompleteTimeout:      completeTimeout,
 		StreamIdleTimeout:    streamIdleTimeout,
+		MaxChatRequestBytes:  maxChatRequestBytes,
 	}, nil
 }
 
@@ -118,6 +124,18 @@ func nonNegativeInt(key, def string) (int, error) {
 	}
 	if n < 0 {
 		return 0, fmt.Errorf("%s must be >= 0, got %q", key, raw)
+	}
+	return n, nil
+}
+
+func positiveInt64(key, def string) (int64, error) {
+	raw := orDefault(key, def)
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be an integer, got %q: %w", key, raw, err)
+	}
+	if n <= 0 {
+		return 0, fmt.Errorf("%s must be > 0, got %q", key, raw)
 	}
 	return n, nil
 }

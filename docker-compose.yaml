@@ -9,13 +9,14 @@ services:
     build: .
     image: llmgate:dev
     ports:
-      - "8080:8080"
+      - "${LLMGATE_HOST_PORT:-8080}:8080"
     environment:
       LLMGATE_OPENCODE_API_KEY: ${LLMGATE_OPENCODE_API_KEY}
       LLMGATE_OPENROUTER_API_KEY: ${LLMGATE_OPENROUTER_API_KEY:-}
       LLMGATE_CATALOG: /etc/llmgate/catalog
       LLMGATE_CONSUMERS: /etc/llmgate/consumers
       LLMGATE_LOG_LEVEL: info
+      LLMGATE_MAX_CHAT_REQUEST_BYTES: ${LLMGATE_MAX_CHAT_REQUEST_BYTES:-8388608}
     volumes:
       - ./catalog:/etc/llmgate/catalog:ro
       - ./consumers:/etc/llmgate/consumers:ro

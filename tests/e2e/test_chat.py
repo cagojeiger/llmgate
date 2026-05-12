@@ -10,6 +10,7 @@ from openai import OpenAI
 from conftest import (
     assert_streaming_progressive,
     discover_catalog_models,
+    e2e_vendor_filter,
     field,
     raw_consumer_key,
 )
@@ -19,10 +20,13 @@ pytestmark = pytest.mark.timeout(120)
 
 _openai = discover_catalog_models("openai")
 _anthropic = discover_catalog_models("anthropic")
-if not _openai or not _anthropic:
-    pytest.skip("openai/anthropic protocol model missing from catalog", allow_module_level=True)
-MODEL = _openai[0]
-ANTHROPIC_MODEL = _anthropic[0]
+MODEL = _openai[0] if _openai else ""
+ANTHROPIC_MODEL = _anthropic[0] if _anthropic else ""
+OPENROUTER_MODELS = discover_catalog_models("openai", vendor="openrouter")
+RED_PIXEL_PNG_DATA_URL = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR42mP8z8BQDwAFgwJ/lZK6qAAAAABJRU5ErkJggg=="
+)
 
 
 @pytest.fixture
@@ -30,9 +34,15 @@ def client(gate_base_url: str) -> OpenAI:
     return OpenAI(base_url=f"{gate_base_url}/v1", api_key=raw_consumer_key())
 
 
+def require_model(model: str, label: str) -> str:
+    if not model:
+        pytest.skip(f"{label} model missing from selected catalog vendor")
+    return model
+
+
 def test_chat_non_stream(client: OpenAI) -> None:
     resp = client.chat.completions.create(
-        model=MODEL,
+        model=require_model(MODEL, "openai protocol"),
         messages=[{"role": "user", "content": "Reply with just one word: pong"}],
         max_tokens=2048,
     )
@@ -51,7 +61,7 @@ def test_chat_anthropic_stream(client: OpenAI) -> None:
     finish_reason: str | None = None
 
     stream = client.chat.completions.create(
-        model=ANTHROPIC_MODEL,
+        model=require_model(ANTHROPIC_MODEL, "anthropic protocol"),
         messages=[{"role": "user", "content": "Count 1 to 3, one per line."}],
         stream=True,
         max_tokens=2048,
@@ -74,7 +84,7 @@ def test_chat_anthropic_stream(client: OpenAI) -> None:
 
 def test_chat_system_message_extraction(client: OpenAI) -> None:
     resp = client.chat.completions.create(
-        model=ANTHROPIC_MODEL,
+        model=require_model(ANTHROPIC_MODEL, "anthropic protocol"),
         messages=[
             {"role": "system", "content": "Answer in one short sentence."},
             {"role": "user", "content": "Say hello."},
@@ -90,7 +100,7 @@ def test_chat_system_message_extraction(client: OpenAI) -> None:
 def test_non_stream_preserves_vendor_fields(client: OpenAI) -> None:
     """Vendor extras (cost, prompt_cache_*) must ride through Response.Extra."""
     resp = client.chat.completions.create(
-        model=MODEL,
+        model=require_model(MODEL, "openai protocol"),
         messages=[{"role": "user", "content": "say hi"}],
         max_tokens=2048,
     )
@@ -111,7 +121,7 @@ def test_chat_stream(client: OpenAI) -> None:
     finish_reason: str | None = None
 
     stream = client.chat.completions.create(
-        model=MODEL,
+        model=require_model(MODEL, "openai protocol"),
         messages=[{"role": "user", "content": "Count 1 to 5, one per line."}],
         stream=True,
         max_tokens=2048,
@@ -143,6 +153,33 @@ def test_chat_stream(client: OpenAI) -> None:
     assert_streaming_progressive(timestamps, label="chat-stream")
 
 
+@pytest.mark.live_only
+def test_openrouter_image_input_with_openai_sdk(client: OpenAI) -> None:
+    selected = {v.strip() for v in e2e_vendor_filter().split(",") if v.strip()}
+    if "all" not in selected and "openrouter" not in selected:
+        pytest.skip("OpenRouter image smoke test requires LLMGATE_E2E_VENDOR=openrouter or all")
+    if not OPENROUTER_MODELS:
+        pytest.skip("openrouter model missing from catalog")
+
+    resp = client.chat.completions.create(
+        model=OPENROUTER_MODELS[0],
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "What color is this 1x1 image? Reply with one word."},
+                    {"type": "image_url", "image_url": {"url": RED_PIXEL_PNG_DATA_URL}},
+                ],
+            }
+        ],
+        max_tokens=20,
+    )
+
+    assert resp.choices, f"no choices: {resp}"
+    text = (resp.choices[0].message.content or "").strip().lower()
+    assert "red" in text, f"expected red image classification, got {text!r}"
+
+
 def test_unregistered_client_key_is_rejected(gate_base_url: str) -> None:
     """Unregistered bearer token gets 401 (no bypass mode). ADR 003."""
     import openai as openai_pkg
@@ -150,7 +187,7 @@ def test_unregistered_client_key_is_rejected(gate_base_url: str) -> None:
     dummy = OpenAI(base_url=f"{gate_base_url}/v1", api_key="dummy-client-key")
     with pytest.raises(openai_pkg.AuthenticationError):
         dummy.chat.completions.create(
-            model=MODEL,
+            model=require_model(MODEL, "openai protocol"),
             messages=[{"role": "user", "content": "hi"}],
             max_tokens=2048,
         )

@@ -7,7 +7,7 @@ Bearer-key auth, one audit record per request.
 ## Run locally
 
 ```bash
-cp .env.example .env   # fill LLMGATE_OPENCODE_API_KEY
+cp .env.example .env   # fill the provider API keys you use
 make run               # listens on :8080
 ```
 

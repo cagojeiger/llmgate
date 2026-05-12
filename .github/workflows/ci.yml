@@ -66,3 +66,5 @@ jobs:
       # The cassette upstream is local; no real vendor key needed.
       # conftest sets a dummy LLMGATE_OPENCODE_API_KEY when MODE=cassette.
       - run: make e2e-mock
+        env:
+          LLMGATE_E2E_VENDOR: opencode

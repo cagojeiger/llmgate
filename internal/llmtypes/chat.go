@@ -69,9 +69,13 @@ func (r *Request) Validate() error {
 }
 
 type Message struct {
-	Role             string `json:"role"`
-	Content          string `json:"content"`
-	ReasoningContent string `json:"reasoning_content,omitempty"`
+	Role    string `json:"role"`
+	Content string `json:"content"`
+	// ContentRaw preserves OpenAI's structured message content shape
+	// (for example image_url parts) while keeping the common text case as
+	// Content for existing provider code.
+	ContentRaw       json.RawMessage `json:"-"`
+	ReasoningContent string          `json:"reasoning_content,omitempty"`
 
 	Extra map[string]json.RawMessage `json:"-"`
 }

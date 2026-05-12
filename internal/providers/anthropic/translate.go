@@ -94,6 +94,9 @@ func toAnthropicRequest(req *llmtypes.Request, defaultMaxTokens int, stream bool
 	messages := make([]anthropicMessage, 0, len(req.Messages))
 	for _, msg := range req.Messages {
 		if msg.Role == "system" {
+			if len(msg.ContentRaw) > 0 {
+				return nil, errors.New("anthropic provider does not support structured system content")
+			}
 			system = append(system, msg.Content)
 			continue
 		}
@@ -206,6 +209,9 @@ func toAnthropicRequest(req *llmtypes.Request, defaultMaxTokens int, stream bool
 // tool_result block; the caller switches role to "user" since Anthropic
 // has no dedicated tool role.
 func buildMessageContent(msg llmtypes.Message) (any, error) {
+	if len(msg.ContentRaw) > 0 {
+		return nil, errors.New("anthropic provider does not support OpenAI structured message content")
+	}
 	if msg.Role == "tool" {
 		toolCallID, err := extractStringField(msg.Extra, "tool_call_id")
 		if err != nil {

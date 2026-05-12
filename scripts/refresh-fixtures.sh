@@ -4,7 +4,9 @@
 #   --prune              — delete fixture dirs for models removed from catalog
 #   --record             — call upstream and capture missing fixtures
 #                          (json + sse per model). Skips files that exist.
-#                          Reads vendor key from .env.
+#                          Reads vendor key from .env. Defaults to
+#                          LLMGATE_E2E_VENDOR=opencode; set to all or a
+#                          comma-separated vendor list to record more.
 
 set -euo pipefail
 
@@ -17,21 +19,70 @@ CATALOG_DIR="catalog/models"
 FIXTURES_DIR="tests/e2e/fixtures/models"
 RECORD_PROMPT="Count 1 to 5, one number per line."
 RECORD_MAX_TOKENS=2048
+VENDOR_FILTER="${LLMGATE_E2E_VENDOR:-opencode}"
 
 mode="${1:---status}"
 mkdir -p "$FIXTURES_DIR"
 
-# Catalog model id set, sorted unique.
-catalog_ids=$(grep -h '^id:' "$CATALOG_DIR"/*.yaml | awk '{print $2}' | sort -u)
+yaml_field_in_file() { grep -m1 "^$2:" "$1" 2>/dev/null | awk '{print $2}'; }
+
+vendor_selected() {
+    local vendor="$1" selected="$2" part
+    [ "$selected" = "all" ] && return 0
+    IFS=',' read -ra parts <<< "$selected"
+    for part in "${parts[@]}"; do
+        part="$(echo "$part" | xargs)"
+        [ "$vendor" = "$part" ] && return 0
+    done
+    return 1
+}
+
+catalog_ids_for_vendor() {
+    local path id vendor
+    for path in "$CATALOG_DIR"/*.yaml; do
+        [ -f "$path" ] || continue
+        id=$(yaml_field_in_file "$path" id)
+        vendor=$(yaml_field_in_file "$path" vendor)
+        [ -n "$id" ] || continue
+        vendor_selected "$vendor" "$VENDOR_FILTER" || continue
+        echo "$id"
+    done | sort -u
+}
+
+all_catalog_ids() {
+    local path id
+    for path in "$CATALOG_DIR"/*.yaml; do
+        [ -f "$path" ] || continue
+        id=$(yaml_field_in_file "$path" id)
+        [ -n "$id" ] && echo "$id"
+    done | sort -u
+}
+
+model_file_for_id() {
+    local id="$1" path
+    for path in "$CATALOG_DIR"/*.yaml; do
+        [ -f "$path" ] || continue
+        [ "$(yaml_field_in_file "$path" id)" = "$id" ] && { echo "$path"; return 0; }
+    done
+    return 1
+}
+
+# Catalog model id set for the selected vendor scope, sorted unique.
+catalog_ids=$(catalog_ids_for_vendor)
+catalog_ids_all=$(all_catalog_ids)
 
 # Existing fixture dirs (skip dotfiles — .omc scratch etc.).
 fixture_ids=$(find "$FIXTURES_DIR" -mindepth 1 -maxdepth 1 -type d \
     -not -name '.*' -exec basename {} \; 2>/dev/null | sort -u || true)
 
 added=$(comm -23 <(echo "$catalog_ids") <(echo "$fixture_ids" || echo ""))
-removed=$(comm -13 <(echo "$catalog_ids") <(echo "$fixture_ids" || echo ""))
+removed=$(comm -13 <(echo "$catalog_ids_all") <(echo "$fixture_ids" || echo ""))
 
-yaml_field() { grep -m1 "^$2:" "$CATALOG_DIR/$1.yaml" 2>/dev/null | awk '{print $2}'; }
+yaml_field() {
+    local file
+    file=$(model_file_for_id "$1") || return 1
+    yaml_field_in_file "$file" "$2"
+}
 
 record_one() {
     local id="$1"
@@ -99,8 +150,9 @@ case "$mode" in
             echo "$removed" | sed 's/^/  /'
             echo "  → prune: ./scripts/refresh-fixtures.sh --prune"
         fi
-        [ -z "$added" ] && [ -z "$removed" ] && \
-            echo "fixtures in sync with catalog ($(echo "$catalog_ids" | wc -l | tr -d ' ') models)"
+        if [ -z "$added" ] && [ -z "$removed" ]; then
+            echo "fixtures in sync with catalog vendor filter '$VENDOR_FILTER' ($(echo "$catalog_ids" | wc -l | tr -d ' ') models)"
+        fi
         ;;
     --prune)
         [ -z "$removed" ] && { echo "no stale fixtures"; exit 0; }

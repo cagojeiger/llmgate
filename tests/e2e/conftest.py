@@ -5,7 +5,10 @@ Two modes via ``LLMGATE_E2E_MODE``:
   live      — real upstream from .env (default; ``make e2e``)
   cassette  — replays tests/e2e/fixtures via cassette.py (``make e2e-mock``)
 
-Set ``LLMGATE_E2E_EXTERNAL=1`` to reuse a gate already running on :8080.
+Set ``LLMGATE_E2E_EXTERNAL=1`` to reuse a gate already running on the e2e port.
+Set ``LLMGATE_E2E_PORT`` to avoid local port conflicts (default: 8080).
+Set ``LLMGATE_E2E_VENDOR`` to choose the catalog vendor under test
+(``opencode`` by default, or ``all`` for every vendor).
 ``@pytest.mark.live_only`` auto-skips in cassette mode. ADR 006.
 """
 
@@ -28,7 +31,7 @@ import cassette
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-GATE_PORT = 8080
+GATE_PORT = int(os.environ.get("LLMGATE_E2E_PORT", "8080"))
 GATE_BASE_URL = f"http://127.0.0.1:{GATE_PORT}"
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 
@@ -143,6 +146,7 @@ def gate_base_url(tmp_path_factory) -> Iterator[str]:
     _ensure_port_free(GATE_PORT)
 
     env = os.environ.copy()
+    env.setdefault("LLMGATE_ADDR", f":{GATE_PORT}")
     env.setdefault("LLMGATE_LOG_LEVEL", "debug")
 
     upstream_server: Optional[object] = None
@@ -155,9 +159,20 @@ def gate_base_url(tmp_path_factory) -> Iterator[str]:
         env.setdefault("LLMGATE_OPENCODE_API_KEY", "dummy-cassette-key")
     elif mode == "live":
         load_dotenv(REPO_ROOT / ".env")
-        if not os.environ.get("LLMGATE_OPENCODE_API_KEY"):
-            pytest.skip("LLMGATE_OPENCODE_API_KEY not set; populate .env")
-        env["LLMGATE_OPENCODE_API_KEY"] = os.environ["LLMGATE_OPENCODE_API_KEY"]
+        selected_vendor = e2e_vendor_filter()
+        vendors = sorted(
+            {
+                _catalog_field(path, "vendor")
+                for path in (REPO_ROOT / "catalog" / "models").glob("*.yaml")
+                if _catalog_field(path, "vendor")
+                and _vendor_selected(_catalog_field(path, "vendor"), selected_vendor)
+            }
+        )
+        for vendor in vendors:
+            key_env = _required_vendor_env(vendor)
+            if not os.environ.get(key_env):
+                pytest.skip(f"{key_env} not set; populate .env or change LLMGATE_E2E_VENDOR")
+            env[key_env] = os.environ[key_env]
     else:
         pytest.fail(f"unknown LLMGATE_E2E_MODE: {mode}")
 
@@ -232,25 +247,49 @@ def _skip_if_no_cassette_fixture(request: pytest.FixtureRequest) -> None:
         pytest.skip(f"cassette: no fixture for {model}")
 
 
-def discover_catalog_models(protocol: str | None = None) -> list[str]:
-    """Catalog model ids (sorted), optionally filtered by ``protocol:``.
+def e2e_vendor_filter() -> str:
+    return os.environ.get("LLMGATE_E2E_VENDOR", "opencode").strip().lower() or "opencode"
+
+
+def _vendor_selected(vendor: str, selected: str) -> bool:
+    if selected == "all":
+        return True
+    wanted = {v.strip() for v in selected.split(",") if v.strip()}
+    return vendor.lower() in wanted
+
+
+def _required_vendor_env(vendor: str) -> str:
+    return f"LLMGATE_{vendor.upper().replace('-', '_')}_API_KEY"
+
+
+def discover_catalog_models(protocol: str | None = None, vendor: str | None = None) -> list[str]:
+    """Catalog model ids (sorted), optionally filtered by protocol/vendor.
 
     Avoids a PyYAML dep by regex-extracting top-level fields. Adding a yaml
     under catalog/models/ flows into the matrix on the next run.
     """
-    id_pat = re.compile(r"^id:\s*(\S+)", re.MULTILINE)
-    proto_pat = re.compile(r"^protocol:\s*(\S+)", re.MULTILINE)
+    selected_vendor = vendor if vendor is not None else e2e_vendor_filter()
     ids: list[str] = []
     for path in sorted((REPO_ROOT / "catalog" / "models").glob("*.yaml")):
         text = path.read_text()
+        model_vendor = _catalog_field(path, "vendor", text=text)
+        if selected_vendor and model_vendor and not _vendor_selected(model_vendor, selected_vendor):
+            continue
         if protocol is not None:
-            m_proto = proto_pat.search(text)
-            if not m_proto or m_proto.group(1) != protocol:
+            model_protocol = _catalog_field(path, "protocol", text=text)
+            if model_protocol != protocol:
                 continue
-        m_id = id_pat.search(text)
-        if m_id:
-            ids.append(m_id.group(1))
+        model_id = _catalog_field(path, "id", text=text)
+        if model_id:
+            ids.append(model_id)
     return ids
+
+
+def _catalog_field(path: Path, field: str, *, text: str | None = None) -> str:
+    if text is None:
+        text = path.read_text()
+    match = re.search(rf"^{re.escape(field)}:\s*(\S+)", text, flags=re.MULTILINE)
+    return match.group(1) if match else ""
 
 
 def raw_consumer_key(consumer: str = "example", index: int = 1) -> str:

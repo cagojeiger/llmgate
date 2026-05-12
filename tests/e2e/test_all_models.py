@@ -1,4 +1,4 @@
-"""Auto-discovered matrix: every catalog model × non-stream / stream / function-call.
+"""Auto-discovered matrix: selected catalog vendor × non-stream / stream / function-call.
 Function-call is live_only (cassette V1 doesn't cover multi-turn tool calls)."""
 
 from __future__ import annotations

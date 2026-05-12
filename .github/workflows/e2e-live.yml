@@ -30,6 +30,7 @@ jobs:
         continue-on-error: true
         env:
           LLMGATE_OPENCODE_API_KEY: ${{ secrets.LLMGATE_OPENCODE_API_KEY }}
+          LLMGATE_E2E_VENDOR: opencode
         run: |
           if [ -z "$LLMGATE_OPENCODE_API_KEY" ]; then
             echo "::error::LLMGATE_OPENCODE_API_KEY secret is not set on this repo"

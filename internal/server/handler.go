@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"llmgate/internal/audit"
@@ -112,6 +113,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rec.ModelRequested = req.Model
+	if req.Model != "" && !isModelAllowed(req.Model, consumer.AllowedAliases) {
+		perr := &llmtypes.Error{Kind: llmtypes.KindForbidden, Message: "model not allowed"}
+		adoptError(rec, perr)
+		writeError(w, perr)
+		return
+	}
 
 	if req.Stream != nil && *req.Stream {
 		rec.Operation = "chat.completions.stream"
@@ -119,6 +126,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.serveComplete(w, r, req, rec)
+}
+
+func isModelAllowed(model string, allowed []string) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	for _, alias := range allowed {
+		if strings.EqualFold(model, alias) {
+			return true
+		}
+	}
+	return false
 }
 
 // recoverPanic stamps panic outcomes for audit, preserves

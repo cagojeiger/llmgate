@@ -17,9 +17,10 @@ import (
 // short-circuits itself — the handler stays the single audit emitter
 // (ADR 001 / ADR 003 audit-always).
 type ConsumerInfo struct {
-	Name      string
-	KeyID     string
-	AuthError audit.AuthError
+	Name           string
+	KeyID          string
+	AllowedAliases []string
+	AuthError      audit.AuthError
 }
 
 type consumerCtxKey struct{}
@@ -83,9 +84,9 @@ func classifyAuth(r *http.Request, store *consumers.Store) ConsumerInfo {
 	if key == "" {
 		return ConsumerInfo{AuthError: audit.AuthErrorFormat}
 	}
-	name, keyID, ok := store.Lookup(key)
+	info, ok := store.LookupInfo(key)
 	if !ok {
 		return ConsumerInfo{AuthError: audit.AuthErrorUnknown}
 	}
-	return ConsumerInfo{Name: name, KeyID: keyID}
+	return ConsumerInfo{Name: info.Name, KeyID: info.KeyID, AllowedAliases: info.AllowedAliases}
 }

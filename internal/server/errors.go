@@ -46,6 +46,8 @@ func errorPayload(err error) (int, time.Duration, []byte) {
 		switch kind {
 		case llmtypes.KindAuth:
 			status = http.StatusUnauthorized
+		case llmtypes.KindForbidden:
+			status = http.StatusForbidden
 		case llmtypes.KindRateLimit:
 			status = http.StatusTooManyRequests
 		case llmtypes.KindBadRequest:

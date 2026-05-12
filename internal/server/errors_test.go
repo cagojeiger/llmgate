@@ -179,6 +179,12 @@ func TestErrorPayload_NonTransportKindsPreserveMessage(t *testing.T) {
 			wantMessage: "unauthorized",
 		},
 		{
+			name:        "forbidden preserves policy reason",
+			err:         &llmtypes.Error{Kind: llmtypes.KindForbidden, Message: "model not allowed"},
+			wantStatus:  http.StatusForbidden,
+			wantMessage: "model not allowed",
+		},
+		{
 			name:        "bad_request preserves the parse offset",
 			err:         &llmtypes.Error{Kind: llmtypes.KindBadRequest, Message: "decode request: invalid json at offset 12"},
 			wantStatus:  http.StatusBadRequest,

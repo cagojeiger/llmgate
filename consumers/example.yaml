@@ -8,3 +8,9 @@ name: example
 key_hashes:
   - sha256:467d813a164205cb1d0de0d9bcb080c2bd653c9faed94a24fb6f753ed69ff2d4
   - sha256:278bb4c27aa3a7bff4dac942ad551034f182c1230f70fb114c82858d0fc8a5ca
+
+# 선택: 이 consumer가 요청할 수 있는 model/alias 이름을 제한한다.
+# 비워두거나 생략하면 모든 model 요청을 허용한다.
+# allowed_aliases:
+#   - cheap
+#   - worker

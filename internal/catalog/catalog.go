@@ -57,8 +57,9 @@ type Model struct {
 	Vendor     string            `yaml:"vendor"`
 	Protocol   llmtypes.Protocol `yaml:"protocol"` // see llmtypes.AllProtocols
 	BaseURL    string            `yaml:"base_url"`
-	AuthEnv    string            `yaml:"auth_env"`    // env var *name*; empty defaults to LLMGATE_<VENDOR>_API_KEY
-	AuthScheme string            `yaml:"auth_scheme"` // bearer | x-api-key
+	AuthEnv    string            `yaml:"auth_env"`             // env var *name*; empty defaults to LLMGATE_<VENDOR>_API_KEY
+	AuthScheme string            `yaml:"auth_scheme"`          // bearer | x-api-key
+	ExtraBody  map[string]any    `yaml:"extra_body,omitempty"` // default extra parameters to include in request body
 }
 
 // Alias maps a logical name (e.g. "smart") to an ordered list of concrete

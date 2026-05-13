@@ -192,6 +192,7 @@ func openaiFactory(m *catalog.Model) (llmtypes.Provider, error) {
 		APIKey:     apiKey,
 		AuthScheme: m.AuthScheme,
 		Name:       m.Vendor,
+		ExtraBody:  m.ExtraBody,
 	})
 }
 

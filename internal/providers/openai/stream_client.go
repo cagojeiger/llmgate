@@ -14,7 +14,7 @@ func (c *Client) CompleteStream(ctx context.Context, req *llmtypes.Request) (llm
 		return nil, llmtypes.StampProvider(err, c.cfg.Name)
 	}
 
-	body, err := requestBodyWithStream(req)
+	body, err := c.marshalRequestWithStream(req)
 	if err != nil {
 		return nil, c.badRequest("marshal request", err, nil)
 	}

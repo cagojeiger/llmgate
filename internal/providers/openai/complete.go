@@ -14,7 +14,7 @@ func (c *Client) Complete(ctx context.Context, req *llmtypes.Request) (*llmtypes
 		return nil, llmtypes.StampProvider(err, c.cfg.Name)
 	}
 
-	body, err := json.Marshal(req)
+	body, err := c.marshalRequest(req)
 	if err != nil {
 		return nil, c.badRequest("marshal request", err, nil)
 	}

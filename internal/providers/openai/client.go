@@ -4,11 +4,13 @@ package openai
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
+	"llmgate/internal/llmtypes"
 	"llmgate/internal/upstream"
 )
 
@@ -22,6 +24,7 @@ type Config struct {
 	HTTPClient   *http.Client
 	ExtraHeaders map[string]string
 	Name         string
+	ExtraBody    map[string]any // default extra parameters to include in request body
 }
 
 type Client struct {
@@ -59,6 +62,43 @@ func New(cfg Config) (*Client, error) {
 }
 
 func (c *Client) Name() string { return c.cfg.Name }
+
+// marshalRequest marshals the request to JSON, merging in any default
+// extra_body parameters configured for the model.
+func (c *Client) marshalRequest(req *llmtypes.Request) ([]byte, error) {
+	if len(c.cfg.ExtraBody) == 0 {
+		return json.Marshal(req)
+	}
+
+	// Create a copy of the request to avoid mutating the original
+	reqCopy := *req
+
+	// Initialize Extra map if nil
+	if reqCopy.Extra == nil {
+		reqCopy.Extra = make(map[string]json.RawMessage)
+	}
+
+	// Merge model defaults (ExtraBody) with user-provided Extra
+	// User values take precedence
+	for k, v := range c.cfg.ExtraBody {
+		if _, exists := reqCopy.Extra[k]; !exists {
+			data, err := json.Marshal(v)
+			if err != nil {
+				return nil, fmt.Errorf("marshal extra_body field %q: %w", k, err)
+			}
+			reqCopy.Extra[k] = data
+		}
+	}
+
+	return json.Marshal(&reqCopy)
+}
+
+func (c *Client) marshalRequestWithStream(req *llmtypes.Request) ([]byte, error) {
+	reqCopy := *req
+	t := true
+	reqCopy.Stream = &t
+	return c.marshalRequest(&reqCopy)
+}
 
 func (c *Client) newRequest(ctx context.Context, accept string, body []byte) (*http.Request, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL+"/chat/completions", bytes.NewReader(body))

@@ -1,0 +1,3 @@
+alias: deepseek-pro
+chain:
+  - deepseek-v4-pro

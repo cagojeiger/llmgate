@@ -1,4 +1,5 @@
 # Anthropic 프로토콜, 최신 + 빠른 응답
+# context: 204,800 tokens / max output: 131,072 tokens
 id: minimax-m2.7
 vendor: opencode
 protocol: anthropic

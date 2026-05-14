@@ -1,4 +1,5 @@
 # 멀티모달 (text/image)
+# context: 1,000,000 tokens / max output: 128,000 tokens
 id: mimo-v2.5
 vendor: opencode
 protocol: openai

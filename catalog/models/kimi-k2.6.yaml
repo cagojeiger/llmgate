@@ -1,4 +1,5 @@
 # 긴 컨텍스트 + vision, tool calling 강점
+# context: 262,144 tokens / max output: 65,536 tokens
 id: kimi-k2.6
 vendor: opencode
 protocol: openai

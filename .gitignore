@@ -14,3 +14,4 @@ uv.lock
 # catalog-diff agent artifacts (runtime output, never commit)
 /manifest.yaml
 /pr-body.md
+.sisyphus/

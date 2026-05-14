@@ -11,3 +11,6 @@ protocol: openai             # openai | anthropic 둘 중 하나.
 base_url: https://api.example.com/v1
 auth_env: LLMGATE_EXAMPLE_API_KEY  # env 변수 *이름* (값은 부팅 시 factory 가 읽음).
 auth_scheme: bearer          # bearer | x-api-key 둘 중 하나.
+# extra_body:                  # (선택) 모델별 기본 extra 파라미터. 모든 요청 body에
+#   thinking:                  # 자동 병합되며, 호출자가 같은 키를 보내면 호출자 값 우선.
+#     type: disabled           # 주 용도: thinking 모드 기본 off, 고정 reasoning budget 등.

@@ -1,4 +1,5 @@
 # 최강 reasoning, 복잡한 문제 해결에 최적
+# context: 1,000,000 tokens / max output: 384,000 tokens
 id: deepseek-v4-pro
 vendor: opencode
 protocol: openai

@@ -1,0 +1,3 @@
+alias: tier-1m-fast
+chain:
+  - deepseek-v4-flash

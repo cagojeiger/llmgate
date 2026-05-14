@@ -1,4 +1,5 @@
 # 저렴 + 초고속, 경량 reasoning
+# context: 1,000,000 tokens / max output: 384,000 tokens
 id: deepseek-v4-flash
 vendor: opencode
 protocol: openai

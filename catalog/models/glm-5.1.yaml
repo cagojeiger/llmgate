@@ -1,4 +1,5 @@
 # Claude-like 행동, orchestration 에 최적
+# context: 204,800 tokens / max output: 131,072 tokens
 id: glm-5.1
 vendor: opencode
 protocol: openai

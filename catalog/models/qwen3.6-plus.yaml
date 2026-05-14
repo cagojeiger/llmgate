@@ -1,4 +1,5 @@
 # 코딩/문서 작업에 강점, 상세 reasoning
+# context: 262,144 tokens / max output: 65,536 tokens
 id: qwen3.6-plus
 vendor: opencode
 protocol: openai

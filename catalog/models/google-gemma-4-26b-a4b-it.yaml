@@ -1,0 +1,8 @@
+# Google DeepMind MoE (25.2B total / 3.8B active), 256K context, Apache 2.0
+# context: 262,144 tokens / max output: 262,144 tokens
+id: google/gemma-4-26b-a4b-it
+vendor: openrouter
+protocol: openai
+base_url: https://openrouter.ai/api/v1
+auth_env: LLMGATE_OPENROUTER_API_KEY
+auth_scheme: bearer

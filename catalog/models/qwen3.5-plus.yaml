@@ -1,4 +1,5 @@
 # 가성비 reasoning (가장 저렴)
+# context: 262,144 tokens / max output: 65,536 tokens
 id: qwen3.5-plus
 vendor: opencode
 protocol: openai

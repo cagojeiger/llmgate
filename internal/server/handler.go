@@ -27,6 +27,7 @@ type Handler struct {
 	service        ChatService
 	log            *slog.Logger
 	recorder       audit.Recorder
+	callRecorder   audit.CallRecorder
 	requestTimeout time.Duration
 	stream         *streamRelay
 }
@@ -36,17 +37,21 @@ type HandlerConfig struct {
 	StreamIdleTimeout time.Duration
 }
 
-func NewHandler(service ChatService, log *slog.Logger, recorder audit.Recorder, cfg HandlerConfig) *Handler {
+func NewHandler(service ChatService, log *slog.Logger, recorder audit.Recorder, callRecorder audit.CallRecorder, cfg HandlerConfig) *Handler {
 	if log == nil {
 		log = slog.Default()
 	}
 	if recorder == nil {
 		recorder = audit.Nop{}
 	}
+	if callRecorder == nil {
+		callRecorder = &nopCallRecorder{}
+	}
 	return &Handler{
 		service:        service,
 		log:            log,
 		recorder:       recorder,
+		callRecorder:   callRecorder,
 		requestTimeout: cfg.RequestTimeout,
 		stream:         newStreamRelay(log, cfg.StreamIdleTimeout),
 	}
@@ -63,19 +68,26 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	consumer := ConsumerFromContext(ctx)
-	rec := &audit.Record{
+	common := audit.EventCommon{
 		Timestamp:     start,
 		RequestID:     RequestIDFromContext(ctx),
 		Operation:     "chat.completions",
 		ConsumerName:  consumer.Name,
 		ConsumerKeyID: consumer.KeyID,
 	}
+	rec := &audit.Record{EventCommon: common}
+	var call *audit.CallRecord
+
 	defer func() {
 		rec.DurationMS = time.Since(start).Milliseconds()
-		h.recorder.Record(ctx, rec)
+		h.recorder.RecordAudit(ctx, rec)
+		if call != nil {
+			call.DurationMS = rec.DurationMS
+			call.StatusCode = rec.StatusCode
+			call.Kind = rec.Kind
+			h.callRecorder.RecordCall(ctx, call)
+		}
 	}()
-	// Registered after the audit defer so it runs first and stamps the
-	// record before the audit-always hook observes it.
 	defer func() {
 		if p := recover(); p != nil {
 			h.recoverPanic(ctx, w, rec, p)
@@ -83,12 +95,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	if consumer.AuthError != "" {
-		// Auth middleware ran but rejected; emit the audit record
-		// (audit-always — ADR 003) and return 401. The specific
-		// audit.AuthError stays out of the wire response — callers see
-		// only "unauthorized" — but is stamped on rec.AuthError so
-		// audit/access-log surfaces show "missing" vs "format" vs
-		// "unknown" for operators.
 		rec.AuthError = consumer.AuthError
 		perr := &llmtypes.Error{Kind: llmtypes.KindAuth, Message: "unauthorized"}
 		adoptError(rec, perr)
@@ -103,7 +109,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, perr)
 		return
 	}
-	rec.RequestBytes = int64(len(body))
+	requestBytes := int64(len(body))
 
 	req := &llmtypes.Request{}
 	if err := json.Unmarshal(body, req); err != nil {
@@ -112,7 +118,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, perr)
 		return
 	}
-	rec.ModelRequested = req.Model
 	if req.Model != "" && !isModelAllowed(req.Model, consumer.AllowedAliases) {
 		perr := &llmtypes.Error{Kind: llmtypes.KindForbidden, Message: "model not allowed"}
 		adoptError(rec, perr)
@@ -120,12 +125,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	call = &audit.CallRecord{
+		ModelRequested: req.Model,
+		RequestBytes:   requestBytes,
+	}
+
 	if req.Stream != nil && *req.Stream {
 		rec.Operation = "chat.completions.stream"
-		h.serveStream(w, r, req, rec)
+		call.Operation = "chat.completions.stream"
+		h.serveStream(w, r, req, rec, call)
 		return
 	}
-	h.serveComplete(w, r, req, rec)
+	h.serveComplete(w, r, req, rec, call)
 }
 
 func isModelAllowed(model string, allowed []string) bool {
@@ -140,53 +151,43 @@ func isModelAllowed(model string, allowed []string) bool {
 	return false
 }
 
-// recoverPanic stamps panic outcomes for audit, preserves
-// http.ErrAbortHandler's abort semantics, and avoids writing a JSON
-// envelope after a streaming response has already started.
 func (h *Handler) recoverPanic(ctx context.Context, w http.ResponseWriter, rec *audit.Record, p any) {
 	if p == http.ErrAbortHandler {
 		panic(p)
 	}
 	rec.Kind = llmtypes.KindPanic
-	// Audit status records the outcome, so a panic overrides any prior
-	// status stamp such as the 200 set when SSE headers flush.
 	rec.StatusCode = http.StatusInternalServerError
 	h.log.LogAttrs(ctx, slog.LevelError, "handler panic",
 		slog.String("request_id", rec.RequestID),
 		slog.Any("panic", p),
 		slog.String("stack", string(debug.Stack())),
 	)
-	// A second WriteHeader is ignored, but body bytes would still corrupt
-	// an in-flight SSE stream.
 	if cw, ok := w.(*countingWriter); ok && cw.wroteHeader {
 		return
 	}
 	writeError(w, &llmtypes.Error{Kind: llmtypes.KindUnknown, Message: "internal server error"})
 }
 
-// adoptRoute copies routing metadata onto rec.
-func adoptRoute(rec *audit.Record, result *llmrouter.RouteResult) {
+func adoptRouteCall(call *audit.CallRecord, result *llmrouter.RouteResult) {
 	if result == nil {
 		return
 	}
-	rec.Attempts = result.Attempts
-	rec.Vendor = result.Vendor
-	rec.ModelUsed = result.ModelUsed
+	call.Attempts = result.Attempts
+	call.Vendor = result.Vendor
+	call.ModelUsed = result.ModelUsed
 }
 
-// adoptError populates rec.Kind and rec.StatusCode from err.
 func adoptError(rec *audit.Record, err error) {
 	rec.Kind = llmtypes.ErrorKindOf(err)
 	rec.StatusCode = errStatus(err)
 }
 
-// adoptStreamSummary finalizes stream audit fields after the stream ends.
-func adoptStreamSummary(rec *audit.Record, sum *llmtypes.Summary, now time.Time) {
-	if len(rec.Attempts) > 0 {
-		last := &rec.Attempts[len(rec.Attempts)-1]
+func adoptStreamSummaryCall(call *audit.CallRecord, sum *llmtypes.Summary, now time.Time) {
+	if len(call.Attempts) > 0 {
+		last := &call.Attempts[len(call.Attempts)-1]
 		last.DurationMS = now.Sub(last.StartedAt).Milliseconds()
-		if last.Kind == "" && rec.Kind != "" {
-			last.Kind = rec.Kind
+		if last.Kind == "" && call.Kind != "" {
+			last.Kind = call.Kind
 		}
 		if sum != nil {
 			if sum.Usage != nil {
@@ -201,16 +202,16 @@ func adoptStreamSummary(rec *audit.Record, sum *llmtypes.Summary, now time.Time)
 		return
 	}
 	if sum.Usage != nil {
-		rec.Usage = sum.Usage
+		call.Usage = sum.Usage
 	}
 	if sum.VendorCost != "" {
-		rec.VendorCost = sum.VendorCost
+		call.VendorCost = sum.VendorCost
 	}
 }
 
-func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *llmtypes.Request, rec *audit.Record) {
+func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *llmtypes.Request, rec *audit.Record, call *audit.CallRecord) {
 	result, err := h.service.Complete(r.Context(), req)
-	adoptRoute(rec, result)
+	adoptRouteCall(call, result)
 	if err != nil {
 		adoptError(rec, err)
 		writeError(w, err)
@@ -226,28 +227,29 @@ func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *llm
 	}
 
 	rec.StatusCode = http.StatusOK
+	call.ResponseBytes = int64(len(out))
 	if result.Response != nil {
-		rec.Usage = result.Response.Usage
+		call.Usage = result.Response.Usage
 		if cost, ok := result.Response.Extra["cost"]; ok && len(cost) > 0 {
-			rec.VendorCost = string(cost)
+			call.VendorCost = string(cost)
 		}
 	}
-	rec.ResponseBytes = int64(len(out))
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if _, werr := w.Write(out); werr != nil {
 		rec.Kind = llmtypes.KindClientClosed
+		call.Kind = rec.Kind
 		h.log.LogAttrs(r.Context(), slog.LevelInfo, "client write failed",
-			slog.String("vendor", rec.Vendor),
+			slog.String("vendor", call.Vendor),
 			slog.String("err", werr.Error()),
 		)
 	}
 }
 
-func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *llmtypes.Request, rec *audit.Record) {
+func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *llmtypes.Request, rec *audit.Record, call *audit.CallRecord) {
 	result, err := h.service.CompleteStream(r.Context(), req)
-	adoptRoute(rec, result)
+	adoptRouteCall(call, result)
 	if err != nil {
 		adoptError(rec, err)
 		writeError(w, err)
@@ -255,7 +257,13 @@ func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *llmty
 	}
 	stream := result.Stream
 	defer stream.Close()
-	defer func() { adoptStreamSummary(rec, stream.Summary(), time.Now()) }()
+	defer func() { adoptStreamSummaryCall(call, stream.Summary(), time.Now()) }()
 
-	h.stream.Run(r.Context(), w, stream, rec)
+	call.DurationMS = 0 // reset; stream_relay stamps this on rec, defer copies it
+	h.stream.Run(r.Context(), w, stream, rec, call)
 }
+
+type nopCallRecorder struct{}
+
+func (nopCallRecorder) RecordCall(context.Context, *audit.CallRecord) {}
+func (nopCallRecorder) Close() error                                   { return nil }

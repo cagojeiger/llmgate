@@ -27,7 +27,7 @@ type recordingRecorder struct {
 	records []audit.Record
 }
 
-func (r *recordingRecorder) Record(_ context.Context, rec *audit.Record) {
+func (r *recordingRecorder) RecordAudit(_ context.Context, rec *audit.Record) {
 	r.records = append(r.records, *rec)
 }
 func (r *recordingRecorder) Close() error { return nil }
@@ -212,7 +212,7 @@ func TestServer_AuthIntegration(t *testing.T) {
 		Vendor:    "anthropic",
 		ModelUsed: "claude-x",
 	}}
-	handler := NewHandler(stub, logger, rec, HandlerConfig{})
+	handler := NewHandler(stub, logger, rec, nil, HandlerConfig{})
 	srv := New(&config.Server{Addr: ":0"}, logger, handler, store, NewProbeState())
 	ts := httptest.NewServer(srv.Handler)
 	defer ts.Close()
@@ -298,7 +298,7 @@ func TestServer_AllowedAliasesRejectDisallowedModel(t *testing.T) {
 		stubCalled = true
 		return stub.resp, nil
 	}
-	handler := NewHandler(stub, logger, rec, HandlerConfig{})
+	handler := NewHandler(stub, logger, rec, nil, HandlerConfig{})
 	srv := New(&config.Server{Addr: ":0"}, logger, handler, store, NewProbeState())
 	ts := httptest.NewServer(srv.Handler)
 	defer ts.Close()
@@ -323,8 +323,8 @@ func TestServer_AllowedAliasesRejectDisallowedModel(t *testing.T) {
 		t.Fatalf("records = %d, want 1", len(rec.records))
 	}
 	got := rec.records[0]
-	if got.ConsumerName != "alpha" || got.ModelRequested != "smart" {
-		t.Fatalf("audit identity/model = %q/%q, want alpha/smart", got.ConsumerName, got.ModelRequested)
+	if got.ConsumerName != "alpha" {
+		t.Fatalf("audit identity = %q, want alpha", got.ConsumerName)
 	}
 	if got.Kind != llmtypes.KindForbidden || got.StatusCode != http.StatusForbidden {
 		t.Fatalf("audit kind/status = %q/%d, want forbidden/403", got.Kind, got.StatusCode)
@@ -338,7 +338,7 @@ func TestServer_HealthzPublic(t *testing.T) {
 	// Smoke-only: probes are unauthenticated even when consumers are
 	// registered. Detailed probe-state coverage lives in probe_test.go.
 	store := writeStoreYAML(t, "alpha", "good-key")
-	handler := NewHandler(&stubService{}, slog.Default(), &recordingRecorder{}, HandlerConfig{})
+	handler := NewHandler(&stubService{}, slog.Default(), &recordingRecorder{}, nil, HandlerConfig{})
 	srv := New(&config.Server{Addr: ":0"}, slog.Default(), handler, store, NewProbeState())
 	ts := httptest.NewServer(srv.Handler)
 	defer ts.Close()

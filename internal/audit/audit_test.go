@@ -20,15 +20,17 @@ func newCapturingLogger() (*slog.Logger, *bytes.Buffer) {
 
 func TestSlogRecorder_RecordSuccess(t *testing.T) {
 	log, buf := newCapturingLogger()
-	r := NewSlogRecorder(log)
+	r := NewSlogCallRecorder(log)
 
-	rec := &Record{
-		Timestamp:      time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
-		RequestID:      "req-1",
-		Operation:      "chat.completions",
+	rec := &CallRecord{
+		EventCommon: EventCommon{
+			Timestamp:  time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
+			RequestID:  "req-1",
+			Operation:  "chat.completions",
+			StatusCode: 200,
+			DurationMS: 234,
+		},
 		ModelRequested: "deepseek-v4-flash",
-		StatusCode:     200,
-		DurationMS:     234,
 		RequestBytes:   100,
 		ResponseBytes:  500,
 		Usage: &llmtypes.Usage{
@@ -38,14 +40,14 @@ func TestSlogRecorder_RecordSuccess(t *testing.T) {
 		},
 		VendorCost: "0.001",
 	}
-	r.Record(context.Background(), rec)
+	r.RecordCall(context.Background(), rec)
 
 	var out map[string]any
 	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
 		t.Fatalf("unmarshal log line: %v", err)
 	}
-	if out["msg"] != "audit" {
-		t.Errorf("msg = %v, want audit", out["msg"])
+	if out["msg"] != "call" {
+		t.Errorf("msg = %v, want call", out["msg"])
 	}
 	if out["operation"] != "chat.completions" {
 		t.Errorf("operation = %v, want chat.completions", out["operation"])
@@ -73,14 +75,15 @@ func TestSlogRecorder_RecordAuthFields(t *testing.T) {
 	log, buf := newCapturingLogger()
 	r := NewSlogRecorder(log)
 
-	r.Record(context.Background(), &Record{
-		Timestamp:      time.Now(),
-		RequestID:      "req-auth-ok",
-		Operation:      "chat.completions",
-		ModelRequested: "deepseek-v4-flash",
-		ConsumerName:   "alpha",
-		ConsumerKeyID:  "01234567",
-		StatusCode:     200,
+	r.RecordAudit(context.Background(), &Record{
+		EventCommon: EventCommon{
+			Timestamp:     time.Now(),
+			RequestID:     "req-auth-ok",
+			Operation:     "chat.completions",
+			ConsumerName:  "alpha",
+			ConsumerKeyID: "01234567",
+			StatusCode:    200,
+		},
 	})
 
 	var out map[string]any
@@ -105,14 +108,15 @@ func TestSlogRecorder_RecordAuthFailure(t *testing.T) {
 	log, buf := newCapturingLogger()
 	r := NewSlogRecorder(log)
 
-	r.Record(context.Background(), &Record{
-		Timestamp:      time.Now(),
-		RequestID:      "req-auth-bad",
-		Operation:      "chat.completions",
-		ModelRequested: "",
-		AuthError:      AuthErrorUnknown,
-		Kind:           llmtypes.KindAuth,
-		StatusCode:     401,
+	r.RecordAudit(context.Background(), &Record{
+		EventCommon: EventCommon{
+			Timestamp:  time.Now(),
+			RequestID:  "req-auth-bad",
+			Operation:  "chat.completions",
+			Kind:       llmtypes.KindAuth,
+			StatusCode: 401,
+		},
+		AuthError: AuthErrorUnknown,
 	})
 
 	var out map[string]any
@@ -132,16 +136,18 @@ func TestSlogRecorder_RecordAuthFailure(t *testing.T) {
 
 func TestSlogRecorder_RecordError(t *testing.T) {
 	log, buf := newCapturingLogger()
-	r := NewSlogRecorder(log)
+	r := NewSlogCallRecorder(log)
 
-	r.Record(context.Background(), &Record{
-		Timestamp:      time.Now(),
-		RequestID:      "req-2",
-		Operation:      "chat.completions",
+	r.RecordCall(context.Background(), &CallRecord{
+		EventCommon: EventCommon{
+			Timestamp:  time.Now(),
+			RequestID:  "req-2",
+			Operation:  "chat.completions",
+			StatusCode: 429,
+			Kind:       llmtypes.KindRateLimit,
+			DurationMS: 50,
+		},
 		ModelRequested: "kimi-k2.6",
-		StatusCode:     429,
-		Kind:           llmtypes.KindRateLimit,
-		DurationMS:     50,
 	})
 
 	var out map[string]any
@@ -159,7 +165,7 @@ func TestSlogRecorder_RecordError(t *testing.T) {
 func TestSlogRecorder_RecordNil(t *testing.T) {
 	log, buf := newCapturingLogger()
 	r := NewSlogRecorder(log)
-	r.Record(context.Background(), nil)
+	r.RecordAudit(context.Background(), nil)
 	if buf.Len() != 0 {
 		t.Errorf("nil record should emit nothing, got %s", buf.String())
 	}
@@ -167,16 +173,18 @@ func TestSlogRecorder_RecordNil(t *testing.T) {
 
 func TestSlogRecorder_FallbackFields(t *testing.T) {
 	log, buf := newCapturingLogger()
-	r := NewSlogRecorder(log)
+	r := NewSlogCallRecorder(log)
 
-	r.Record(context.Background(), &Record{
-		Timestamp:      time.Now(),
-		RequestID:      "req-3",
-		Operation:      "chat.completions",
+	r.RecordCall(context.Background(), &CallRecord{
+		EventCommon: EventCommon{
+			Timestamp:  time.Now(),
+			RequestID:  "req-3",
+			Operation:  "chat.completions",
+			StatusCode: 200,
+		},
 		ModelRequested: "coder",
 		Vendor:         "opencode",
 		ModelUsed:      "deepseek-v4-flash",
-		StatusCode:     200,
 		Usage:          &llmtypes.Usage{PromptTokens: 5, CompletionTokens: 7, TotalTokens: 12},
 		Attempts: []llmtypes.Attempt{
 			{Vendor: "opencode", Model: "deepseek-v4-pro", DurationMS: 80, Kind: llmtypes.KindRateLimit, StatusCode: 429},
@@ -205,16 +213,18 @@ func TestSlogRecorder_FallbackFields(t *testing.T) {
 
 func TestSlogRecorder_OmitsAttemptsWhenSingle(t *testing.T) {
 	log, buf := newCapturingLogger()
-	r := NewSlogRecorder(log)
+	r := NewSlogCallRecorder(log)
 
-	r.Record(context.Background(), &Record{
-		Timestamp:      time.Now(),
-		RequestID:      "req-4",
-		Operation:      "chat.completions",
+	r.RecordCall(context.Background(), &CallRecord{
+		EventCommon: EventCommon{
+			Timestamp:  time.Now(),
+			RequestID:  "req-4",
+			Operation:  "chat.completions",
+			StatusCode: 200,
+		},
 		ModelRequested: "deepseek-v4-flash",
 		Vendor:         "opencode",
 		ModelUsed:      "deepseek-v4-flash",
-		StatusCode:     200,
 		Attempts: []llmtypes.Attempt{
 			{Vendor: "opencode", Model: "deepseek-v4-flash", StatusCode: 200},
 		},
@@ -239,7 +249,7 @@ type captureRecorder struct {
 	err   error
 }
 
-func (c *captureRecorder) Record(_ context.Context, r *Record) {
+func (c *captureRecorder) RecordAudit(_ context.Context, r *Record) {
 	c.calls = append(c.calls, r)
 }
 
@@ -248,7 +258,7 @@ func (c *captureRecorder) Close() error { return c.err }
 func TestRecorders(t *testing.T) {
 	a, b := &captureRecorder{}, &captureRecorder{}
 	c := Recorders{a, b}
-	c.Record(context.Background(), &Record{ModelRequested: "m"})
+	c.RecordAudit(context.Background(), &Record{})
 
 	if len(a.calls) != 1 || len(b.calls) != 1 {
 		t.Errorf("each recorder should have 1 call, got a=%d b=%d", len(a.calls), len(b.calls))
@@ -258,7 +268,7 @@ func TestRecorders(t *testing.T) {
 func TestRecorders_NilElement(t *testing.T) {
 	a := &captureRecorder{}
 	c := Recorders{nil, a, nil}
-	c.Record(context.Background(), &Record{ModelRequested: "m"})
+	c.RecordAudit(context.Background(), &Record{})
 	if len(a.calls) != 1 {
 		t.Errorf("non-nil element should still receive: %d", len(a.calls))
 	}
@@ -286,7 +296,7 @@ func TestRecorders_CloseReturnsFirstErrButStillRunsRest(t *testing.T) {
 
 func TestNop(t *testing.T) {
 	var n Nop
-	n.Record(context.Background(), &Record{ModelRequested: "x"})
+	n.RecordAudit(context.Background(), &Record{})
 	if err := n.Close(); err != nil {
 		t.Errorf("Nop.Close = %v, want nil", err)
 	}

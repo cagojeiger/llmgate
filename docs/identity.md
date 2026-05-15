@@ -15,8 +15,9 @@
 | 라우팅 정책 + 서버 런타임 | env → Server config | 프로세스 수명 |
 | 회로 차단 상태 | `llmrouter.Service` breakerStore (per-process) | 프로세스 수명 |
 | 호출자 lookup | consumers Store (per-process) | 프로세스 수명 |
-| 요청별 시도 이력 | Result → Record | 요청 1 회 |
-| 감사 record | Sink 정책 따라 | Sink 정책 |
+| 요청별 시도 이력 | Result → CallRecord | 요청 1 회 |
+| 운영 / 보안 감사 record | Sink 정책 따라 | Sink 정책 |
+| LLM 호출 결과 record | Sink 정책 따라 | Sink 정책 |
 | 비용 / 한도 / 단가 | **gateway 보관 안 함** | 후처리 시스템 |
 
 ## 의도적 미지원

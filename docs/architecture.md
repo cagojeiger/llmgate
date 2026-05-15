@@ -15,7 +15,7 @@ OpenAI SDK 와이어 호환 게이트웨이. 모델은 *기본 등록 단위*, *
 | [config.md](config.md) | `LLMGATE_*` 환경 변수 |
 | [lifecycle.md](lifecycle.md) | 부팅 시퀀스 + 프로브 + 셧다운 / drain |
 | [request.md](request.md) | 요청 생애주기 + 스트리밍 폴백 경계 |
-| [logs.md](logs.md) | access / audit 두 로그 갈래와 키 스키마 |
+| [logs.md](logs.md) | access / audit / call 로그 갈래와 키 스키마 |
 | [identity.md](identity.md) | 상태 위치 + 의도적 미지원 (V1 거절 목록) |
 | [adr/](adr/) | Accepted 결정 기록 (6개) |
 
@@ -37,6 +37,7 @@ graph LR
         StreamRelay[streamRelay]
         Probe[ProbeState]
         Audit[Audit Recorder]
+        Call[Call Recorder]
     end
 
     subgraph Routing["LLM Routing — standalone service<br/>(internal/llmrouter)"]
@@ -68,7 +69,10 @@ graph LR
     StreamRelay -.SSE chunks.-> Agent
     Handler --> Audit
     StreamRelay --> Audit
+    Handler --> Call
+    StreamRelay --> Call
     Audit --> Sink
+    Call --> Sink
 
     Delivery -.imports.-> Contracts
     Routing -.imports.-> Contracts
@@ -87,10 +91,11 @@ graph LR
 |---|---|---|
 | Delivery | HTTP Server | chi 라우터 + request_id / clientContext / access log / recoverer / read+request timeout. `/v1/chat/completions` (auth 보호), `/healthz/live` · `/healthz/ready` · `/healthz` (공개) |
 | Delivery | auth middleware | `Authorization: Bearer` 추출 → sha256 → consumers Store lookup → ctx 에 ConsumerInfo 기록. 실패해도 short-circuit 안 함 — Handler 가 audit-always emit ([ADR 003](adr/003-consumers.md)) |
-| Delivery | Handler | 요청 디코드, stream / non-stream 분기. ConsumerInfo 로 Record 채움 + auth 실패 시 401. 요청 총 wall-clock 한도의 권위자 ([ADR 005](adr/005-timeout-authority.md)) |
+| Delivery | Handler | 요청 디코드, stream / non-stream 분기. ConsumerInfo 로 audit / call record 공통 키를 채움 + auth 실패 시 401. 요청 총 wall-clock 한도의 권위자 ([ADR 005](adr/005-timeout-authority.md)) |
 | Delivery | streamRelay | 스트림 열린 뒤 SSE wire transcript. 이벤트 전송, idle timeout, client_closed, mid-stream error, `[DONE]` ([ADR 004](adr/004-fallback-policy.md)). 스트림 idle 한도의 권위자 ([ADR 005](adr/005-timeout-authority.md)) |
 | Delivery | ProbeState | SIGTERM 시 `MarkShuttingDown()` → readiness 만 503. liveness · in-flight 영향 없음 |
-| Delivery | Audit Recorder | 요청당 1 개 fact record. consumer_name + consumer_key_id + auth_error 포함 — *누가 / 왜 실패* 의 사실 |
+| Delivery | Audit Recorder | 요청당 1 개 운영 / 보안 fact record. consumer_name + consumer_key_id + auth_error 포함 — *누가 / 왜 실패* 의 사실 |
+| Delivery | Call Recorder | LLM 호출이 시도된 요청당 1 개 호출 결과 fact. model / vendor / usage / attempts 포함 — 후처리와 메시징 stream 의 입력 |
 | Routing | llmrouter.Service | 별명 → chain 해석, 폴백 적격 판정, 회로 차단 ([ADR 004](adr/004-fallback-policy.md)). non-stream 시도당 한도의 권위자 ([ADR 005](adr/005-timeout-authority.md)). stdlib + llmtypes 만 import |
 | Providers | OpenAI Adapter | OpenAI 와이어 호출. status 분류 + 첫 이벤트 검증 ([ADR 004](adr/004-fallback-policy.md)) |
 | Providers | Anthropic Adapter | Anthropic ↔ OpenAI 와이어 양방향 변환 (tools / tool_choice / tool_calls / tool_use). status 분류 + 첫 이벤트 검증 ([ADR 004](adr/004-fallback-policy.md)) |
@@ -116,7 +121,7 @@ internal/providers/          벤더 어댑터
 internal/llmrouter/          별명 → chain, 폴백, 회로 (service.go + breaker.go)
 internal/streaming/          스트림 시작 검증 + close grace helper
 internal/server/             chi + middleware + auth + handler + streamRelay + probes
-internal/audit/              Recorder + SlogRecorder (stdout)
+internal/audit/              Audit / call record + SlogRecorder (stdout)
 cmd/llmgate/                 wiring + shutdown
 scripts/gen-consumer.sh      호출자 발급 헬퍼
 docs/adr/                    Accepted 결정 기록

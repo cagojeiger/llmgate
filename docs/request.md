@@ -2,7 +2,7 @@
 
 ← [architecture.md](architecture.md) 로 돌아가기
 
-요청 1 회가 어떤 컴포넌트를 어떤 순서로 거쳐 audit record 1 행으로 끝나는가.
+요청 1 회가 어떤 컴포넌트를 어떤 순서로 거쳐 audit record 와 call record 로 끝나는가.
 
 ## 요청 생애주기
 
@@ -14,17 +14,23 @@ sequenceDiagram
     participant S as llmrouter.Service
     participant P as Adapter
     participant Au as Audit
+    participant Ca as Call
 
     A->>M: POST /v1/chat/completions<br/>Authorization: Bearer ...
     Note over M: sha256(raw) lookup → ConsumerInfo on ctx<br/>(audit-always: pass through on failure)
     M->>H: next(r)
-    Note over H: ConsumerInfo → Record<br/>(auth 실패 시 401 emit + return)
+    Note over H: ConsumerInfo → Audit Record<br/>(auth 실패 시 401 emit + return)
     H->>S: Complete(req)
     Note over S: 별명 해석 → chain 시도<br/>실패마다 Attempt 누적
     S-->>H: Result
     H-->>A: 200 OK
     H->>Au: Record (consumer_name + key_id + (auth_error?))
+    H->>Ca: CallRecord (model/vendor/usage/attempts)
 ```
+
+`Audit Record` 는 요청당 1 행이다. auth 실패, bad request, panic 도 남긴다. `CallRecord` 는
+LLM 호출이 시도된 요청만 남긴다 — vendor 호출 전 끝난 요청은 운영 / 보안 증적으로 충분하므로
+call stream 을 오염시키지 않는다.
 
 ## 스트리밍 폴백 경계
 
@@ -51,5 +57,5 @@ request context 를 그대로 넘긴다 ([ADR 005](adr/005-timeout-authority.md)
 
 Handler 가 200 OK 를 커밋한 뒤에는 streamRelay 가 SSE 전송. 이벤트 사이 idle 은
 `LLMGATE_STREAM_IDLE_TIMEOUT`, end-of-stream 에서 `Stream.Summary()` 로 usage / finish
-reason 을 audit 에 finalize. mid-stream 폴백 거부 근거 (HTTP 시맨틱 / SDK 호환 / record
+reason 을 call record 에 finalize. mid-stream 폴백 거부 근거 (HTTP 시맨틱 / SDK 호환 / record
 무결성) 는 [ADR 004](adr/004-fallback-policy.md).

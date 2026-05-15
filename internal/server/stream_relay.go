@@ -32,20 +32,21 @@ func newStreamRelay(log *slog.Logger, idleTimeout time.Duration) *streamRelay {
 }
 
 // Run drives the SSE wire response. Returns when the stream has been
-// fully drained or a terminal condition was reached. rec is mutated in
+// fully drained or a terminal condition was reached. rec/call are mutated in
 // place: StatusCode, ResponseBytes, Kind. The caller's deferred
-// stream.Close() and adoptStreamSummary() finalize the rest.
-func (s *streamRelay) Run(ctx context.Context, w http.ResponseWriter, stream llmtypes.Stream, rec *audit.Record) {
+// stream.Close() and adoptStreamSummaryCall() finalize the rest.
+func (s *streamRelay) Run(ctx context.Context, w http.ResponseWriter, stream llmtypes.Stream, rec *audit.Record, call *audit.CallRecord) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		perr := &llmtypes.Error{Kind: llmtypes.KindUnknown, Message: "streaming unsupported"}
 		adoptError(rec, perr)
+		call.Kind = rec.Kind
 		writeError(w, perr)
 		return
 	}
 
 	sink := newSSEWriter(w, flusher)
-	defer func() { rec.ResponseBytes = sink.Bytes() }()
+	defer func() { call.ResponseBytes = sink.Bytes() }()
 	sink.WriteHeaders()
 	rec.StatusCode = http.StatusOK
 
@@ -53,18 +54,20 @@ func (s *streamRelay) Run(ctx context.Context, w http.ResponseWriter, stream llm
 		event, err := recvWithIdleTimeout(ctx, stream, s.idleTimeout)
 		if errors.Is(err, io.EOF) {
 			if werr := sink.SendDone(); werr != nil {
-				s.recordClientClosed(ctx, rec, werr)
+				s.recordClientClosed(ctx, rec, call, werr)
 			}
 			return
 		}
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				s.recordClientClosed(ctx, rec, err)
+				s.recordClientClosed(ctx, rec, call, err)
 				return
 			}
-			rec.Kind = llmtypes.ErrorKindOf(err)
+			k := llmtypes.ErrorKindOf(err)
+			rec.Kind = k
+			call.Kind = k
 			s.log.LogAttrs(ctx, slog.LevelWarn, "stream receive failed",
-				slog.String("vendor", rec.Vendor),
+				slog.String("vendor", call.Vendor),
 				slog.String("err", err.Error()),
 			)
 			_ = sink.SendError(err)
@@ -76,12 +79,13 @@ func (s *streamRelay) Run(ctx context.Context, w http.ResponseWriter, stream llm
 		if err != nil {
 			perr := &llmtypes.Error{Kind: llmtypes.KindUnknown, Message: "encode stream event: " + err.Error(), Cause: err}
 			rec.Kind = perr.Kind
+			call.Kind = perr.Kind
 			_ = sink.SendError(perr)
 			_ = sink.SendDone()
 			return
 		}
 		if werr := sink.Send(payload); werr != nil {
-			s.recordClientClosed(ctx, rec, werr)
+			s.recordClientClosed(ctx, rec, call, werr)
 			return
 		}
 	}
@@ -90,10 +94,11 @@ func (s *streamRelay) Run(ctx context.Context, w http.ResponseWriter, stream llm
 // recordClientClosed marks rec terminal state as a client disconnect.
 // Caller should return immediately afterwards — further writes would
 // fail the same way and SendDone would too.
-func (s *streamRelay) recordClientClosed(ctx context.Context, rec *audit.Record, werr error) {
+func (s *streamRelay) recordClientClosed(ctx context.Context, rec *audit.Record, call *audit.CallRecord, werr error) {
 	rec.Kind = llmtypes.KindClientClosed
+	call.Kind = rec.Kind
 	s.log.LogAttrs(ctx, slog.LevelInfo, "client disconnected mid-stream",
-		slog.String("vendor", rec.Vendor),
+		slog.String("vendor", call.Vendor),
 		slog.String("err", werr.Error()),
 	)
 }

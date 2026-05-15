@@ -14,20 +14,20 @@ import (
 	"strings"
 	"testing"
 
-	"llmgate/internal/audit"
 	"llmgate/internal/config"
 	"llmgate/internal/consumers"
 	"llmgate/internal/llmrouter"
 	"llmgate/internal/llmtypes"
+	"llmgate/internal/telemetry"
 )
 
-// recordingRecorder captures every emitted audit Record so tests can
+// recordingRecorder captures every emitted audit event so tests can
 // assert on the audit-always property without standing up a real sink.
 type recordingRecorder struct {
-	records []audit.Record
+	records []telemetry.AuditEvent
 }
 
-func (r *recordingRecorder) RecordAudit(_ context.Context, rec *audit.Record) {
+func (r *recordingRecorder) RecordAudit(_ context.Context, rec *telemetry.AuditEvent) {
 	r.records = append(r.records, *rec)
 }
 func (r *recordingRecorder) Close() error { return nil }
@@ -79,8 +79,8 @@ func writeStoreYAML(t *testing.T, name, rawKey string, allowedAliases ...string)
 func TestClassifyAuth_NoHeader(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	got := classifyAuth(r, nil)
-	if got.AuthError != audit.AuthErrorMissing {
-		t.Fatalf("AuthError = %q, want %q", got.AuthError, audit.AuthErrorMissing)
+	if got.AuthError != telemetry.AuthErrorMissing {
+		t.Fatalf("AuthError = %q, want %q", got.AuthError, telemetry.AuthErrorMissing)
 	}
 	if got.Name != "" || got.KeyID != "" {
 		t.Errorf("consumer info populated on missing header: %+v", got)
@@ -100,8 +100,8 @@ func TestClassifyAuth_BadFormat(t *testing.T) {
 			r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 			r.Header.Set("Authorization", header)
 			got := classifyAuth(r, nil)
-			if got.AuthError != audit.AuthErrorFormat {
-				t.Fatalf("AuthError = %q, want %q (header=%q)", got.AuthError, audit.AuthErrorFormat, header)
+			if got.AuthError != telemetry.AuthErrorFormat {
+				t.Fatalf("AuthError = %q, want %q (header=%q)", got.AuthError, telemetry.AuthErrorFormat, header)
 			}
 		})
 	}
@@ -112,8 +112,8 @@ func TestClassifyAuth_UnknownKey(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	r.Header.Set("Authorization", "Bearer not-issued")
 	got := classifyAuth(r, store)
-	if got.AuthError != audit.AuthErrorUnknown {
-		t.Fatalf("AuthError = %q, want %q", got.AuthError, audit.AuthErrorUnknown)
+	if got.AuthError != telemetry.AuthErrorUnknown {
+		t.Fatalf("AuthError = %q, want %q", got.AuthError, telemetry.AuthErrorUnknown)
 	}
 	if got.Name != "" {
 		t.Errorf("Name = %q, want empty on unknown key", got.Name)
@@ -182,7 +182,7 @@ func TestAuthMiddleware_AlwaysCallsNext(t *testing.T) {
 	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		called = true
 		got := ConsumerFromContext(r.Context())
-		if got.AuthError != audit.AuthErrorUnknown {
+		if got.AuthError != telemetry.AuthErrorUnknown {
 			t.Errorf("ctx AuthError = %q, want unknown", got.AuthError)
 		}
 	})
@@ -223,7 +223,7 @@ func TestServer_AuthIntegration(t *testing.T) {
 		wantStatus    int
 		wantClient    string
 		wantKind      llmtypes.ErrorKind
-		wantAuthError audit.AuthError
+		wantAuthError telemetry.AuthError
 	}
 	cases := []call{
 		{"no-auth", "", http.StatusUnauthorized, "", llmtypes.KindAuth, "missing"},

@@ -1,11 +1,11 @@
-package audit
+package telemetry
 
 import "context"
 
-// Recorders fans each operational Record out to every contained Recorder.
-type Recorders []Recorder
+// AuditRecorders fans each operational AuditEvent out to every contained AuditRecorder.
+type AuditRecorders []AuditRecorder
 
-func (rs Recorders) RecordAudit(ctx context.Context, r *Record) {
+func (rs AuditRecorders) RecordAudit(ctx context.Context, r *AuditEvent) {
 	for _, rec := range rs {
 		if rec == nil {
 			continue
@@ -14,9 +14,9 @@ func (rs Recorders) RecordAudit(ctx context.Context, r *Record) {
 	}
 }
 
-// Close closes every contained Recorder, returning the first error seen
+// Close closes every contained AuditRecorder, returning the first error seen
 // while still attempting the rest.
-func (rs Recorders) Close() error {
+func (rs AuditRecorders) Close() error {
 	var firstErr error
 	for _, rec := range rs {
 		if rec == nil {
@@ -29,10 +29,10 @@ func (rs Recorders) Close() error {
 	return firstErr
 }
 
-// CallRecorders fans each CallRecord out to every contained CallRecorder.
+// CallRecorders fans each CallEvent out to every contained CallRecorder.
 type CallRecorders []CallRecorder
 
-func (rs CallRecorders) RecordCall(ctx context.Context, r *CallRecord) {
+func (rs CallRecorders) RecordCall(ctx context.Context, r *CallEvent) {
 	for _, rec := range rs {
 		if rec == nil {
 			continue

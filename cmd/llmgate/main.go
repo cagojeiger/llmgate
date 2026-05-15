@@ -14,7 +14,6 @@ import (
 
 	"github.com/joho/godotenv"
 
-	"llmgate/internal/audit"
 	"llmgate/internal/catalog"
 	"llmgate/internal/config"
 	"llmgate/internal/consumers"
@@ -23,6 +22,7 @@ import (
 	"llmgate/internal/providers/anthropic"
 	"llmgate/internal/providers/openai"
 	"llmgate/internal/server"
+	"llmgate/internal/telemetry"
 )
 
 // version is set by the linker at build time via
@@ -98,8 +98,8 @@ func run() error {
 		return err
 	}
 
-	recorder := audit.Recorders{audit.NewSlogRecorder(auditLog)}
-	callRecorder := audit.CallRecorders{audit.NewSlogCallRecorder(callLog)}
+	recorder := telemetry.AuditRecorders{telemetry.NewSlogAuditRecorder(auditLog)}
+	callRecorder := telemetry.CallRecorders{telemetry.NewSlogCallRecorder(callLog)}
 	defer func() {
 		if err := recorder.Close(); err != nil {
 			logger.Warn("audit recorder close failed", slog.String("err", err.Error()))

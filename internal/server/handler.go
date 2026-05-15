@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"llmgate/internal/audit"
 	"llmgate/internal/llmrouter"
 	"llmgate/internal/llmtypes"
+	"llmgate/internal/telemetry"
 )
 
 const maxChatRequestBytes = 1 << 20
@@ -26,8 +26,8 @@ type ChatService interface {
 type Handler struct {
 	service        ChatService
 	log            *slog.Logger
-	recorder       audit.Recorder
-	callRecorder   audit.CallRecorder
+	recorder       telemetry.AuditRecorder
+	callRecorder   telemetry.CallRecorder
 	requestTimeout time.Duration
 	stream         *streamRelay
 }
@@ -37,12 +37,12 @@ type HandlerConfig struct {
 	StreamIdleTimeout time.Duration
 }
 
-func NewHandler(service ChatService, log *slog.Logger, recorder audit.Recorder, callRecorder audit.CallRecorder, cfg HandlerConfig) *Handler {
+func NewHandler(service ChatService, log *slog.Logger, recorder telemetry.AuditRecorder, callRecorder telemetry.CallRecorder, cfg HandlerConfig) *Handler {
 	if log == nil {
 		log = slog.Default()
 	}
 	if recorder == nil {
-		recorder = audit.Nop{}
+		recorder = telemetry.NopAuditRecorder{}
 	}
 	if callRecorder == nil {
 		callRecorder = nopCallRecorder{}
@@ -68,22 +68,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	consumer := ConsumerFromContext(ctx)
-	common := audit.EventCommon{
+	common := telemetry.NewEventCommon(telemetry.CommonInput{
 		Timestamp:     start,
 		RequestID:     RequestIDFromContext(ctx),
 		Operation:     "chat.completions",
 		ConsumerName:  consumer.Name,
 		ConsumerKeyID: consumer.KeyID,
-	}
-	rec := &audit.Record{EventCommon: common}
-	var call *audit.CallRecord
+	})
+	rec := telemetry.NewAuditEvent(common)
+	var call *telemetry.CallEvent
 	defer func() {
-		rec.DurationMS = time.Since(start).Milliseconds()
+		telemetry.FinishAuditEvent(rec, rec.StatusCode, rec.Kind, time.Since(start).Milliseconds())
 		h.recorder.RecordAudit(ctx, rec)
-		if call != nil && len(call.Attempts) > 0 {
-			call.DurationMS = rec.DurationMS
-			call.StatusCode = rec.StatusCode
-			call.Kind = rec.Kind
+		if telemetry.CallAttempted(call) {
+			telemetry.FinishCallFromAudit(call, rec)
 			h.callRecorder.RecordCall(ctx, call)
 		}
 	}()
@@ -98,7 +96,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if consumer.AuthError != "" {
 		// Auth middleware ran but rejected; emit the audit record
 		// (audit-always — ADR 003) and return 401. The specific
-		// audit.AuthError stays out of the wire response — callers see
+		// AuthError stays out of the wire response — callers see
 		// only "unauthorized" — but is stamped on rec.AuthError so
 		// audit/access-log surfaces show "missing" vs "format" vs
 		// "unknown" for operators.
@@ -132,11 +130,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	call = &audit.CallRecord{
-		EventCommon:    common,
-		ModelRequested: req.Model,
-		RequestBytes:   requestBytes,
-	}
+	call = telemetry.NewCallEvent(common, req.Model, requestBytes)
 	if req.Stream != nil && *req.Stream {
 		rec.Operation = "chat.completions.stream"
 		call.Operation = "chat.completions.stream"
@@ -161,7 +155,7 @@ func isModelAllowed(model string, allowed []string) bool {
 // recoverPanic stamps panic outcomes for audit, preserves
 // http.ErrAbortHandler's abort semantics, and avoids writing a JSON
 // envelope after a streaming response has already started.
-func (h *Handler) recoverPanic(ctx context.Context, w http.ResponseWriter, rec *audit.Record, p any) {
+func (h *Handler) recoverPanic(ctx context.Context, w http.ResponseWriter, rec *telemetry.AuditEvent, p any) {
 	if p == http.ErrAbortHandler {
 		panic(p)
 	}
@@ -182,53 +176,15 @@ func (h *Handler) recoverPanic(ctx context.Context, w http.ResponseWriter, rec *
 	writeError(w, &llmtypes.Error{Kind: llmtypes.KindUnknown, Message: "internal server error"})
 }
 
-// adoptRouteCall copies routing metadata onto call.
-func adoptRouteCall(call *audit.CallRecord, result *llmrouter.RouteResult) {
-	if result == nil {
-		return
-	}
-	call.Attempts = result.Attempts
-	call.Vendor = result.Vendor
-	call.ModelUsed = result.ModelUsed
-}
-
 // adoptError populates rec.Kind and rec.StatusCode from err.
-func adoptError(rec *audit.Record, err error) {
+func adoptError(rec *telemetry.AuditEvent, err error) {
 	rec.Kind = llmtypes.ErrorKindOf(err)
 	rec.StatusCode = errStatus(err)
 }
 
-// adoptStreamSummaryCall finalizes stream call fields after the stream ends.
-func adoptStreamSummaryCall(call *audit.CallRecord, sum *llmtypes.Summary, now time.Time) {
-	if len(call.Attempts) > 0 {
-		last := &call.Attempts[len(call.Attempts)-1]
-		last.DurationMS = now.Sub(last.StartedAt).Milliseconds()
-		if last.Kind == "" && call.Kind != "" {
-			last.Kind = call.Kind
-		}
-		if sum != nil {
-			if sum.Usage != nil {
-				last.Usage = sum.Usage
-			}
-			if sum.VendorCost != "" {
-				last.VendorCost = sum.VendorCost
-			}
-		}
-	}
-	if sum == nil {
-		return
-	}
-	if sum.Usage != nil {
-		call.Usage = sum.Usage
-	}
-	if sum.VendorCost != "" {
-		call.VendorCost = sum.VendorCost
-	}
-}
-
-func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *llmtypes.Request, rec *audit.Record, call *audit.CallRecord) {
+func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *llmtypes.Request, rec *telemetry.AuditEvent, call *telemetry.CallEvent) {
 	result, err := h.service.Complete(r.Context(), req)
-	adoptRouteCall(call, result)
+	telemetry.AdoptRouteResult(call, result)
 	if err != nil {
 		adoptError(rec, err)
 		writeError(w, err)
@@ -244,19 +200,13 @@ func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *llm
 	}
 
 	rec.StatusCode = http.StatusOK
-	call.ResponseBytes = int64(len(out))
-	if result.Response != nil {
-		call.Usage = result.Response.Usage
-		if cost, ok := result.Response.Extra["cost"]; ok && len(cost) > 0 {
-			call.VendorCost = string(cost)
-		}
-	}
+	telemetry.AdoptResponse(call, result.Response, int64(len(out)))
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if _, werr := w.Write(out); werr != nil {
 		rec.Kind = llmtypes.KindClientClosed
-		call.Kind = rec.Kind
+		telemetry.SetCallKind(call, rec.Kind)
 		h.log.LogAttrs(r.Context(), slog.LevelInfo, "client write failed",
 			slog.String("vendor", call.Vendor),
 			slog.String("err", werr.Error()),
@@ -264,9 +214,9 @@ func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *llm
 	}
 }
 
-func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *llmtypes.Request, rec *audit.Record, call *audit.CallRecord) {
+func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *llmtypes.Request, rec *telemetry.AuditEvent, call *telemetry.CallEvent) {
 	result, err := h.service.CompleteStream(r.Context(), req)
-	adoptRouteCall(call, result)
+	telemetry.AdoptRouteResult(call, result)
 	if err != nil {
 		adoptError(rec, err)
 		writeError(w, err)
@@ -274,12 +224,12 @@ func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *llmty
 	}
 	stream := result.Stream
 	defer stream.Close()
-	defer func() { adoptStreamSummaryCall(call, stream.Summary(), time.Now()) }()
+	defer func() { telemetry.AdoptStreamSummary(call, stream.Summary(), time.Now()) }()
 
 	h.stream.Run(r.Context(), w, stream, rec, call)
 }
 
 type nopCallRecorder struct{}
 
-func (nopCallRecorder) RecordCall(context.Context, *audit.CallRecord) {}
-func (nopCallRecorder) Close() error                                  { return nil }
+func (nopCallRecorder) RecordCall(context.Context, *telemetry.CallEvent) {}
+func (nopCallRecorder) Close() error                                     { return nil }

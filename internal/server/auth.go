@@ -5,22 +5,22 @@ import (
 	"net/http"
 	"strings"
 
-	"llmgate/internal/audit"
 	"llmgate/internal/consumers"
+	"llmgate/internal/telemetry"
 )
 
 // ConsumerInfo describes the registered caller behind a request, populated
 // by the auth middleware on every protected route. Name and KeyID are set
 // only when Authorization successfully matched a registered consumer; on
-// failure AuthError is non-empty and identifies the failure mode so the
-// handler can audit-emit and short-circuit. The middleware *never*
+// failure AuthError is non-empty and identifies the failure mode. The
+// handler emits the audit event and short-circuits. The middleware *never*
 // short-circuits itself — the handler stays the single audit emitter
 // (ADR 001 / ADR 003 audit-always).
 type ConsumerInfo struct {
 	Name           string
 	KeyID          string
 	AllowedAliases []string
-	AuthError      audit.AuthError
+	AuthError      telemetry.AuthError
 }
 
 type consumerCtxKey struct{}
@@ -70,23 +70,23 @@ func authMiddleware(store *consumers.Store) func(http.Handler) http.Handler {
 
 // classifyAuth inspects the Authorization header and looks the bearer
 // token up in store. It deliberately does not log the raw key on any
-// failure path — the audit.AuthError is the only signal that escapes.
+// failure path — AuthError is the only signal that escapes.
 func classifyAuth(r *http.Request, store *consumers.Store) ConsumerInfo {
 	raw := r.Header.Get("Authorization")
 	if raw == "" {
-		return ConsumerInfo{AuthError: audit.AuthErrorMissing}
+		return ConsumerInfo{AuthError: telemetry.AuthErrorMissing}
 	}
 	const prefix = "Bearer "
 	if len(raw) <= len(prefix) || !strings.EqualFold(raw[:len(prefix)], prefix) {
-		return ConsumerInfo{AuthError: audit.AuthErrorFormat}
+		return ConsumerInfo{AuthError: telemetry.AuthErrorFormat}
 	}
 	key := strings.TrimSpace(raw[len(prefix):])
 	if key == "" {
-		return ConsumerInfo{AuthError: audit.AuthErrorFormat}
+		return ConsumerInfo{AuthError: telemetry.AuthErrorFormat}
 	}
 	info, ok := store.LookupInfo(key)
 	if !ok {
-		return ConsumerInfo{AuthError: audit.AuthErrorUnknown}
+		return ConsumerInfo{AuthError: telemetry.AuthErrorUnknown}
 	}
 	return ConsumerInfo{Name: info.Name, KeyID: info.KeyID, AllowedAliases: info.AllowedAliases}
 }

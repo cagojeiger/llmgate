@@ -1,4 +1,4 @@
-package audit
+package telemetry
 
 import (
 	"bytes"
@@ -18,11 +18,11 @@ func newCapturingLogger() (*slog.Logger, *bytes.Buffer) {
 	return slog.New(h), buf
 }
 
-func TestSlogRecorder_RecordAudit(t *testing.T) {
+func TestSlogAuditRecorder_RecordAudit(t *testing.T) {
 	log, buf := newCapturingLogger()
-	r := NewSlogRecorder(log)
+	r := NewSlogAuditRecorder(log)
 
-	r.RecordAudit(context.Background(), &Record{
+	r.RecordAudit(context.Background(), &AuditEvent{
 		EventCommon: EventCommon{
 			Timestamp:     time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
 			RequestID:     "req-1",
@@ -52,11 +52,11 @@ func TestSlogRecorder_RecordAudit(t *testing.T) {
 	}
 }
 
-func TestSlogRecorder_RecordAuthFailure(t *testing.T) {
+func TestSlogAuditRecorder_RecordAuthFailure(t *testing.T) {
 	log, buf := newCapturingLogger()
-	r := NewSlogRecorder(log)
+	r := NewSlogAuditRecorder(log)
 
-	r.RecordAudit(context.Background(), &Record{
+	r.RecordAudit(context.Background(), &AuditEvent{
 		EventCommon: EventCommon{
 			Timestamp:  time.Now(),
 			RequestID:  "req-auth-bad",
@@ -83,7 +83,7 @@ func TestSlogCallRecorder_RecordCall(t *testing.T) {
 	log, buf := newCapturingLogger()
 	r := NewSlogCallRecorder(log)
 
-	r.RecordCall(context.Background(), &CallRecord{
+	r.RecordCall(context.Background(), &CallEvent{
 		EventCommon: EventCommon{
 			Timestamp:     time.Now(),
 			RequestID:     "req-call",
@@ -129,7 +129,7 @@ func TestSlogCallRecorder_OmitsAttemptsWhenSingle(t *testing.T) {
 	log, buf := newCapturingLogger()
 	r := NewSlogCallRecorder(log)
 
-	r.RecordCall(context.Background(), &CallRecord{
+	r.RecordCall(context.Background(), &CallEvent{
 		EventCommon:    EventCommon{Timestamp: time.Now(), RequestID: "req-4", Operation: "chat.completions", StatusCode: 200},
 		ModelRequested: "deepseek-v4-flash",
 		Vendor:         "opencode",
@@ -149,9 +149,9 @@ func TestSlogCallRecorder_OmitsAttemptsWhenSingle(t *testing.T) {
 	}
 }
 
-func TestSlogRecorders_RecordNil(t *testing.T) {
+func TestSlogAuditRecorders_RecordNil(t *testing.T) {
 	log, buf := newCapturingLogger()
-	NewSlogRecorder(log).RecordAudit(context.Background(), nil)
+	NewSlogAuditRecorder(log).RecordAudit(context.Background(), nil)
 	NewSlogCallRecorder(log).RecordCall(context.Background(), nil)
 	if buf.Len() != 0 {
 		t.Errorf("nil record should emit nothing, got %s", buf.String())
@@ -159,22 +159,22 @@ func TestSlogRecorders_RecordNil(t *testing.T) {
 }
 
 type captureRecorder struct {
-	calls []*Record
+	calls []*AuditEvent
 	err   error
 }
 
-func (c *captureRecorder) RecordAudit(_ context.Context, r *Record) {
+func (c *captureRecorder) RecordAudit(_ context.Context, r *AuditEvent) {
 	c.calls = append(c.calls, r)
 }
 
 func (c *captureRecorder) Close() error { return c.err }
 
 type captureCallRecorder struct {
-	calls []*CallRecord
+	calls []*CallEvent
 	err   error
 }
 
-func (c *captureCallRecorder) RecordCall(_ context.Context, r *CallRecord) {
+func (c *captureCallRecorder) RecordCall(_ context.Context, r *CallEvent) {
 	c.calls = append(c.calls, r)
 }
 
@@ -182,8 +182,8 @@ func (c *captureCallRecorder) Close() error { return c.err }
 
 func TestRecorders(t *testing.T) {
 	a, b := &captureRecorder{}, &captureRecorder{}
-	c := Recorders{a, b}
-	c.RecordAudit(context.Background(), &Record{})
+	c := AuditRecorders{a, b}
+	c.RecordAudit(context.Background(), &AuditEvent{})
 
 	if len(a.calls) != 1 || len(b.calls) != 1 {
 		t.Errorf("each recorder should have 1 call, got a=%d b=%d", len(a.calls), len(b.calls))
@@ -193,7 +193,7 @@ func TestRecorders(t *testing.T) {
 func TestCallRecorders(t *testing.T) {
 	a, b := &captureCallRecorder{}, &captureCallRecorder{}
 	c := CallRecorders{a, b}
-	c.RecordCall(context.Background(), &CallRecord{})
+	c.RecordCall(context.Background(), &CallEvent{})
 
 	if len(a.calls) != 1 || len(b.calls) != 1 {
 		t.Errorf("each call recorder should have 1 call, got a=%d b=%d", len(a.calls), len(b.calls))
@@ -203,7 +203,7 @@ func TestCallRecorders(t *testing.T) {
 func TestRecorders_CloseReturnsFirstErrButStillRunsRest(t *testing.T) {
 	first := errors.New("first-failed")
 	second := errors.New("second-failed")
-	rs := Recorders{&captureRecorder{err: first}, &captureRecorder{err: second}, &captureRecorder{}}
+	rs := AuditRecorders{&captureRecorder{err: first}, &captureRecorder{err: second}, &captureRecorder{}}
 
 	got := rs.Close()
 	if !errors.Is(got, first) {
@@ -212,9 +212,9 @@ func TestRecorders_CloseReturnsFirstErrButStillRunsRest(t *testing.T) {
 }
 
 func TestNop(t *testing.T) {
-	var n Nop
-	n.RecordAudit(context.Background(), &Record{})
+	var n NopAuditRecorder
+	n.RecordAudit(context.Background(), &AuditEvent{})
 	if err := n.Close(); err != nil {
-		t.Errorf("Nop.Close = %v, want nil", err)
+		t.Errorf("NopAuditRecorder.Close = %v, want nil", err)
 	}
 }

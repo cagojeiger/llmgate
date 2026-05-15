@@ -1,7 +1,9 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -205,6 +207,7 @@ func TestAdoptStreamSummary_FinalizesAttemptAndRecord(t *testing.T) {
 	started := time.Unix(1700000000, 0)
 	now := started.Add(250 * time.Millisecond)
 	call := &telemetry.CallEvent{
+		EventCommon: telemetry.EventCommon{StatusCode: http.StatusOK},
 		Attempts: []llmtypes.Attempt{
 			{Vendor: "v", Model: "m", StartedAt: started},
 		},
@@ -225,6 +228,9 @@ func TestAdoptStreamSummary_FinalizesAttemptAndRecord(t *testing.T) {
 	last := call.Attempts[0]
 	if last.DurationMS != 250 {
 		t.Errorf("last.DurationMS = %d, want 250", last.DurationMS)
+	}
+	if last.StatusCode != http.StatusOK {
+		t.Errorf("last.StatusCode = %d, want 200 propagated", last.StatusCode)
 	}
 	if last.Usage == nil || last.Usage.TotalTokens != 12 {
 		t.Errorf("last.Usage = %+v, want total=12 propagated", last.Usage)
@@ -323,6 +329,9 @@ func TestHandler_Stream_NormalEOF(t *testing.T) {
 	}
 	if gotCall.Attempts[0].Usage == nil || gotCall.Attempts[0].Usage.TotalTokens != 5 {
 		t.Errorf("Attempts[0].Usage not finalized from Summary: %+v", gotCall.Attempts[0].Usage)
+	}
+	if gotCall.Attempts[0].StatusCode != http.StatusOK {
+		t.Errorf("Attempts[0].StatusCode = %d, want 200", gotCall.Attempts[0].StatusCode)
 	}
 	if gotCall.ResponseBytes <= 0 {
 		t.Errorf("ResponseBytes = %d, want > 0", gotCall.ResponseBytes)
@@ -965,6 +974,112 @@ func TestHandler_LifecyclePanic_DoesNotBreakResponse(t *testing.T) {
 	}
 }
 
+func TestHandler_LogContract_AuthFailure(t *testing.T) {
+	auditBuf, callBuf, sink := newLogContractSink()
+	h := NewHandler(okFakeService(), slog.New(slog.NewTextHandler(io.Discard, nil)), sink, HandlerConfig{})
+
+	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	req = requestWithTelemetryContext(req, "req-auth-contract", &ConsumerInfo{AuthError: telemetry.AuthErrorMissing})
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401; body = %s", w.Code, w.Body.String())
+	}
+	audit := decodeSingleLogLine(t, auditBuf)
+	wantLogField(t, audit, "log", "audit")
+	wantLogField(t, audit, "event_type", "audit")
+	wantLogField(t, audit, "request_id", "req-auth-contract")
+	wantLogNumber(t, audit, "status", http.StatusUnauthorized)
+	wantLogField(t, audit, "operation", "chat.completions")
+	wantLogField(t, audit, "auth_result", "failure")
+	wantLogField(t, audit, "auth_error", "missing")
+	wantLogField(t, audit, "policy_result", "denied")
+	wantLogField(t, audit, "deny_reason", "auth")
+	wantLogField(t, audit, "error_kind", "auth")
+	if callBuf.Len() != 0 {
+		t.Fatalf("auth failure must not emit call log, got %s", callBuf.String())
+	}
+	assertLogDoesNotContainSensitiveMaterial(t, auditBuf, callBuf)
+}
+
+func TestHandler_LogContract_NonStreamSuccess(t *testing.T) {
+	auditBuf, callBuf, sink := newLogContractSink()
+	h := NewHandler(okFakeService(), slog.New(slog.NewTextHandler(io.Discard, nil)), sink, HandlerConfig{})
+
+	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"Reply with exactly OK."}],"max_tokens":8}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer example-key-001")
+	req = requestWithTelemetryContext(req, "req-non-stream-contract", &ConsumerInfo{
+		Name:  "example",
+		KeyID: "467d813a",
+	})
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", w.Code, w.Body.String())
+	}
+	audit := decodeSingleLogLine(t, auditBuf)
+	call := decodeSingleLogLine(t, callBuf)
+	assertSuccessAuditLog(t, audit, "req-non-stream-contract", "chat.completions")
+	assertSuccessCallLog(t, call, "req-non-stream-contract", "chat.completions")
+	wantLogNumber(t, call, "final_attempt_status", http.StatusOK)
+	assertLogDoesNotContainSensitiveMaterial(t, auditBuf, callBuf)
+}
+
+func TestHandler_LogContract_StreamSuccess(t *testing.T) {
+	auditBuf, callBuf, sink := newLogContractSink()
+	streamObj := fake.NewStream(
+		fake.WithEvents([]*llmtypes.Event{
+			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: "OK"}}}},
+		}),
+		fake.WithSummary(&llmtypes.Summary{
+			Usage: &llmtypes.Usage{PromptTokens: 9, CompletionTokens: 2, TotalTokens: 11},
+		}),
+	)
+	svc := &fakeService{
+		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
+			return &llmrouter.RouteResult{
+				Stream:    streamObj,
+				Vendor:    "opencode",
+				ModelUsed: req.Model,
+				Attempts: []llmtypes.Attempt{
+					{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()},
+				},
+			}, nil
+		},
+	}
+	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), sink, HandlerConfig{})
+
+	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"Reply with exactly OK."}],"max_tokens":8}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer example-key-001")
+	req = requestWithTelemetryContext(req, "req-stream-contract", &ConsumerInfo{
+		Name:  "example",
+		KeyID: "467d813a",
+	})
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", w.Code, w.Body.String())
+	}
+	audit := decodeSingleLogLine(t, auditBuf)
+	call := decodeSingleLogLine(t, callBuf)
+	assertSuccessAuditLog(t, audit, "req-stream-contract", "chat.completions.stream")
+	assertSuccessCallLog(t, call, "req-stream-contract", "chat.completions.stream")
+	wantLogNumber(t, call, "final_attempt_status", http.StatusOK)
+	wantLogNumber(t, call, "prompt_tokens", 9)
+	wantLogNumber(t, call, "completion_tokens", 2)
+	wantLogNumber(t, call, "total_tokens", 11)
+	assertLogDoesNotContainSensitiveMaterial(t, auditBuf, callBuf)
+}
+
 // fakeService implements ChatService for handler tests. buildResult /
 // buildStreamResult let each test case shape the RouteResult —
 // including pre-populated Attempts — so we exercise the audit-copy
@@ -1099,6 +1214,102 @@ func (c *captureCallSink) len() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return len(c.calls)
+}
+
+func newLogContractSink() (*bytes.Buffer, *bytes.Buffer, telemetry.EventSink) {
+	auditBuf := &bytes.Buffer{}
+	callBuf := &bytes.Buffer{}
+	auditLog := slog.New(slog.NewJSONHandler(auditBuf, nil)).With(slog.String("log", "audit"))
+	callLog := slog.New(slog.NewJSONHandler(callBuf, nil)).With(slog.String("log", "call"))
+	return auditBuf, callBuf, telemetry.NewSlogSink(auditLog, callLog)
+}
+
+func decodeSingleLogLine(t *testing.T, buf *bytes.Buffer) map[string]any {
+	t.Helper()
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 1 || lines[0] == "" {
+		t.Fatalf("log lines = %d, want 1; logs=%q", len(lines), buf.String())
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &out); err != nil {
+		t.Fatalf("decode log line: %v; line=%s", err, lines[0])
+	}
+	return out
+}
+
+func requestWithTelemetryContext(req *http.Request, requestID string, consumer *ConsumerInfo) *http.Request {
+	ctx := context.WithValue(req.Context(), requestIDCtxKey{}, requestID)
+	ctx = context.WithValue(ctx, consumerCtxKey{}, consumer)
+	return req.WithContext(ctx)
+}
+
+func assertSuccessAuditLog(t *testing.T, got map[string]any, requestID, operation string) {
+	t.Helper()
+	wantLogField(t, got, "log", "audit")
+	wantLogField(t, got, "event_type", "audit")
+	wantLogField(t, got, "request_id", requestID)
+	wantLogField(t, got, "operation", operation)
+	wantLogNumber(t, got, "status", http.StatusOK)
+	wantLogField(t, got, "consumer_name", "example")
+	wantLogField(t, got, "consumer_key_id", "467d813a")
+	wantLogField(t, got, "auth_result", "success")
+	wantLogField(t, got, "policy_result", "allowed")
+	wantLogField(t, got, "resource_type", "llm_model")
+	wantLogField(t, got, "resource_id", "deepseek-v4-flash")
+}
+
+func assertSuccessCallLog(t *testing.T, got map[string]any, requestID, operation string) {
+	t.Helper()
+	wantLogField(t, got, "log", "call")
+	wantLogField(t, got, "event_type", "call")
+	wantLogField(t, got, "request_id", requestID)
+	wantLogField(t, got, "operation", operation)
+	wantLogNumber(t, got, "status", http.StatusOK)
+	wantLogField(t, got, "consumer_name", "example")
+	wantLogField(t, got, "consumer_key_id", "467d813a")
+	wantLogField(t, got, "model_requested", "deepseek-v4-flash")
+	wantLogField(t, got, "vendor", "opencode")
+	wantLogField(t, got, "final_attempt_vendor", "opencode")
+	wantLogField(t, got, "final_attempt_model", "deepseek-v4-flash")
+	wantLogNumber(t, got, "attempts_count", 1)
+}
+
+func wantLogField(t *testing.T, got map[string]any, key string, want string) {
+	t.Helper()
+	if got[key] != want {
+		t.Fatalf("%s = %v, want %q; log=%+v", key, got[key], want, got)
+	}
+}
+
+func wantLogNumber(t *testing.T, got map[string]any, key string, want int) {
+	t.Helper()
+	val, ok := got[key].(float64)
+	if !ok {
+		t.Fatalf("%s = %T(%v), want number %d; log=%+v", key, got[key], got[key], want, got)
+	}
+	if int(val) != want {
+		t.Fatalf("%s = %v, want %d; log=%+v", key, val, want, got)
+	}
+}
+
+func assertLogDoesNotContainSensitiveMaterial(t *testing.T, bufs ...*bytes.Buffer) {
+	t.Helper()
+	var joined strings.Builder
+	for _, buf := range bufs {
+		joined.WriteString(buf.String())
+	}
+	logged := joined.String()
+	for _, forbidden := range []string{
+		"Authorization",
+		"Bearer ",
+		"example-key-001",
+		"Reply with exactly OK.",
+		"say ok",
+	} {
+		if strings.Contains(logged, forbidden) {
+			t.Fatalf("log leaked %q: %s", forbidden, logged)
+		}
+	}
 }
 
 type captureLifecycle struct {

@@ -23,8 +23,8 @@ graph TD
 ```
 
 순서 (`cmd/llmgate/main.go`): env 로드 → catalog 파싱 → adapter factory →
-llmrouter.Service 조립 → consumers 파싱 (0 개면 fail) → Audit + Handler + middleware
-wire → ProbeState + Listen.
+llmrouter.Service 조립 → consumers 파싱 (0 개면 fail) → telemetry recorders + Handler +
+middleware wire → ProbeState + Listen.
 
 ## 프로브 & 셧다운
 
@@ -45,7 +45,11 @@ stateDiagram-v2
 GET /healthz/live    →  200 ok            →  200 ok               (항상)
 GET /healthz/ready   →  200 ready         →  503 shutting_down
 GET /healthz         →  200 ready         →  503 shutting_down    (legacy alias)
+GET /metrics         →  선택적 scrape endpoint, embedder 가 설정한 경우만
 ```
+
+프로브와 선택적 `/metrics` 는 business middleware 밖에 둔다. request_id / auth / access log 를
+거치지 않으므로 앱 로그는 실제 호출 트래픽에 집중된다.
 
 `LLMGATE_SHUTDOWN_DRAIN_TIMEOUT` (디폴트 5m) 이 drain 의 상한. 오케스트레이터의
 `terminationGracePeriodSeconds` (k8s) / `stop_grace_period` (compose) 를 이 값보다 살짝 크게

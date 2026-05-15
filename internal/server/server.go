@@ -12,7 +12,32 @@ import (
 	"llmgate/internal/consumers"
 )
 
+type ServerOptions struct {
+	Config         *config.Server
+	Log            *slog.Logger
+	Handler        *Handler
+	Consumers      *consumers.Store
+	Probe          *ProbeState
+	MetricsHandler http.Handler
+}
+
 func New(cfg *config.Server, log *slog.Logger, h *Handler, store *consumers.Store, probe *ProbeState) *http.Server {
+	return NewWithOptions(ServerOptions{
+		Config:    cfg,
+		Log:       log,
+		Handler:   h,
+		Consumers: store,
+		Probe:     probe,
+	})
+}
+
+func NewWithOptions(opts ServerOptions) *http.Server {
+	cfg := opts.Config
+	log := opts.Log
+	h := opts.Handler
+	store := opts.Consumers
+	probe := opts.Probe
+
 	r := chi.NewRouter()
 
 	// Probes sit *outside* the middleware chain. k8s liveness / readiness
@@ -32,9 +57,13 @@ func New(cfg *config.Server, log *slog.Logger, h *Handler, store *consumers.Stor
 	r.Get("/healthz", readyHandler)
 	r.Get("/healthz/live", liveness)
 	r.Get("/healthz/ready", readyHandler)
+	if opts.MetricsHandler != nil {
+		r.Handle("/metrics", opts.MetricsHandler)
+	}
 
 	// Business traffic carries the full middleware chain. Probes are
-	// already mounted above, so nothing in this group ever sees them.
+	// already mounted above, and /metrics joins that public scrape surface
+	// when configured, so nothing in this group ever sees them.
 	r.Group(func(r chi.Router) {
 		r.Use(requestIDMiddleware)
 		// consumerContextMiddleware must run before accessLogMiddleware so the

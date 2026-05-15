@@ -5,7 +5,7 @@ import (
 	"net/http"
 )
 
-// sseWriter writes SSE frames and tracks response bytes for audit.
+// sseWriter writes SSE frames and tracks response bytes for call telemetry.
 type sseWriter struct {
 	w       http.ResponseWriter
 	flusher http.Flusher

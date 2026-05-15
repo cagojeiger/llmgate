@@ -1,38 +1,57 @@
-package audit
+package telemetry
 
 import (
 	"context"
 	"log/slog"
-
-	"llmgate/internal/llmtypes"
 )
 
-// CallRecord captures the result of one gateway LLM request. Attempts contains
-// the vendor/model history for that request; a CallRecord is emitted only after
-// at least one vendor attempt exists.
-type CallRecord struct {
-	EventCommon
-
-	ModelRequested string
-	ModelUsed      string
-	Vendor         string
-
-	RequestBytes  int64
-	ResponseBytes int64
-
-	Usage      *llmtypes.Usage
-	VendorCost string
-
-	Attempts []llmtypes.Attempt
+// SlogAuditRecorder emits each operational AuditEvent as one structured slog line. The
+// prefix names the backing technology (slog) — same convention as
+// bufio.Reader / slog.JSONHandler.
+type SlogAuditRecorder struct {
+	log *slog.Logger
 }
 
-// CallRecorder receives one LLM call-result record per attempted LLM request.
-type CallRecorder interface {
-	RecordCall(ctx context.Context, r *CallRecord)
-	Close() error
+func NewSlogAuditRecorder(log *slog.Logger) *SlogAuditRecorder {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &SlogAuditRecorder{log: log}
 }
 
-// SlogCallRecorder emits each CallRecord as one structured slog line.
+func (r *SlogAuditRecorder) RecordAudit(ctx context.Context, rec *AuditEvent) {
+	if rec == nil {
+		return
+	}
+
+	attrs := []slog.Attr{
+		slog.Int("schema_version", SchemaVersion),
+		slog.String("event_type", EventTypeAudit),
+		slog.Time("timestamp", rec.Timestamp),
+		slog.String("request_id", rec.RequestID),
+		slog.String("operation", rec.Operation),
+		slog.Int("status", rec.StatusCode),
+		slog.Int64("duration_ms", rec.DurationMS),
+	}
+	if rec.ConsumerName != "" {
+		attrs = append(attrs, slog.String("consumer_name", rec.ConsumerName))
+	}
+	if rec.ConsumerKeyID != "" {
+		attrs = append(attrs, slog.String("consumer_key_id", rec.ConsumerKeyID))
+	}
+	if rec.AuthError != "" {
+		attrs = append(attrs, slog.String("auth_error", string(rec.AuthError)))
+	}
+	if rec.Kind != "" {
+		attrs = append(attrs, slog.String("error_kind", string(rec.Kind)))
+	}
+
+	r.log.LogAttrs(ctx, slog.LevelInfo, "audit", attrs...)
+}
+
+func (r *SlogAuditRecorder) Close() error { return nil }
+
+// SlogCallRecorder emits each CallEvent as one structured slog line.
 type SlogCallRecorder struct {
 	log *slog.Logger
 }
@@ -44,7 +63,7 @@ func NewSlogCallRecorder(log *slog.Logger) *SlogCallRecorder {
 	return &SlogCallRecorder{log: log}
 }
 
-func (r *SlogCallRecorder) RecordCall(ctx context.Context, rec *CallRecord) {
+func (r *SlogCallRecorder) RecordCall(ctx context.Context, rec *CallEvent) {
 	if rec == nil {
 		return
 	}

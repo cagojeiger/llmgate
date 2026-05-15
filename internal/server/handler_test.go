@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"llmgate/internal/audit"
 	"llmgate/internal/llmrouter"
 	"llmgate/internal/llmtypes"
 	"llmgate/internal/providers/fake"
 	"llmgate/internal/streaming"
+	"llmgate/internal/telemetry"
 )
 
 func TestHandler_SingleAttempt_RecordPopulated(t *testing.T) {
@@ -129,7 +129,7 @@ func TestAdoptError_ProviderErrorMapsKindAndStatus(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rec := &audit.Record{}
+			rec := &telemetry.AuditEvent{}
 			adoptError(rec, &llmtypes.Error{Kind: tc.kind, Message: "x"})
 			if rec.Kind != tc.kind {
 				t.Errorf("Kind = %q, want %q", rec.Kind, tc.kind)
@@ -185,7 +185,7 @@ func TestHandler_AllowedAliasesRejectBeforeService(t *testing.T) {
 }
 
 func TestAdoptError_NonProviderError_Falls500Unknown(t *testing.T) {
-	rec := &audit.Record{}
+	rec := &telemetry.AuditEvent{}
 	adoptError(rec, io.ErrUnexpectedEOF)
 	if rec.Kind != llmtypes.KindUnknown {
 		t.Errorf("Kind = %q, want unknown", rec.Kind)
@@ -198,7 +198,7 @@ func TestAdoptError_NonProviderError_Falls500Unknown(t *testing.T) {
 func TestAdoptStreamSummary_FinalizesAttemptAndRecord(t *testing.T) {
 	started := time.Unix(1700000000, 0)
 	now := started.Add(250 * time.Millisecond)
-	call := &audit.CallRecord{
+	call := &telemetry.CallEvent{
 		Attempts: []llmtypes.Attempt{
 			{Vendor: "v", Model: "m", StartedAt: started},
 		},
@@ -208,7 +208,7 @@ func TestAdoptStreamSummary_FinalizesAttemptAndRecord(t *testing.T) {
 		VendorCost: `"0.001"`,
 	}
 
-	adoptStreamSummaryCall(call, sum, now)
+	telemetry.AdoptStreamSummary(call, sum, now)
 
 	if call.Usage == nil || call.Usage.TotalTokens != 12 {
 		t.Errorf("call.Usage = %+v, want total=12", call.Usage)
@@ -234,14 +234,14 @@ func TestAdoptStreamSummary_PropagatesRecvErrorKindToAttempt(t *testing.T) {
 	// non-stream path.
 	started := time.Unix(1700000000, 0)
 	now := started.Add(100 * time.Millisecond)
-	call := &audit.CallRecord{
-		EventCommon: audit.EventCommon{Kind: llmtypes.KindUpstream},
+	call := &telemetry.CallEvent{
+		EventCommon: telemetry.EventCommon{Kind: llmtypes.KindUpstream},
 		Attempts: []llmtypes.Attempt{
 			{Vendor: "v", Model: "m", StartedAt: started},
 		},
 	}
 
-	adoptStreamSummaryCall(call, nil, now)
+	telemetry.AdoptStreamSummary(call, nil, now)
 
 	if call.Attempts[0].Kind != llmtypes.KindUpstream {
 		t.Errorf("attempt ErrorKind = %q, want upstream", call.Attempts[0].Kind)
@@ -889,8 +889,8 @@ func TestHandler_recoverPanic_OverridesPreStampedStatus(t *testing.T) {
 	_, recorder := newCaptureRecorder()
 	h := NewHandler(&fakeService{vendor: "opencode"}, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, nil, HandlerConfig{})
 
-	rec := &audit.Record{
-		EventCommon: audit.EventCommon{
+	rec := &telemetry.AuditEvent{
+		EventCommon: telemetry.EventCommon{
 			RequestID:  "test-req-id",
 			StatusCode: http.StatusOK,
 		},
@@ -934,15 +934,15 @@ func (f *fakeService) CompleteStream(_ context.Context, req *llmtypes.Request) (
 
 type captureRecorder struct {
 	mu      sync.Mutex
-	records []*audit.Record
+	records []*telemetry.AuditEvent
 }
 
-func newCaptureRecorder() (*captureRecorder, audit.Recorder) {
+func newCaptureRecorder() (*captureRecorder, telemetry.AuditRecorder) {
 	c := &captureRecorder{}
 	return c, c
 }
 
-func (c *captureRecorder) RecordAudit(_ context.Context, r *audit.Record) {
+func (c *captureRecorder) RecordAudit(_ context.Context, r *telemetry.AuditEvent) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.records = append(c.records, r)
@@ -950,7 +950,7 @@ func (c *captureRecorder) RecordAudit(_ context.Context, r *audit.Record) {
 
 func (c *captureRecorder) Close() error { return nil }
 
-func (c *captureRecorder) last(t *testing.T) *audit.Record {
+func (c *captureRecorder) last(t *testing.T) *telemetry.AuditEvent {
 	t.Helper()
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -962,15 +962,15 @@ func (c *captureRecorder) last(t *testing.T) *audit.Record {
 
 type captureCallRecorder struct {
 	mu    sync.Mutex
-	calls []*audit.CallRecord
+	calls []*telemetry.CallEvent
 }
 
-func newCaptureCallRecorder() (*captureCallRecorder, audit.CallRecorder) {
+func newCaptureCallRecorder() (*captureCallRecorder, telemetry.CallRecorder) {
 	c := &captureCallRecorder{}
 	return c, c
 }
 
-func (c *captureCallRecorder) RecordCall(_ context.Context, r *audit.CallRecord) {
+func (c *captureCallRecorder) RecordCall(_ context.Context, r *telemetry.CallEvent) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.calls = append(c.calls, r)
@@ -978,7 +978,7 @@ func (c *captureCallRecorder) RecordCall(_ context.Context, r *audit.CallRecord)
 
 func (c *captureCallRecorder) Close() error { return nil }
 
-func (c *captureCallRecorder) last(t *testing.T) *audit.CallRecord {
+func (c *captureCallRecorder) last(t *testing.T) *telemetry.CallEvent {
 	t.Helper()
 	c.mu.Lock()
 	defer c.mu.Unlock()

@@ -9,15 +9,15 @@ import (
 	"net/http"
 	"time"
 
-	"llmgate/internal/audit"
 	"llmgate/internal/llmtypes"
 	"llmgate/internal/streaming"
+	"llmgate/internal/telemetry"
 )
 
 // streamRelay owns the SSE wire transcript for one streaming
 // request. Caller (Handler) handles the pre-stream phases (parse →
-// Service → audit-route reflect) and the deferred Stream.Close /
-// adoptStreamSummary; streamRelay takes over once a Stream is in
+// Service → call event adoption) and the deferred Stream.Close /
+// stream summary adoption; streamRelay takes over once a Stream is in
 // hand and runs the Recv loop until terminal state — EOF / idle
 // timeout / client disconnect / mid-stream provider error / encode
 // failure — translating each into the right SSE wire pattern and
@@ -34,8 +34,8 @@ func newStreamRelay(log *slog.Logger, idleTimeout time.Duration) *streamRelay {
 // Run drives the SSE wire response. Returns when the stream has been
 // fully drained or a terminal condition was reached. rec/call are mutated in
 // place: StatusCode, ResponseBytes, Kind. The caller's deferred
-// stream.Close() and adoptStreamSummaryCall() finalize the rest.
-func (s *streamRelay) Run(ctx context.Context, w http.ResponseWriter, stream llmtypes.Stream, rec *audit.Record, call *audit.CallRecord) {
+// stream.Close() and telemetry.AdoptStreamSummary() finalize the rest.
+func (s *streamRelay) Run(ctx context.Context, w http.ResponseWriter, stream llmtypes.Stream, rec *telemetry.AuditEvent, call *telemetry.CallEvent) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		perr := &llmtypes.Error{Kind: llmtypes.KindUnknown, Message: "streaming unsupported"}
@@ -94,7 +94,7 @@ func (s *streamRelay) Run(ctx context.Context, w http.ResponseWriter, stream llm
 // recordClientClosed marks rec terminal state as a client disconnect.
 // Caller should return immediately afterwards — further writes would
 // fail the same way and SendDone would too.
-func (s *streamRelay) recordClientClosed(ctx context.Context, rec *audit.Record, call *audit.CallRecord, werr error) {
+func (s *streamRelay) recordClientClosed(ctx context.Context, rec *telemetry.AuditEvent, call *telemetry.CallEvent, werr error) {
 	rec.Kind = llmtypes.KindClientClosed
 	call.Kind = rec.Kind
 	s.log.LogAttrs(ctx, slog.LevelInfo, "client disconnected mid-stream",

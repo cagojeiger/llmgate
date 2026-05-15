@@ -12,6 +12,10 @@ log=audit   → 운영 / 보안 fact (chat 요청 한정, auth 실패 포함 한
 log=call    → LLM 호출 결과 fact (LLM 호출이 시도된 요청만 한 줄)
 ```
 
+`audit` / `call` 은 Handler 가 `telemetry.EventSink` 로 emit 한 finalized event 를 기본
+`SlogSink` 가 stdout JSON 으로 라우팅한 결과다. 이 경계 덕분에 추후 messaging stream sink 를
+추가하더라도 로그 스키마와 요청 처리 흐름을 분리해서 유지할 수 있다.
+
 ## 키 스키마
 
 | 키 | access | audit | call | 의미 |

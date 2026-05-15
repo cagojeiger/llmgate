@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"strings"
 	"testing"
@@ -19,11 +20,11 @@ func newCapturingLogger() (*slog.Logger, *bytes.Buffer) {
 	return slog.New(h), buf
 }
 
-func TestSlogAuditRecorder_RecordAudit(t *testing.T) {
+func TestSlogSink_RecordAudit(t *testing.T) {
 	log, buf := newCapturingLogger()
-	r := NewSlogAuditRecorder(log)
+	sink := NewSlogSink(log, log)
 
-	r.RecordAudit(context.Background(), &AuditEvent{
+	sink.Emit(context.Background(), &AuditEvent{
 		EventCommon: EventCommon{
 			Timestamp:      time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
 			RequestID:      "req-1",
@@ -69,11 +70,11 @@ func TestSlogAuditRecorder_RecordAudit(t *testing.T) {
 	}
 }
 
-func TestSlogAuditRecorder_RecordAuthFailure(t *testing.T) {
+func TestSlogSink_RecordAuthFailure(t *testing.T) {
 	log, buf := newCapturingLogger()
-	r := NewSlogAuditRecorder(log)
+	sink := NewSlogSink(log, log)
 
-	r.RecordAudit(context.Background(), &AuditEvent{
+	sink.Emit(context.Background(), &AuditEvent{
 		EventCommon: EventCommon{
 			Timestamp:  time.Now(),
 			RequestID:  "req-auth-bad",
@@ -102,11 +103,11 @@ func TestSlogAuditRecorder_RecordAuthFailure(t *testing.T) {
 	}
 }
 
-func TestSlogCallRecorder_RecordCall(t *testing.T) {
+func TestSlogSink_RecordCall(t *testing.T) {
 	log, buf := newCapturingLogger()
-	r := NewSlogCallRecorder(log)
+	sink := NewSlogSink(log, log)
 
-	r.RecordCall(context.Background(), &CallEvent{
+	sink.Emit(context.Background(), &CallEvent{
 		EventCommon: EventCommon{
 			Timestamp:      time.Now(),
 			RequestID:      "req-call",
@@ -196,12 +197,11 @@ func TestCallAttemptHelpers(t *testing.T) {
 	}
 }
 
-func TestSlogRecorders_DoNotLeakSensitiveMaterial(t *testing.T) {
+func TestSlogSink_DoNotLeakSensitiveMaterial(t *testing.T) {
 	log, buf := newCapturingLogger()
-	auditRecorder := NewSlogAuditRecorder(log)
-	callRecorder := NewSlogCallRecorder(log)
+	sink := NewSlogSink(log, log)
 
-	auditRecorder.RecordAudit(context.Background(), &AuditEvent{
+	sink.Emit(context.Background(), &AuditEvent{
 		EventCommon: EventCommon{
 			Timestamp:     time.Now(),
 			RequestID:     "req-redaction",
@@ -212,7 +212,7 @@ func TestSlogRecorders_DoNotLeakSensitiveMaterial(t *testing.T) {
 		},
 		AuthResult: AuthResultSuccess,
 	})
-	callRecorder.RecordCall(context.Background(), &CallEvent{
+	sink.Emit(context.Background(), &CallEvent{
 		EventCommon: EventCommon{
 			Timestamp:     time.Now(),
 			RequestID:     "req-redaction",
@@ -241,11 +241,11 @@ func TestSlogRecorders_DoNotLeakSensitiveMaterial(t *testing.T) {
 	}
 }
 
-func TestSlogCallRecorder_OmitsAttemptsWhenSingle(t *testing.T) {
+func TestSlogSink_OmitsAttemptsWhenSingle(t *testing.T) {
 	log, buf := newCapturingLogger()
-	r := NewSlogCallRecorder(log)
+	sink := NewSlogSink(log, log)
 
-	r.RecordCall(context.Background(), &CallEvent{
+	sink.Emit(context.Background(), &CallEvent{
 		EventCommon:    EventCommon{Timestamp: time.Now(), RequestID: "req-4", Operation: "chat.completions", StatusCode: 200},
 		ModelRequested: "deepseek-v4-flash",
 		Vendor:         "opencode",
@@ -265,55 +265,79 @@ func TestSlogCallRecorder_OmitsAttemptsWhenSingle(t *testing.T) {
 	}
 }
 
-func TestSlogAuditRecorders_RecordNil(t *testing.T) {
+func TestSlogSink_RecordNil(t *testing.T) {
 	log, buf := newCapturingLogger()
-	NewSlogAuditRecorder(log).RecordAudit(context.Background(), nil)
-	NewSlogCallRecorder(log).RecordCall(context.Background(), nil)
+	sink := NewSlogSink(log, log)
+	sink.Emit(context.Background(), (*AuditEvent)(nil))
+	sink.Emit(context.Background(), (*CallEvent)(nil))
 	if buf.Len() != 0 {
 		t.Errorf("nil record should emit nothing, got %s", buf.String())
 	}
 }
 
-type captureRecorder struct {
-	calls []*AuditEvent
-	err   error
+type panicSink struct{}
+
+func (panicSink) Emit(context.Context, Event) { panic("sink failed") }
+func (panicSink) Close() error                { return nil }
+
+type captureSink struct {
+	events []Event
+	err    error
 }
 
-func (c *captureRecorder) RecordAudit(_ context.Context, r *AuditEvent) {
-	c.calls = append(c.calls, r)
+func (c *captureSink) Emit(_ context.Context, event Event) {
+	c.events = append(c.events, event)
 }
 
-func (c *captureRecorder) Close() error { return c.err }
+func (c *captureSink) Close() error { return nil }
 
-type captureCallRecorder struct {
-	calls []*CallEvent
-	err   error
+type closeErrSink struct {
+	err error
 }
 
-func (c *captureCallRecorder) RecordCall(_ context.Context, r *CallEvent) {
-	c.calls = append(c.calls, r)
-}
+func (c closeErrSink) Emit(context.Context, Event) {}
+func (c closeErrSink) Close() error                { return c.err }
 
-func (c *captureCallRecorder) Close() error { return c.err }
+func TestFanoutSink_FansOutEvents(t *testing.T) {
+	a, b := &captureSink{}, &captureSink{}
+	sinks := NewFanoutSink(nil, a, b)
 
-func TestRecorders(t *testing.T) {
-	a, b := &captureRecorder{}, &captureRecorder{}
-	c := AuditRecorders{a, b}
-	c.RecordAudit(context.Background(), &AuditEvent{})
+	sinks.Emit(context.Background(), &AuditEvent{})
 
-	if len(a.calls) != 1 || len(b.calls) != 1 {
-		t.Errorf("each recorder should have 1 call, got a=%d b=%d", len(a.calls), len(b.calls))
+	if len(a.events) != 1 || len(b.events) != 1 {
+		t.Errorf("each sink should have 1 event, got a=%d b=%d", len(a.events), len(b.events))
 	}
 }
 
-func TestCallRecorders(t *testing.T) {
-	a, b := &captureCallRecorder{}, &captureCallRecorder{}
-	c := CallRecorders{a, b}
-	c.RecordCall(context.Background(), &CallEvent{})
+func TestFanoutSink_IsolatesPanicAndContinuesFanout(t *testing.T) {
+	capture := &captureSink{}
+	sinks := NewFanoutSink(slog.New(slog.NewTextHandler(io.Discard, nil)), panicSink{}, capture)
 
-	if len(a.calls) != 1 || len(b.calls) != 1 {
-		t.Errorf("each call recorder should have 1 call, got a=%d b=%d", len(a.calls), len(b.calls))
+	sinks.Emit(context.Background(), &AuditEvent{})
+
+	if len(capture.events) != 1 {
+		t.Fatalf("events captured = %d, want 1", len(capture.events))
 	}
+}
+
+func TestFanoutSink_LogsPanic(t *testing.T) {
+	log, buf := newCapturingLogger()
+	sinks := NewFanoutSink(log, panicSink{})
+
+	sinks.Emit(context.Background(), &AuditEvent{})
+
+	if !strings.Contains(buf.String(), "telemetry sink panic") {
+		t.Fatalf("panic log missing: %s", buf.String())
+	}
+	if !strings.Contains(buf.String(), `"event_type":"audit"`) {
+		t.Fatalf("panic log missing event_type: %s", buf.String())
+	}
+}
+
+func TestRecoveringSink_IsolatesPanic(t *testing.T) {
+	sink := NewRecoveringSink(panicSink{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	sink.Emit(context.Background(), &AuditEvent{})
 }
 
 type captureLifecycleObserver struct {
@@ -355,10 +379,28 @@ func TestLifecycleObservers(t *testing.T) {
 	}
 }
 
-func TestRecorders_CloseReturnsFirstErrButStillRunsRest(t *testing.T) {
+type panicLifecycleObserver struct{}
+
+func (panicLifecycleObserver) RequestStarted(context.Context)             { panic("request started") }
+func (panicLifecycleObserver) RequestFinished(context.Context)            { panic("request finished") }
+func (panicLifecycleObserver) StreamStarted(context.Context, EventCommon) { panic("stream started") }
+func (panicLifecycleObserver) StreamFinished(context.Context, *AuditEvent, *CallEvent) {
+	panic("stream finished")
+}
+
+func TestRecoveringLifecycleObserver_IsolatesPanic(t *testing.T) {
+	observer := NewRecoveringLifecycleObserver(panicLifecycleObserver{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	observer.RequestStarted(context.Background())
+	observer.RequestFinished(context.Background())
+	observer.StreamStarted(context.Background(), EventCommon{})
+	observer.StreamFinished(context.Background(), &AuditEvent{}, &CallEvent{})
+}
+
+func TestFanoutSink_CloseReturnsFirstErrButStillRunsRest(t *testing.T) {
 	first := errors.New("first-failed")
 	second := errors.New("second-failed")
-	rs := AuditRecorders{&captureRecorder{err: first}, &captureRecorder{err: second}, &captureRecorder{}}
+	rs := NewFanoutSink(nil, closeErrSink{err: first}, closeErrSink{err: second}, &captureSink{})
 
 	got := rs.Close()
 	if !errors.Is(got, first) {
@@ -367,9 +409,9 @@ func TestRecorders_CloseReturnsFirstErrButStillRunsRest(t *testing.T) {
 }
 
 func TestNop(t *testing.T) {
-	var n NopAuditRecorder
-	n.RecordAudit(context.Background(), &AuditEvent{})
+	var n NopSink
+	n.Emit(context.Background(), &AuditEvent{})
 	if err := n.Close(); err != nil {
-		t.Errorf("NopAuditRecorder.Close = %v, want nil", err)
+		t.Errorf("NopSink.Close = %v, want nil", err)
 	}
 }

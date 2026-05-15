@@ -2,8 +2,6 @@
 package telemetry
 
 import (
-	"context"
-
 	"llmgate/internal/llmtypes"
 )
 
@@ -61,6 +59,8 @@ func NewAuditEvent(common EventCommon) *AuditEvent {
 	return &AuditEvent{EventCommon: common}
 }
 
+func (*AuditEvent) TelemetryEventType() string { return EventTypeAudit }
+
 func FinishAuditEvent(rec *AuditEvent, statusCode int, kind llmtypes.ErrorKind, durationMS int64) {
 	rec.StatusCode = statusCode
 	rec.Kind = kind
@@ -104,15 +104,3 @@ func MarkPolicyDenied(rec *AuditEvent, reason DenyReason) {
 	rec.PolicyResult = PolicyResultDenied
 	rec.DenyReason = reason
 }
-
-// AuditRecorder receives one operational AuditEvent per gateway request.
-type AuditRecorder interface {
-	RecordAudit(ctx context.Context, r *AuditEvent)
-	Close() error
-}
-
-// NopAuditRecorder drops every record. Default when no recorder is configured.
-type NopAuditRecorder struct{}
-
-func (NopAuditRecorder) RecordAudit(context.Context, *AuditEvent) {}
-func (NopAuditRecorder) Close() error                             { return nil }

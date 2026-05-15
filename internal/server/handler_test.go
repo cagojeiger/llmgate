@@ -20,8 +20,8 @@ import (
 )
 
 func TestHandler_SingleAttempt_RecordPopulated(t *testing.T) {
-	rec, recorder := newCaptureRecorder()
-	callRec, callRecorder := newCaptureCallRecorder()
+	rec, recorder := newCaptureAuditSink()
+	callRec, callSink := newCaptureCallSink()
 	r := &fakeService{
 		vendor: "opencode",
 		buildResult: func(req *llmtypes.Request) *llmrouter.RouteResult {
@@ -38,7 +38,7 @@ func TestHandler_SingleAttempt_RecordPopulated(t *testing.T) {
 			}
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, callRecorder, HandlerConfig{})
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), telemetry.NewFanoutSink(nil, recorder, callSink), HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -74,8 +74,8 @@ func TestHandler_SingleAttempt_RecordPopulated(t *testing.T) {
 }
 
 func TestHandler_FallbackChain_AttemptsRecorded(t *testing.T) {
-	_, recorder := newCaptureRecorder()
-	callRec, callRecorder := newCaptureCallRecorder()
+	_, recorder := newCaptureAuditSink()
+	callRec, callSink := newCaptureCallSink()
 	r := &fakeService{
 		vendor: "opencode",
 		buildResult: func(req *llmtypes.Request) *llmrouter.RouteResult {
@@ -93,7 +93,7 @@ func TestHandler_FallbackChain_AttemptsRecorded(t *testing.T) {
 			}
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, callRecorder, HandlerConfig{})
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), telemetry.NewFanoutSink(nil, recorder, callSink), HandlerConfig{})
 
 	body := `{"model":"coder","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -148,8 +148,8 @@ func TestAdoptError_ProviderErrorMapsKindAndStatus(t *testing.T) {
 }
 
 func TestHandler_AllowedAliasesRejectBeforeService(t *testing.T) {
-	rec, recorder := newCaptureRecorder()
-	callRec, callRecorder := newCaptureCallRecorder()
+	rec, recorder := newCaptureAuditSink()
+	callRec, callSink := newCaptureCallSink()
 	serviceCalled := false
 	r := &fakeService{
 		buildResult: func(req *llmtypes.Request) *llmrouter.RouteResult {
@@ -160,7 +160,7 @@ func TestHandler_AllowedAliasesRejectBeforeService(t *testing.T) {
 			}
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, callRecorder, HandlerConfig{})
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), telemetry.NewFanoutSink(nil, recorder, callSink), HandlerConfig{})
 
 	body := `{"model":"smart","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -258,8 +258,8 @@ func TestAdoptStreamSummary_PropagatesRecvErrorKindToAttempt(t *testing.T) {
 }
 
 func TestHandler_Stream_NormalEOF(t *testing.T) {
-	captured, recorder := newCaptureRecorder()
-	callCaptured, callRecorder := newCaptureCallRecorder()
+	captured, recorder := newCaptureAuditSink()
+	callCaptured, callSink := newCaptureCallSink()
 	lifecycle := &captureLifecycle{}
 	streamObj := fake.NewStream(
 		fake.WithEvents([]*llmtypes.Event{
@@ -282,7 +282,7 @@ func TestHandler_Stream_NormalEOF(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, callRecorder, HandlerConfig{
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), telemetry.NewFanoutSink(nil, recorder, callSink), HandlerConfig{
 		LifecycleObserver: lifecycle,
 	})
 
@@ -345,8 +345,8 @@ func TestHandler_Stream_NormalEOF(t *testing.T) {
 }
 
 func TestHandler_Stream_RecvError_PropagatesErrorKind(t *testing.T) {
-	captured, recorder := newCaptureRecorder()
-	callCaptured, callRecorder := newCaptureCallRecorder()
+	captured, recorder := newCaptureAuditSink()
+	callCaptured, callSink := newCaptureCallSink()
 	streamObj := fake.NewStream(
 		fake.WithEvents([]*llmtypes.Event{
 			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: "partial"}}}},
@@ -366,7 +366,7 @@ func TestHandler_Stream_RecvError_PropagatesErrorKind(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, callRecorder, HandlerConfig{})
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), telemetry.NewFanoutSink(nil, recorder, callSink), HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -400,8 +400,8 @@ func TestHandler_Stream_RecvError_PropagatesErrorKind(t *testing.T) {
 }
 
 func TestHandler_Stream_IdleTimeoutSendsError(t *testing.T) {
-	captured, recorder := newCaptureRecorder()
-	callCaptured, callRecorder := newCaptureCallRecorder()
+	captured, recorder := newCaptureAuditSink()
+	callCaptured, callSink := newCaptureCallSink()
 	streamObj := fake.NewStream(
 		fake.WithRecvDelay(50*time.Millisecond),
 		fake.WithSummary(&llmtypes.Summary{}),
@@ -418,7 +418,7 @@ func TestHandler_Stream_IdleTimeoutSendsError(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, callRecorder, HandlerConfig{
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), telemetry.NewFanoutSink(nil, recorder, callSink), HandlerConfig{
 		StreamIdleTimeout: time.Millisecond,
 	})
 
@@ -452,8 +452,8 @@ func TestHandler_Stream_IdleTimeoutSendsError(t *testing.T) {
 }
 
 func TestHandler_Stream_RequestTimeoutSendsError(t *testing.T) {
-	captured, recorder := newCaptureRecorder()
-	callCaptured, callRecorder := newCaptureCallRecorder()
+	captured, recorder := newCaptureAuditSink()
+	callCaptured, callSink := newCaptureCallSink()
 	streamObj := fake.NewStream(
 		fake.WithRecvDelay(50*time.Millisecond),
 		fake.WithSummary(&llmtypes.Summary{}),
@@ -470,7 +470,7 @@ func TestHandler_Stream_RequestTimeoutSendsError(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, callRecorder, HandlerConfig{
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), telemetry.NewFanoutSink(nil, recorder, callSink), HandlerConfig{
 		RequestTimeout: time.Millisecond,
 	})
 
@@ -501,8 +501,8 @@ func TestHandler_Stream_RequestTimeoutSendsError(t *testing.T) {
 }
 
 func TestHandler_Stream_ContextCanceledRecordsClientClosed(t *testing.T) {
-	captured, recorder := newCaptureRecorder()
-	callCaptured, callRecorder := newCaptureCallRecorder()
+	captured, recorder := newCaptureAuditSink()
+	callCaptured, callSink := newCaptureCallSink()
 	streamObj := fake.NewStream(
 		fake.WithRecvDelay(50*time.Millisecond),
 		fake.WithSummary(&llmtypes.Summary{}),
@@ -519,7 +519,7 @@ func TestHandler_Stream_ContextCanceledRecordsClientClosed(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, callRecorder, HandlerConfig{})
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), telemetry.NewFanoutSink(nil, recorder, callSink), HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	baseReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -547,8 +547,8 @@ func TestHandler_Stream_ContextCanceledRecordsClientClosed(t *testing.T) {
 // terminal state as KindClientClosed in audit and (b) stop draining the
 // upstream stream — leaving later events un-consumed.
 func TestHandler_Stream_ClientDisconnect_MidStream(t *testing.T) {
-	captured, recorder := newCaptureRecorder()
-	_, callRecorder := newCaptureCallRecorder()
+	captured, recorder := newCaptureAuditSink()
+	_, callSink := newCaptureCallSink()
 	streamObj := fake.NewStream(
 		fake.WithEvents([]*llmtypes.Event{
 			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: "one"}}}},
@@ -569,7 +569,7 @@ func TestHandler_Stream_ClientDisconnect_MidStream(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, callRecorder, HandlerConfig{})
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), telemetry.NewFanoutSink(nil, recorder, callSink), HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -596,8 +596,8 @@ func TestHandler_Stream_ClientDisconnect_MidStream(t *testing.T) {
 // Audit must still record client_closed — the wire handshake didn't
 // complete even though upstream finished cleanly.
 func TestHandler_Stream_ClientDisconnect_OnDone(t *testing.T) {
-	captured, recorder := newCaptureRecorder()
-	_, callRecorder := newCaptureCallRecorder()
+	captured, recorder := newCaptureAuditSink()
+	_, callSink := newCaptureCallSink()
 	streamObj := fake.NewStream(
 		fake.WithEvents([]*llmtypes.Event{
 			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: "only"}}}},
@@ -616,7 +616,7 @@ func TestHandler_Stream_ClientDisconnect_OnDone(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, callRecorder, HandlerConfig{})
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), telemetry.NewFanoutSink(nil, recorder, callSink), HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -634,8 +634,8 @@ func TestHandler_Stream_ClientDisconnect_OnDone(t *testing.T) {
 // the very first SSE write fails — handler should bail after consuming
 // just the first event.
 func TestHandler_Stream_ClientDisconnect_OnFirstEvent(t *testing.T) {
-	captured, recorder := newCaptureRecorder()
-	_, callRecorder := newCaptureCallRecorder()
+	captured, recorder := newCaptureAuditSink()
+	_, callSink := newCaptureCallSink()
 	streamObj := fake.NewStream(
 		fake.WithEvents([]*llmtypes.Event{
 			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: "first"}}}},
@@ -655,7 +655,7 @@ func TestHandler_Stream_ClientDisconnect_OnFirstEvent(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, callRecorder, HandlerConfig{})
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), telemetry.NewFanoutSink(nil, recorder, callSink), HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -675,8 +675,8 @@ func TestHandler_Stream_ClientDisconnect_OnFirstEvent(t *testing.T) {
 // path also tags audit when the client write fails. StatusCode stays 200
 // (already on the wire), but ErrorKind reveals the terminal state.
 func TestHandler_NonStream_ClientDisconnect(t *testing.T) {
-	captured, recorder := newCaptureRecorder()
-	_, callRecorder := newCaptureCallRecorder()
+	captured, recorder := newCaptureAuditSink()
+	_, callSink := newCaptureCallSink()
 	r := &fakeService{
 		buildResult: func(req *llmtypes.Request) *llmrouter.RouteResult {
 			return &llmrouter.RouteResult{
@@ -692,7 +692,7 @@ func TestHandler_NonStream_ClientDisconnect(t *testing.T) {
 			}
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, callRecorder, HandlerConfig{})
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), telemetry.NewFanoutSink(nil, recorder, callSink), HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -737,8 +737,8 @@ func (d *disconnectAfterNWriter) WriteHeader(statusCode int) { d.rec.WriteHeader
 func (d *disconnectAfterNWriter) Flush() {}
 
 func TestHandler_Stream_PreStreamServiceError(t *testing.T) {
-	captured, recorder := newCaptureRecorder()
-	callCaptured, callRecorder := newCaptureCallRecorder()
+	captured, recorder := newCaptureAuditSink()
+	callCaptured, callSink := newCaptureCallSink()
 	r := &fakeService{
 		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
 			return &llmrouter.RouteResult{
@@ -750,7 +750,7 @@ func TestHandler_Stream_PreStreamServiceError(t *testing.T) {
 			}, &llmtypes.Error{Kind: llmtypes.KindAuth, Message: "no key"}
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, callRecorder, HandlerConfig{})
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), telemetry.NewFanoutSink(nil, recorder, callSink), HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -783,14 +783,14 @@ func TestHandler_Stream_PreStreamServiceError(t *testing.T) {
 // Panic paths must stamp audit as panic/500 and keep panic values out
 // of the wire response.
 func TestHandler_PanicInComplete_StampsAuditAndReturns500(t *testing.T) {
-	rec, recorder := newCaptureRecorder()
+	rec, recorder := newCaptureAuditSink()
 	svc := &fakeService{
 		vendor: "opencode",
 		buildResult: func(req *llmtypes.Request) *llmrouter.RouteResult {
 			panic("boom in complete")
 		},
 	}
-	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, nil, HandlerConfig{})
+	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -813,14 +813,14 @@ func TestHandler_PanicInComplete_StampsAuditAndReturns500(t *testing.T) {
 }
 
 func TestHandler_PanicInStream_StampsAuditAndReturns500(t *testing.T) {
-	rec, recorder := newCaptureRecorder()
+	rec, recorder := newCaptureAuditSink()
 	svc := &fakeService{
 		vendor: "opencode",
 		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
 			panic("boom in stream")
 		},
 	}
-	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, nil, HandlerConfig{})
+	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -845,14 +845,14 @@ func TestHandler_PanicInStream_StampsAuditAndReturns500(t *testing.T) {
 // Once the response has started, panic recovery must only update audit;
 // writing a JSON body would corrupt the in-flight SSE stream.
 func TestHandler_PanicAfterResponseStarted_DoesNotCorruptWireBody(t *testing.T) {
-	rec, recorder := newCaptureRecorder()
+	rec, recorder := newCaptureAuditSink()
 	svc := &fakeService{
 		vendor: "opencode",
 		buildResult: func(req *llmtypes.Request) *llmrouter.RouteResult {
 			panic("late boom")
 		},
 	}
-	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, nil, HandlerConfig{})
+	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -879,14 +879,14 @@ func TestHandler_PanicAfterResponseStarted_DoesNotCorruptWireBody(t *testing.T) 
 // http.ErrAbortHandler is an intentional abort sentinel, not a panic
 // outcome to stamp into audit.
 func TestHandler_AbortHandlerPanic_Repropagates_NotStamped(t *testing.T) {
-	rec, recorder := newCaptureRecorder()
+	rec, recorder := newCaptureAuditSink()
 	svc := &fakeService{
 		vendor: "opencode",
 		buildResult: func(req *llmtypes.Request) *llmrouter.RouteResult {
 			panic(http.ErrAbortHandler)
 		},
 	}
-	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, nil, HandlerConfig{})
+	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -910,8 +910,8 @@ func TestHandler_AbortHandlerPanic_Repropagates_NotStamped(t *testing.T) {
 
 // Panic audit status records the outcome, not any earlier wire status.
 func TestHandler_recoverPanic_OverridesPreStampedStatus(t *testing.T) {
-	_, recorder := newCaptureRecorder()
-	h := NewHandler(&fakeService{vendor: "opencode"}, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, nil, HandlerConfig{})
+	_, recorder := newCaptureAuditSink()
+	h := NewHandler(&fakeService{vendor: "opencode"}, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
 
 	rec := &telemetry.AuditEvent{
 		EventCommon: telemetry.EventCommon{
@@ -932,6 +932,36 @@ func TestHandler_recoverPanic_OverridesPreStampedStatus(t *testing.T) {
 	}
 	if inner.Body.Len() != 0 {
 		t.Errorf("wire body = %q, want empty (already-flushed response must not get JSON written)", inner.Body.String())
+	}
+}
+
+func TestHandler_TelemetrySinkPanic_DoesNotBreakResponse(t *testing.T) {
+	h := NewHandler(okFakeService(), slog.New(slog.NewTextHandler(io.Discard, nil)), panicEventSink{}, HandlerConfig{})
+
+	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandler_LifecyclePanic_DoesNotBreakResponse(t *testing.T) {
+	h := NewHandler(okFakeService(), slog.New(slog.NewTextHandler(io.Discard, nil)), telemetry.NopSink{}, HandlerConfig{
+		LifecycleObserver: panicLifecycleObserver{},
+	})
+
+	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", w.Code, w.Body.String())
 	}
 }
 
@@ -956,25 +986,70 @@ func (f *fakeService) CompleteStream(_ context.Context, req *llmtypes.Request) (
 	return &llmrouter.RouteResult{}, &llmtypes.Error{Kind: llmtypes.KindUpstream, Message: "stream not implemented in this fake"}
 }
 
-type captureRecorder struct {
+func okFakeService() *fakeService {
+	return &fakeService{
+		vendor: "opencode",
+		buildResult: func(req *llmtypes.Request) *llmrouter.RouteResult {
+			return &llmrouter.RouteResult{
+				Response: &llmtypes.Response{
+					Model:   req.Model,
+					Choices: []llmtypes.Choice{{Index: 0, Message: llmtypes.Message{Role: "assistant", Content: "ok"}}},
+				},
+				Vendor:    "opencode",
+				ModelUsed: req.Model,
+				Attempts: []llmtypes.Attempt{
+					{Vendor: "opencode", Model: req.Model, StatusCode: http.StatusOK, StartedAt: time.Now()},
+				},
+			}
+		},
+	}
+}
+
+type panicEventSink struct{}
+
+func (panicEventSink) Emit(context.Context, telemetry.Event) { panic("telemetry sink failed") }
+func (panicEventSink) Close() error                          { return nil }
+
+type panicLifecycleObserver struct{}
+
+func (panicLifecycleObserver) RequestStarted(context.Context) { panic("request started failed") }
+func (panicLifecycleObserver) RequestFinished(context.Context) {
+	panic("request finished failed")
+}
+func (panicLifecycleObserver) StreamStarted(context.Context, telemetry.EventCommon) {
+	panic("stream started failed")
+}
+func (panicLifecycleObserver) StreamFinished(context.Context, *telemetry.AuditEvent, *telemetry.CallEvent) {
+	panic("stream finished failed")
+}
+
+type captureAuditSink struct {
 	mu      sync.Mutex
 	records []*telemetry.AuditEvent
 }
 
-func newCaptureRecorder() (*captureRecorder, telemetry.AuditRecorder) {
-	c := &captureRecorder{}
+func newCaptureAuditSink() (*captureAuditSink, telemetry.EventSink) {
+	c := &captureAuditSink{}
 	return c, c
 }
 
-func (c *captureRecorder) RecordAudit(_ context.Context, r *telemetry.AuditEvent) {
+func (c *captureAuditSink) captureAudit(_ context.Context, r *telemetry.AuditEvent) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.records = append(c.records, r)
 }
 
-func (c *captureRecorder) Close() error { return nil }
+func (c *captureAuditSink) Close() error { return nil }
 
-func (c *captureRecorder) last(t *testing.T) *telemetry.AuditEvent {
+func (c *captureAuditSink) Emit(ctx context.Context, event telemetry.Event) {
+	rec, ok := event.(*telemetry.AuditEvent)
+	if !ok {
+		return
+	}
+	c.captureAudit(ctx, rec)
+}
+
+func (c *captureAuditSink) last(t *testing.T) *telemetry.AuditEvent {
 	t.Helper()
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -984,25 +1059,33 @@ func (c *captureRecorder) last(t *testing.T) *telemetry.AuditEvent {
 	return c.records[len(c.records)-1]
 }
 
-type captureCallRecorder struct {
+type captureCallSink struct {
 	mu    sync.Mutex
 	calls []*telemetry.CallEvent
 }
 
-func newCaptureCallRecorder() (*captureCallRecorder, telemetry.CallRecorder) {
-	c := &captureCallRecorder{}
+func newCaptureCallSink() (*captureCallSink, telemetry.EventSink) {
+	c := &captureCallSink{}
 	return c, c
 }
 
-func (c *captureCallRecorder) RecordCall(_ context.Context, r *telemetry.CallEvent) {
+func (c *captureCallSink) captureCall(_ context.Context, r *telemetry.CallEvent) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.calls = append(c.calls, r)
 }
 
-func (c *captureCallRecorder) Close() error { return nil }
+func (c *captureCallSink) Close() error { return nil }
 
-func (c *captureCallRecorder) last(t *testing.T) *telemetry.CallEvent {
+func (c *captureCallSink) Emit(ctx context.Context, event telemetry.Event) {
+	rec, ok := event.(*telemetry.CallEvent)
+	if !ok {
+		return
+	}
+	c.captureCall(ctx, rec)
+}
+
+func (c *captureCallSink) last(t *testing.T) *telemetry.CallEvent {
 	t.Helper()
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1012,7 +1095,7 @@ func (c *captureCallRecorder) last(t *testing.T) *telemetry.CallEvent {
 	return c.calls[len(c.calls)-1]
 }
 
-func (c *captureCallRecorder) len() int {
+func (c *captureCallSink) len() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return len(c.calls)

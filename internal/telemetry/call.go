@@ -1,7 +1,6 @@
 package telemetry
 
 import (
-	"context"
 	"time"
 
 	"llmgate/internal/llmrouter"
@@ -34,6 +33,8 @@ func NewCallEvent(common EventCommon, modelRequested string, requestBytes int64)
 		RequestBytes:   requestBytes,
 	}
 }
+
+func (*CallEvent) TelemetryEventType() string { return EventTypeCall }
 
 func CallAttempted(c *CallEvent) bool {
 	return c != nil && len(c.Attempts) > 0
@@ -119,10 +120,4 @@ func AdoptStreamSummary(c *CallEvent, sum *llmtypes.Summary, now time.Time) {
 	if sum.VendorCost != "" {
 		c.VendorCost = sum.VendorCost
 	}
-}
-
-// CallRecorder receives one LLM call-result record per attempted LLM request.
-type CallRecorder interface {
-	RecordCall(ctx context.Context, r *CallEvent)
-	Close() error
 }

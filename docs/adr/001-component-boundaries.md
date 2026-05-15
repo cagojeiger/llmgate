@@ -16,12 +16,12 @@
 - **llmrouter.Service** — 별명을 후보 모델 체인으로 풀고, 폴백 적격성과 회로 차단을 판정한다 ([ADR 004](004-fallback-policy.md)). 비스트림에서 한 시도당 시간 한도도 여기서 정한다 ([ADR 005](005-timeout-authority.md)).
 - **Adapter** (`internal/providers/{openai,anthropic}`) — 한 벤더의 와이어 프로토콜을 다룬다. 응답 상태 분류와 첫 이벤트 검증이 여기 산다.
 - **streamRelay** — 스트림이 열린 뒤의 SSE 전송. 이벤트 사이 유휴 한도(idle), 취소, 종결을 담당한다 ([ADR 005](005-timeout-authority.md)).
-- **Audit Recorder** — 요청 한 건당 사실 한 줄을 남긴다.
+- **Telemetry EventSink** — finalized `AuditEvent` / `CallEvent` delivery boundary. 기본 구현은 stdout JSON 이고, 원격 sink 는 이 경계 뒤에 붙는다.
 
 ### 경계선
 
 - **두 컴포넌트가 한 PR에서 같이 바뀌면** 책임이 섞이고 있다는 신호다 — diff에서 바로 드러난다.
-- **파이프라인이나 미들웨어 같은 추상은 두지 않는다.** 자기 자신의 가정을 또 책임지게 만들어, 우리 규모에서는 직접 분리가 더 단순하다.
+- **도메인 처리 파이프라인 추상은 두지 않는다.** 자기 자신의 가정을 또 책임지게 만들어, 우리 규모에서는 직접 분리가 더 단순하다. 단, telemetry delivery 는 요청 처리 결함 경계와 운영 sink 확장을 위해 `EventSink` 로 분리한다.
 
 ## 근거
 

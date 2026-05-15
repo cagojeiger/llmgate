@@ -28,6 +28,7 @@ type Handler struct {
 	log            *slog.Logger
 	recorder       telemetry.AuditRecorder
 	callRecorder   telemetry.CallRecorder
+	lifecycle      telemetry.LifecycleObserver
 	serviceVersion string
 	environment    string
 	requestTimeout time.Duration
@@ -39,6 +40,7 @@ type HandlerConfig struct {
 	StreamIdleTimeout time.Duration
 	ServiceVersion    string
 	Environment       string
+	LifecycleObserver telemetry.LifecycleObserver
 }
 
 func NewHandler(service ChatService, log *slog.Logger, recorder telemetry.AuditRecorder, callRecorder telemetry.CallRecorder, cfg HandlerConfig) *Handler {
@@ -50,6 +52,10 @@ func NewHandler(service ChatService, log *slog.Logger, recorder telemetry.AuditR
 	}
 	if callRecorder == nil {
 		callRecorder = nopCallRecorder{}
+	}
+	lifecycle := cfg.LifecycleObserver
+	if lifecycle == nil {
+		lifecycle = telemetry.NopLifecycleObserver{}
 	}
 	serviceVersion := cfg.ServiceVersion
 	if serviceVersion == "" {
@@ -64,6 +70,7 @@ func NewHandler(service ChatService, log *slog.Logger, recorder telemetry.AuditR
 		log:            log,
 		recorder:       recorder,
 		callRecorder:   callRecorder,
+		lifecycle:      lifecycle,
 		serviceVersion: serviceVersion,
 		environment:    environment,
 		requestTimeout: cfg.RequestTimeout,
@@ -80,6 +87,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 		r = r.WithContext(ctx)
 	}
+	h.lifecycle.RequestStarted(ctx)
+	defer h.lifecycle.RequestFinished(ctx)
 
 	consumer := ConsumerFromContext(ctx)
 	common := telemetry.NewEventCommon(telemetry.CommonInput{
@@ -244,6 +253,8 @@ func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *llmty
 	}
 	stream := result.Stream
 	defer stream.Close()
+	h.lifecycle.StreamStarted(r.Context(), call.EventCommon)
+	defer h.lifecycle.StreamFinished(r.Context(), rec, call)
 	defer func() { telemetry.AdoptStreamSummary(call, stream.Summary(), time.Now()) }()
 
 	h.stream.Run(r.Context(), w, stream, rec, call)

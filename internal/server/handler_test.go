@@ -260,6 +260,7 @@ func TestAdoptStreamSummary_PropagatesRecvErrorKindToAttempt(t *testing.T) {
 func TestHandler_Stream_NormalEOF(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
 	callCaptured, callRecorder := newCaptureCallRecorder()
+	lifecycle := &captureLifecycle{}
 	streamObj := fake.NewStream(
 		fake.WithEvents([]*llmtypes.Event{
 			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: "hello"}}}},
@@ -281,7 +282,9 @@ func TestHandler_Stream_NormalEOF(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, callRecorder, HandlerConfig{})
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, callRecorder, HandlerConfig{
+		LifecycleObserver: lifecycle,
+	})
 
 	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -323,6 +326,21 @@ func TestHandler_Stream_NormalEOF(t *testing.T) {
 	}
 	if gotCall.ResponseBytes <= 0 {
 		t.Errorf("ResponseBytes = %d, want > 0", gotCall.ResponseBytes)
+	}
+	if lifecycle.requestStarted != 1 || lifecycle.requestFinished != 1 {
+		t.Errorf("request lifecycle = started:%d finished:%d, want 1/1", lifecycle.requestStarted, lifecycle.requestFinished)
+	}
+	if lifecycle.streamStarted != 1 || lifecycle.streamFinished != 1 {
+		t.Errorf("stream lifecycle = started:%d finished:%d, want 1/1", lifecycle.streamStarted, lifecycle.streamFinished)
+	}
+	if lifecycle.streamCommon.Operation != "chat.completions.stream" {
+		t.Errorf("stream lifecycle operation = %q, want chat.completions.stream", lifecycle.streamCommon.Operation)
+	}
+	if lifecycle.streamAudit == nil || lifecycle.streamAudit.StatusCode != http.StatusOK {
+		t.Fatalf("stream lifecycle audit = %+v, want status 200", lifecycle.streamAudit)
+	}
+	if lifecycle.streamCall == nil || lifecycle.streamCall.Usage == nil || lifecycle.streamCall.Usage.TotalTokens != 5 {
+		t.Fatalf("stream lifecycle call usage = %+v, want summary tokens before finish notification", lifecycle.streamCall)
 	}
 }
 
@@ -998,6 +1016,35 @@ func (c *captureCallRecorder) len() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return len(c.calls)
+}
+
+type captureLifecycle struct {
+	requestStarted  int
+	requestFinished int
+	streamStarted   int
+	streamFinished  int
+	streamCommon    telemetry.EventCommon
+	streamAudit     *telemetry.AuditEvent
+	streamCall      *telemetry.CallEvent
+}
+
+func (c *captureLifecycle) RequestStarted(context.Context) {
+	c.requestStarted++
+}
+
+func (c *captureLifecycle) RequestFinished(context.Context) {
+	c.requestFinished++
+}
+
+func (c *captureLifecycle) StreamStarted(_ context.Context, common telemetry.EventCommon) {
+	c.streamStarted++
+	c.streamCommon = common
+}
+
+func (c *captureLifecycle) StreamFinished(_ context.Context, audit *telemetry.AuditEvent, call *telemetry.CallEvent) {
+	c.streamFinished++
+	c.streamAudit = audit
+	c.streamCall = call
 }
 
 // stubbornStream simulates a misbehaving adapter whose Close does not

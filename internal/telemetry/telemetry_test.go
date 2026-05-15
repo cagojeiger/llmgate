@@ -316,6 +316,45 @@ func TestCallRecorders(t *testing.T) {
 	}
 }
 
+type captureLifecycleObserver struct {
+	requestStarted  int
+	requestFinished int
+	streamStarted   int
+	streamFinished  int
+}
+
+func (c *captureLifecycleObserver) RequestStarted(context.Context) {
+	c.requestStarted++
+}
+
+func (c *captureLifecycleObserver) RequestFinished(context.Context) {
+	c.requestFinished++
+}
+
+func (c *captureLifecycleObserver) StreamStarted(context.Context, EventCommon) {
+	c.streamStarted++
+}
+
+func (c *captureLifecycleObserver) StreamFinished(context.Context, *AuditEvent, *CallEvent) {
+	c.streamFinished++
+}
+
+func TestLifecycleObservers(t *testing.T) {
+	a, b := &captureLifecycleObserver{}, &captureLifecycleObserver{}
+	os := LifecycleObservers{a, nil, b}
+
+	os.RequestStarted(context.Background())
+	os.RequestFinished(context.Background())
+	os.StreamStarted(context.Background(), EventCommon{})
+	os.StreamFinished(context.Background(), &AuditEvent{}, &CallEvent{})
+
+	for name, got := range map[string]*captureLifecycleObserver{"a": a, "b": b} {
+		if got.requestStarted != 1 || got.requestFinished != 1 || got.streamStarted != 1 || got.streamFinished != 1 {
+			t.Errorf("%s lifecycle calls = %+v, want all 1", name, got)
+		}
+	}
+}
+
 func TestRecorders_CloseReturnsFirstErrButStillRunsRest(t *testing.T) {
 	first := errors.New("first-failed")
 	second := errors.New("second-failed")

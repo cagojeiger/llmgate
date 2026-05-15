@@ -8,6 +8,7 @@
 
 | 변수 | 디폴트 | 의미 |
 |---|---|---|
+| `LLMGATE_ENVIRONMENT` | `local` | 로그 / 텔레메트리의 배포 환경 라벨 (`local`, `staging`, `prod` 등) |
 | `LLMGATE_FALLBACK_ON` | `rate_limit,upstream,timeout,network` | chain 진행 사유 |
 | `LLMGATE_CIRCUIT_FAILURES` | `3` | 연속 실패 임계 (0 = 비활성) |
 | `LLMGATE_CIRCUIT_OPEN_DURATION` | `30s` | 차단 기본 시간 |

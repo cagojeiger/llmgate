@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,14 +25,21 @@ func TestSlogAuditRecorder_RecordAudit(t *testing.T) {
 
 	r.RecordAudit(context.Background(), &AuditEvent{
 		EventCommon: EventCommon{
-			Timestamp:     time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
-			RequestID:     "req-1",
-			Operation:     "chat.completions",
-			ConsumerName:  "alpha",
-			ConsumerKeyID: "01234567",
-			StatusCode:    200,
-			DurationMS:    234,
+			Timestamp:      time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
+			RequestID:      "req-1",
+			ServiceName:    "llmgate",
+			ServiceVersion: "v0.1.6",
+			Environment:    "prod",
+			Operation:      "chat.completions",
+			ConsumerName:   "alpha",
+			ConsumerKeyID:  "01234567",
+			StatusCode:     200,
+			DurationMS:     234,
 		},
+		AuthResult:   AuthResultSuccess,
+		PolicyResult: PolicyResultAllowed,
+		ResourceType: "llm_model",
+		ResourceID:   "coder",
 	})
 
 	var out map[string]any
@@ -46,6 +54,15 @@ func TestSlogAuditRecorder_RecordAudit(t *testing.T) {
 	}
 	if out["request_id"] != "req-1" || out["consumer_name"] != "alpha" {
 		t.Errorf("missing identity fields: %+v", out)
+	}
+	if out["service_name"] != "llmgate" || out["service_version"] != "v0.1.6" || out["environment"] != "prod" {
+		t.Errorf("missing envelope fields: %+v", out)
+	}
+	if out["auth_result"] != "success" || out["policy_result"] != "allowed" {
+		t.Errorf("missing audit decision fields: %+v", out)
+	}
+	if out["resource_type"] != "llm_model" || out["resource_id"] != "coder" {
+		t.Errorf("missing resource fields: %+v", out)
 	}
 	if _, ok := out["model_requested"]; ok {
 		t.Errorf("audit record must not include call fields: %+v", out)
@@ -64,7 +81,10 @@ func TestSlogAuditRecorder_RecordAuthFailure(t *testing.T) {
 			Kind:       llmtypes.KindAuth,
 			StatusCode: 401,
 		},
-		AuthError: AuthErrorUnknown,
+		AuthResult:   AuthResultFailure,
+		AuthError:    AuthErrorUnknown,
+		PolicyResult: PolicyResultDenied,
+		DenyReason:   DenyReasonAuth,
 	})
 
 	var out map[string]any
@@ -73,6 +93,9 @@ func TestSlogAuditRecorder_RecordAuthFailure(t *testing.T) {
 	}
 	if out["auth_error"] != "unknown" || out["error_kind"] != "auth" {
 		t.Errorf("auth fields = %+v, want auth_error=unknown error_kind=auth", out)
+	}
+	if out["auth_result"] != "failure" || out["policy_result"] != "denied" || out["deny_reason"] != "auth" {
+		t.Errorf("auth decision fields = %+v, want failure/denied/auth", out)
 	}
 	if _, ok := out["consumer_name"]; ok {
 		t.Errorf("consumer_name must be omitted on auth failure: %+v", out)
@@ -85,13 +108,16 @@ func TestSlogCallRecorder_RecordCall(t *testing.T) {
 
 	r.RecordCall(context.Background(), &CallEvent{
 		EventCommon: EventCommon{
-			Timestamp:     time.Now(),
-			RequestID:     "req-call",
-			Operation:     "chat.completions",
-			ConsumerName:  "alpha",
-			ConsumerKeyID: "01234567",
-			StatusCode:    200,
-			DurationMS:    50,
+			Timestamp:      time.Now(),
+			RequestID:      "req-call",
+			ServiceName:    "llmgate",
+			ServiceVersion: "v0.1.6",
+			Environment:    "prod",
+			Operation:      "chat.completions",
+			ConsumerName:   "alpha",
+			ConsumerKeyID:  "01234567",
+			StatusCode:     200,
+			DurationMS:     50,
 		},
 		ModelRequested: "coder",
 		ModelUsed:      "deepseek-v4-flash",
@@ -119,9 +145,99 @@ func TestSlogCallRecorder_RecordCall(t *testing.T) {
 	if out["prompt_tokens"].(float64) != 5 || out["total_tokens"].(float64) != 12 {
 		t.Errorf("usage fields = %+v", out)
 	}
+	if out["attempts_count"].(float64) != 2 {
+		t.Errorf("attempts_count = %v, want 2", out["attempts_count"])
+	}
+	if out["final_attempt_vendor"] != "opencode" || out["final_attempt_model"] != "deepseek-v4-flash" {
+		t.Errorf("final attempt fields = %+v", out)
+	}
 	atts, ok := out["attempts"].([]any)
 	if !ok || len(atts) != 2 {
 		t.Fatalf("attempts = %v, want 2-item slice", out["attempts"])
+	}
+}
+
+func TestEventCommonDefaults(t *testing.T) {
+	got := NewEventCommon(CommonInput{RequestID: "req-1", Operation: "chat.completions"})
+	if got.ServiceName != "llmgate" || got.ServiceVersion != "dev" || got.Environment != "local" {
+		t.Fatalf("defaults = service_name=%q service_version=%q environment=%q", got.ServiceName, got.ServiceVersion, got.Environment)
+	}
+}
+
+func TestAuditDecisionHelpers(t *testing.T) {
+	rec := NewAuditEvent(NewEventCommon(CommonInput{}))
+	MarkAuthSuccess(rec)
+	SetResource(rec, "llm_model", "coder")
+	MarkPolicyAllowed(rec)
+	if rec.AuthResult != AuthResultSuccess || rec.PolicyResult != PolicyResultAllowed {
+		t.Fatalf("allowed decision = %+v", rec)
+	}
+	MarkAuthFailure(rec, AuthErrorFormat)
+	if rec.AuthResult != AuthResultFailure || rec.AuthError != AuthErrorFormat || rec.DenyReason != DenyReasonAuth {
+		t.Fatalf("auth failure = %+v", rec)
+	}
+	MarkPolicyDenied(rec, DenyReasonModelNotAllowed)
+	if rec.PolicyResult != PolicyResultDenied || rec.DenyReason != DenyReasonModelNotAllowed {
+		t.Fatalf("policy denial = %+v", rec)
+	}
+}
+
+func TestCallAttemptHelpers(t *testing.T) {
+	call := &CallEvent{Attempts: []llmtypes.Attempt{
+		{Vendor: "opencode", Model: "a", StatusCode: 429},
+		{Vendor: "opencode", Model: "b", StatusCode: 200},
+	}}
+	if AttemptsCount(call) != 2 {
+		t.Fatalf("AttemptsCount = %d, want 2", AttemptsCount(call))
+	}
+	final, ok := FinalAttempt(call)
+	if !ok || final.Model != "b" || final.StatusCode != 200 {
+		t.Fatalf("FinalAttempt = %+v/%v, want model b status 200", final, ok)
+	}
+}
+
+func TestSlogRecorders_DoNotLeakSensitiveMaterial(t *testing.T) {
+	log, buf := newCapturingLogger()
+	auditRecorder := NewSlogAuditRecorder(log)
+	callRecorder := NewSlogCallRecorder(log)
+
+	auditRecorder.RecordAudit(context.Background(), &AuditEvent{
+		EventCommon: EventCommon{
+			Timestamp:     time.Now(),
+			RequestID:     "req-redaction",
+			Operation:     "chat.completions",
+			ConsumerName:  "alpha",
+			ConsumerKeyID: "01234567",
+			StatusCode:    200,
+		},
+		AuthResult: AuthResultSuccess,
+	})
+	callRecorder.RecordCall(context.Background(), &CallEvent{
+		EventCommon: EventCommon{
+			Timestamp:     time.Now(),
+			RequestID:     "req-redaction",
+			Operation:     "chat.completions",
+			ConsumerName:  "alpha",
+			ConsumerKeyID: "01234567",
+			StatusCode:    200,
+		},
+		ModelRequested: "coder",
+		RequestBytes:   256,
+		ResponseBytes:  512,
+		Attempts:       []llmtypes.Attempt{{Vendor: "opencode", Model: "deepseek-v4-flash", StatusCode: 200}},
+	})
+
+	logged := buf.String()
+	for _, forbidden := range []string{
+		"Authorization",
+		"Bearer ",
+		"sk-test-secret",
+		"hello prompt body",
+		"assistant response body",
+	} {
+		if strings.Contains(logged, forbidden) {
+			t.Fatalf("log leaked %q: %s", forbidden, logged)
+		}
 	}
 }
 

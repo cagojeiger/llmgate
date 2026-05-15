@@ -28,6 +28,8 @@ type Handler struct {
 	log            *slog.Logger
 	recorder       telemetry.AuditRecorder
 	callRecorder   telemetry.CallRecorder
+	serviceVersion string
+	environment    string
 	requestTimeout time.Duration
 	stream         *streamRelay
 }
@@ -35,6 +37,8 @@ type Handler struct {
 type HandlerConfig struct {
 	RequestTimeout    time.Duration
 	StreamIdleTimeout time.Duration
+	ServiceVersion    string
+	Environment       string
 }
 
 func NewHandler(service ChatService, log *slog.Logger, recorder telemetry.AuditRecorder, callRecorder telemetry.CallRecorder, cfg HandlerConfig) *Handler {
@@ -47,11 +51,21 @@ func NewHandler(service ChatService, log *slog.Logger, recorder telemetry.AuditR
 	if callRecorder == nil {
 		callRecorder = nopCallRecorder{}
 	}
+	serviceVersion := cfg.ServiceVersion
+	if serviceVersion == "" {
+		serviceVersion = "dev"
+	}
+	environment := cfg.Environment
+	if environment == "" {
+		environment = "local"
+	}
 	return &Handler{
 		service:        service,
 		log:            log,
 		recorder:       recorder,
 		callRecorder:   callRecorder,
+		serviceVersion: serviceVersion,
+		environment:    environment,
 		requestTimeout: cfg.RequestTimeout,
 		stream:         newStreamRelay(log, cfg.StreamIdleTimeout),
 	}
@@ -69,13 +83,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	consumer := ConsumerFromContext(ctx)
 	common := telemetry.NewEventCommon(telemetry.CommonInput{
-		Timestamp:     start,
-		RequestID:     RequestIDFromContext(ctx),
-		Operation:     "chat.completions",
-		ConsumerName:  consumer.Name,
-		ConsumerKeyID: consumer.KeyID,
+		Timestamp:      start,
+		RequestID:      RequestIDFromContext(ctx),
+		ServiceVersion: h.serviceVersion,
+		Environment:    h.environment,
+		Operation:      "chat.completions",
+		ConsumerName:   consumer.Name,
+		ConsumerKeyID:  consumer.KeyID,
 	})
 	rec := telemetry.NewAuditEvent(common)
+	telemetry.MarkAuthSuccess(rec)
 	var call *telemetry.CallEvent
 	defer func() {
 		telemetry.FinishAuditEvent(rec, rec.StatusCode, rec.Kind, time.Since(start).Milliseconds())
@@ -100,7 +117,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// only "unauthorized" — but is stamped on rec.AuthError so
 		// audit/access-log surfaces show "missing" vs "format" vs
 		// "unknown" for operators.
-		rec.AuthError = consumer.AuthError
+		telemetry.MarkAuthFailure(rec, consumer.AuthError)
 		perr := &llmtypes.Error{Kind: llmtypes.KindAuth, Message: "unauthorized"}
 		adoptError(rec, perr)
 		writeError(w, perr)
@@ -123,12 +140,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, perr)
 		return
 	}
+	telemetry.SetResource(rec, "llm_model", req.Model)
 	if req.Model != "" && !isModelAllowed(req.Model, consumer.AllowedAliases) {
+		telemetry.MarkPolicyDenied(rec, telemetry.DenyReasonModelNotAllowed)
 		perr := &llmtypes.Error{Kind: llmtypes.KindForbidden, Message: "model not allowed"}
 		adoptError(rec, perr)
 		writeError(w, perr)
 		return
 	}
+	telemetry.MarkPolicyAllowed(rec)
 
 	call = telemetry.NewCallEvent(common, req.Model, requestBytes)
 	if req.Stream != nil && *req.Stream {

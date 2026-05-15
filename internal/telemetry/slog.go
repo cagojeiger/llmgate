@@ -24,15 +24,7 @@ func (r *SlogAuditRecorder) RecordAudit(ctx context.Context, rec *AuditEvent) {
 		return
 	}
 
-	attrs := []slog.Attr{
-		slog.Int("schema_version", SchemaVersion),
-		slog.String("event_type", EventTypeAudit),
-		slog.Time("timestamp", rec.Timestamp),
-		slog.String("request_id", rec.RequestID),
-		slog.String("operation", rec.Operation),
-		slog.Int("status", rec.StatusCode),
-		slog.Int64("duration_ms", rec.DurationMS),
-	}
+	attrs := commonAttrs(EventTypeAudit, rec.EventCommon)
 	if rec.ConsumerName != "" {
 		attrs = append(attrs, slog.String("consumer_name", rec.ConsumerName))
 	}
@@ -41,6 +33,21 @@ func (r *SlogAuditRecorder) RecordAudit(ctx context.Context, rec *AuditEvent) {
 	}
 	if rec.AuthError != "" {
 		attrs = append(attrs, slog.String("auth_error", string(rec.AuthError)))
+	}
+	if rec.AuthResult != "" {
+		attrs = append(attrs, slog.String("auth_result", string(rec.AuthResult)))
+	}
+	if rec.PolicyResult != "" {
+		attrs = append(attrs, slog.String("policy_result", string(rec.PolicyResult)))
+	}
+	if rec.DenyReason != "" {
+		attrs = append(attrs, slog.String("deny_reason", string(rec.DenyReason)))
+	}
+	if rec.ResourceType != "" {
+		attrs = append(attrs, slog.String("resource_type", rec.ResourceType))
+	}
+	if rec.ResourceID != "" {
+		attrs = append(attrs, slog.String("resource_id", rec.ResourceID))
 	}
 	if rec.Kind != "" {
 		attrs = append(attrs, slog.String("error_kind", string(rec.Kind)))
@@ -68,18 +75,11 @@ func (r *SlogCallRecorder) RecordCall(ctx context.Context, rec *CallEvent) {
 		return
 	}
 
-	attrs := []slog.Attr{
-		slog.Int("schema_version", SchemaVersion),
-		slog.String("event_type", EventTypeCall),
-		slog.Time("timestamp", rec.Timestamp),
-		slog.String("request_id", rec.RequestID),
-		slog.String("operation", rec.Operation),
+	attrs := append(commonAttrs(EventTypeCall, rec.EventCommon),
 		slog.String("model_requested", rec.ModelRequested),
-		slog.Int("status", rec.StatusCode),
-		slog.Int64("duration_ms", rec.DurationMS),
 		slog.Int64("request_bytes", rec.RequestBytes),
 		slog.Int64("response_bytes", rec.ResponseBytes),
-	}
+	)
 	if rec.ConsumerName != "" {
 		attrs = append(attrs, slog.String("consumer_name", rec.ConsumerName))
 	}
@@ -88,6 +88,21 @@ func (r *SlogCallRecorder) RecordCall(ctx context.Context, rec *CallEvent) {
 	}
 	if rec.Vendor != "" {
 		attrs = append(attrs, slog.String("vendor", rec.Vendor))
+	}
+	attrs = append(attrs, slog.Int("attempts_count", AttemptsCount(rec)))
+	if final, ok := FinalAttempt(rec); ok {
+		if final.Vendor != "" {
+			attrs = append(attrs, slog.String("final_attempt_vendor", final.Vendor))
+		}
+		if final.Model != "" {
+			attrs = append(attrs, slog.String("final_attempt_model", final.Model))
+		}
+		if final.StatusCode != 0 {
+			attrs = append(attrs, slog.Int("final_attempt_status", final.StatusCode))
+		}
+		if final.Kind != "" {
+			attrs = append(attrs, slog.String("final_attempt_error_kind", string(final.Kind)))
+		}
 	}
 	if rec.ModelUsed != "" && rec.ModelUsed != rec.ModelRequested {
 		attrs = append(attrs, slog.String("model_used", rec.ModelUsed))
@@ -113,3 +128,25 @@ func (r *SlogCallRecorder) RecordCall(ctx context.Context, rec *CallEvent) {
 }
 
 func (r *SlogCallRecorder) Close() error { return nil }
+
+func commonAttrs(eventType string, common EventCommon) []slog.Attr {
+	attrs := []slog.Attr{
+		slog.Int("schema_version", SchemaVersion),
+		slog.String("event_type", eventType),
+		slog.Time("timestamp", common.Timestamp),
+		slog.String("request_id", common.RequestID),
+		slog.String("operation", common.Operation),
+		slog.Int("status", common.StatusCode),
+		slog.Int64("duration_ms", common.DurationMS),
+	}
+	if common.ServiceName != "" {
+		attrs = append(attrs, slog.String("service_name", common.ServiceName))
+	}
+	if common.ServiceVersion != "" {
+		attrs = append(attrs, slog.String("service_version", common.ServiceVersion))
+	}
+	if common.Environment != "" {
+		attrs = append(attrs, slog.String("environment", common.Environment))
+	}
+	return attrs
+}

@@ -52,6 +52,12 @@ func TestHandler_SingleAttempt_RecordPopulated(t *testing.T) {
 	if gotAudit.StatusCode != http.StatusOK {
 		t.Errorf("audit StatusCode = %d, want 200", gotAudit.StatusCode)
 	}
+	if gotAudit.AuthResult != telemetry.AuthResultSuccess || gotAudit.PolicyResult != telemetry.PolicyResultAllowed {
+		t.Errorf("audit decisions = auth:%q policy:%q, want success/allowed", gotAudit.AuthResult, gotAudit.PolicyResult)
+	}
+	if gotAudit.ResourceType != "llm_model" || gotAudit.ResourceID != "deepseek-v4-flash" {
+		t.Errorf("audit resource = %q/%q, want llm_model/deepseek-v4-flash", gotAudit.ResourceType, gotAudit.ResourceID)
+	}
 	got := callRec.last(t)
 	if got.ModelRequested != "deepseek-v4-flash" {
 		t.Errorf("ModelRequested = %q, want deepseek-v4-flash", got.ModelRequested)

@@ -54,6 +54,7 @@ func run() error {
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel})).With(
 		slog.String("service", "llmgate"),
+		slog.String("version", version),
 		slog.String("phase", "v1-bypass"),
 	)
 	slog.SetDefault(logger)
@@ -112,6 +113,8 @@ func run() error {
 	handler := server.NewHandler(svc, logger, recorder, callRecorder, server.HandlerConfig{
 		RequestTimeout:    cfg.RequestTimeout,
 		StreamIdleTimeout: cfg.StreamIdleTimeout,
+		ServiceVersion:    version,
+		Environment:       cfg.Environment,
 	})
 	probe := server.NewProbeState()
 	srv := server.New(cfg, accessLog, handler, consumerStore, probe)

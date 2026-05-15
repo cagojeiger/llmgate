@@ -8,9 +8,11 @@
 # Usage:
 #   scripts/gen-consumer.sh <name>
 #
-# The yaml is written to /<name>.yaml. Refuses
+# The yaml is written to generated-key-hashes/<name>.yaml. Refuses
 # to overwrite an existing file so a second invocation does not silently
-# rotate a live consumer's key.
+# rotate a live consumer's key. Copy reviewed hashes into the runtime
+# consumers/ directory through the deployment path, not directly from this
+# generated output.
 #
 # Naming rule (must match internal/consumers/consumers.go):
 #   ^[a-z0-9][a-z0-9_-]{0,63}$
@@ -30,7 +32,7 @@ if ! [[ "$NAME" =~ ^[a-z0-9][a-z0-9_-]{0,63}$ ]]; then
     exit 2
 fi
 
-DIR=""
+DIR="generated-key-hashes"
 mkdir -p "$DIR"
 OUT="$DIR/$NAME.yaml"
 if [[ -e "$OUT" ]]; then

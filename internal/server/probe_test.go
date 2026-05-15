@@ -14,7 +14,7 @@ import (
 func newTestServer(t *testing.T, probe *ProbeState) (*httptest.Server, func()) {
 	t.Helper()
 	store := writeStoreYAML(t, "alpha", "good-key")
-	handler := NewHandler(&stubService{}, slog.Default(), &recordingRecorder{}, HandlerConfig{})
+	handler := NewHandler(&stubService{}, slog.Default(), &recordingRecorder{}, nil, HandlerConfig{})
 	srv := New(&config.Server{Addr: ":0"}, slog.Default(), handler, store, probe)
 	ts := httptest.NewServer(srv.Handler)
 	return ts, ts.Close

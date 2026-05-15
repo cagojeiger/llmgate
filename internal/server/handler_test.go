@@ -21,6 +21,7 @@ import (
 
 func TestHandler_SingleAttempt_RecordPopulated(t *testing.T) {
 	rec, recorder := newCaptureRecorder()
+	callRec, callRecorder := newCaptureCallRecorder()
 	r := &fakeService{
 		vendor: "opencode",
 		buildResult: func(req *llmtypes.Request) *llmrouter.RouteResult {
@@ -37,7 +38,7 @@ func TestHandler_SingleAttempt_RecordPopulated(t *testing.T) {
 			}
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, callRecorder, HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -47,7 +48,11 @@ func TestHandler_SingleAttempt_RecordPopulated(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body = %s", w.Code, w.Body.String())
 	}
-	got := rec.last(t)
+	gotAudit := rec.last(t)
+	if gotAudit.StatusCode != http.StatusOK {
+		t.Errorf("audit StatusCode = %d, want 200", gotAudit.StatusCode)
+	}
+	got := callRec.last(t)
 	if got.ModelRequested != "deepseek-v4-flash" {
 		t.Errorf("ModelRequested = %q, want deepseek-v4-flash", got.ModelRequested)
 	}
@@ -63,7 +68,8 @@ func TestHandler_SingleAttempt_RecordPopulated(t *testing.T) {
 }
 
 func TestHandler_FallbackChain_AttemptsRecorded(t *testing.T) {
-	rec, recorder := newCaptureRecorder()
+	_, recorder := newCaptureRecorder()
+	callRec, callRecorder := newCaptureCallRecorder()
 	r := &fakeService{
 		vendor: "opencode",
 		buildResult: func(req *llmtypes.Request) *llmrouter.RouteResult {
@@ -81,7 +87,7 @@ func TestHandler_FallbackChain_AttemptsRecorded(t *testing.T) {
 			}
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, callRecorder, HandlerConfig{})
 
 	body := `{"model":"coder","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -91,7 +97,7 @@ func TestHandler_FallbackChain_AttemptsRecorded(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
-	got := rec.last(t)
+	got := callRec.last(t)
 	if got.ModelRequested != "coder" {
 		t.Errorf("ModelRequested = %q, want coder (alias)", got.ModelRequested)
 	}
@@ -137,6 +143,7 @@ func TestAdoptError_ProviderErrorMapsKindAndStatus(t *testing.T) {
 
 func TestHandler_AllowedAliasesRejectBeforeService(t *testing.T) {
 	rec, recorder := newCaptureRecorder()
+	callRec, callRecorder := newCaptureCallRecorder()
 	serviceCalled := false
 	r := &fakeService{
 		buildResult: func(req *llmtypes.Request) *llmrouter.RouteResult {
@@ -147,7 +154,7 @@ func TestHandler_AllowedAliasesRejectBeforeService(t *testing.T) {
 			}
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, callRecorder, HandlerConfig{})
 
 	body := `{"model":"smart","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -169,11 +176,11 @@ func TestHandler_AllowedAliasesRejectBeforeService(t *testing.T) {
 	if got.ConsumerName != "alpha" || got.ConsumerKeyID != "12345678" {
 		t.Fatalf("consumer audit = %q/%q, want alpha/12345678", got.ConsumerName, got.ConsumerKeyID)
 	}
-	if got.ModelRequested != "smart" {
-		t.Fatalf("ModelRequested = %q, want smart", got.ModelRequested)
-	}
 	if got.Kind != llmtypes.KindForbidden || got.StatusCode != http.StatusForbidden {
 		t.Fatalf("Kind/StatusCode = %q/%d, want forbidden/403", got.Kind, got.StatusCode)
+	}
+	if callRec.len() != 0 {
+		t.Fatalf("call records = %d, want 0 for allowlist rejection", callRec.len())
 	}
 }
 
@@ -191,7 +198,7 @@ func TestAdoptError_NonProviderError_Falls500Unknown(t *testing.T) {
 func TestAdoptStreamSummary_FinalizesAttemptAndRecord(t *testing.T) {
 	started := time.Unix(1700000000, 0)
 	now := started.Add(250 * time.Millisecond)
-	rec := &audit.Record{
+	call := &audit.CallRecord{
 		Attempts: []llmtypes.Attempt{
 			{Vendor: "v", Model: "m", StartedAt: started},
 		},
@@ -201,15 +208,15 @@ func TestAdoptStreamSummary_FinalizesAttemptAndRecord(t *testing.T) {
 		VendorCost: `"0.001"`,
 	}
 
-	adoptStreamSummary(rec, sum, now)
+	adoptStreamSummaryCall(call, sum, now)
 
-	if rec.Usage == nil || rec.Usage.TotalTokens != 12 {
-		t.Errorf("rec.Usage = %+v, want total=12", rec.Usage)
+	if call.Usage == nil || call.Usage.TotalTokens != 12 {
+		t.Errorf("call.Usage = %+v, want total=12", call.Usage)
 	}
-	if rec.VendorCost != `"0.001"` {
-		t.Errorf("rec.VendorCost = %q, want \"0.001\"", rec.VendorCost)
+	if call.VendorCost != `"0.001"` {
+		t.Errorf("call.VendorCost = %q, want \"0.001\"", call.VendorCost)
 	}
-	last := rec.Attempts[0]
+	last := call.Attempts[0]
 	if last.DurationMS != 250 {
 		t.Errorf("last.DurationMS = %d, want 250", last.DurationMS)
 	}
@@ -227,25 +234,26 @@ func TestAdoptStreamSummary_PropagatesRecvErrorKindToAttempt(t *testing.T) {
 	// non-stream path.
 	started := time.Unix(1700000000, 0)
 	now := started.Add(100 * time.Millisecond)
-	rec := &audit.Record{
-		Kind: llmtypes.KindUpstream,
+	call := &audit.CallRecord{
+		EventCommon: audit.EventCommon{Kind: llmtypes.KindUpstream},
 		Attempts: []llmtypes.Attempt{
 			{Vendor: "v", Model: "m", StartedAt: started},
 		},
 	}
 
-	adoptStreamSummary(rec, nil, now)
+	adoptStreamSummaryCall(call, nil, now)
 
-	if rec.Attempts[0].Kind != llmtypes.KindUpstream {
-		t.Errorf("attempt ErrorKind = %q, want upstream", rec.Attempts[0].Kind)
+	if call.Attempts[0].Kind != llmtypes.KindUpstream {
+		t.Errorf("attempt ErrorKind = %q, want upstream", call.Attempts[0].Kind)
 	}
-	if rec.Attempts[0].DurationMS != 100 {
-		t.Errorf("DurationMS = %d, want 100", rec.Attempts[0].DurationMS)
+	if call.Attempts[0].DurationMS != 100 {
+		t.Errorf("DurationMS = %d, want 100", call.Attempts[0].DurationMS)
 	}
 }
 
 func TestHandler_Stream_NormalEOF(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
+	callCaptured, callRecorder := newCaptureCallRecorder()
 	streamObj := fake.NewStream(
 		fake.WithEvents([]*llmtypes.Event{
 			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: "hello"}}}},
@@ -267,7 +275,7 @@ func TestHandler_Stream_NormalEOF(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, callRecorder, HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -297,22 +305,24 @@ func TestHandler_Stream_NormalEOF(t *testing.T) {
 	if got.StatusCode != 200 {
 		t.Errorf("StatusCode = %d, want 200", got.StatusCode)
 	}
-	if got.Usage == nil || got.Usage.TotalTokens != 5 {
-		t.Errorf("Usage = %+v, want total=5 from Summary", got.Usage)
+	gotCall := callCaptured.last(t)
+	if gotCall.Usage == nil || gotCall.Usage.TotalTokens != 5 {
+		t.Errorf("Usage = %+v, want total=5 from Summary", gotCall.Usage)
 	}
-	if len(got.Attempts) != 1 {
-		t.Fatalf("Attempts = %d, want 1", len(got.Attempts))
+	if len(gotCall.Attempts) != 1 {
+		t.Fatalf("Attempts = %d, want 1", len(gotCall.Attempts))
 	}
-	if got.Attempts[0].Usage == nil || got.Attempts[0].Usage.TotalTokens != 5 {
-		t.Errorf("Attempts[0].Usage not finalized from Summary: %+v", got.Attempts[0].Usage)
+	if gotCall.Attempts[0].Usage == nil || gotCall.Attempts[0].Usage.TotalTokens != 5 {
+		t.Errorf("Attempts[0].Usage not finalized from Summary: %+v", gotCall.Attempts[0].Usage)
 	}
-	if got.ResponseBytes <= 0 {
-		t.Errorf("ResponseBytes = %d, want > 0", got.ResponseBytes)
+	if gotCall.ResponseBytes <= 0 {
+		t.Errorf("ResponseBytes = %d, want > 0", gotCall.ResponseBytes)
 	}
 }
 
 func TestHandler_Stream_RecvError_PropagatesErrorKind(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
+	callCaptured, callRecorder := newCaptureCallRecorder()
 	streamObj := fake.NewStream(
 		fake.WithEvents([]*llmtypes.Event{
 			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: "partial"}}}},
@@ -332,7 +342,7 @@ func TestHandler_Stream_RecvError_PropagatesErrorKind(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, callRecorder, HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -359,13 +369,15 @@ func TestHandler_Stream_RecvError_PropagatesErrorKind(t *testing.T) {
 	if got.Kind != llmtypes.KindUpstream {
 		t.Errorf("rec.Kind = %q, want upstream", got.Kind)
 	}
-	if len(got.Attempts) != 1 || got.Attempts[0].Kind != llmtypes.KindUpstream {
-		t.Errorf("Attempts[0].Kind not propagated: %+v", got.Attempts)
+	gotCall := callCaptured.last(t)
+	if len(gotCall.Attempts) != 1 || gotCall.Attempts[0].Kind != llmtypes.KindUpstream {
+		t.Errorf("Attempts[0].Kind not propagated: %+v", gotCall.Attempts)
 	}
 }
 
 func TestHandler_Stream_IdleTimeoutSendsError(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
+	callCaptured, callRecorder := newCaptureCallRecorder()
 	streamObj := fake.NewStream(
 		fake.WithRecvDelay(50*time.Millisecond),
 		fake.WithSummary(&llmtypes.Summary{}),
@@ -382,7 +394,7 @@ func TestHandler_Stream_IdleTimeoutSendsError(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, callRecorder, HandlerConfig{
 		StreamIdleTimeout: time.Millisecond,
 	})
 
@@ -406,8 +418,9 @@ func TestHandler_Stream_IdleTimeoutSendsError(t *testing.T) {
 	if got.Kind != llmtypes.KindTimeout {
 		t.Errorf("rec.Kind = %q, want timeout", got.Kind)
 	}
-	if len(got.Attempts) != 1 || got.Attempts[0].Kind != llmtypes.KindTimeout {
-		t.Errorf("Attempts[0].Kind not propagated: %+v", got.Attempts)
+	gotCall := callCaptured.last(t)
+	if len(gotCall.Attempts) != 1 || gotCall.Attempts[0].Kind != llmtypes.KindTimeout {
+		t.Errorf("Attempts[0].Kind not propagated: %+v", gotCall.Attempts)
 	}
 	if streamObj.Closed() == 0 {
 		t.Errorf("Stream.Close() calls = 0, want at least 1")
@@ -416,6 +429,7 @@ func TestHandler_Stream_IdleTimeoutSendsError(t *testing.T) {
 
 func TestHandler_Stream_RequestTimeoutSendsError(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
+	callCaptured, callRecorder := newCaptureCallRecorder()
 	streamObj := fake.NewStream(
 		fake.WithRecvDelay(50*time.Millisecond),
 		fake.WithSummary(&llmtypes.Summary{}),
@@ -432,7 +446,7 @@ func TestHandler_Stream_RequestTimeoutSendsError(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, callRecorder, HandlerConfig{
 		RequestTimeout: time.Millisecond,
 	})
 
@@ -456,13 +470,15 @@ func TestHandler_Stream_RequestTimeoutSendsError(t *testing.T) {
 	if got.Kind != llmtypes.KindTimeout {
 		t.Errorf("rec.Kind = %q, want timeout", got.Kind)
 	}
-	if len(got.Attempts) != 1 || got.Attempts[0].Kind != llmtypes.KindTimeout {
-		t.Errorf("Attempts[0].Kind not propagated: %+v", got.Attempts)
+	gotCall := callCaptured.last(t)
+	if len(gotCall.Attempts) != 1 || gotCall.Attempts[0].Kind != llmtypes.KindTimeout {
+		t.Errorf("Attempts[0].Kind not propagated: %+v", gotCall.Attempts)
 	}
 }
 
 func TestHandler_Stream_ContextCanceledRecordsClientClosed(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
+	callCaptured, callRecorder := newCaptureCallRecorder()
 	streamObj := fake.NewStream(
 		fake.WithRecvDelay(50*time.Millisecond),
 		fake.WithSummary(&llmtypes.Summary{}),
@@ -479,7 +495,7 @@ func TestHandler_Stream_ContextCanceledRecordsClientClosed(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, callRecorder, HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	baseReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -494,6 +510,9 @@ func TestHandler_Stream_ContextCanceledRecordsClientClosed(t *testing.T) {
 	if got.Kind != llmtypes.KindClientClosed {
 		t.Fatalf("Kind = %q, want client_closed", got.Kind)
 	}
+	if callCaptured.last(t).Kind != llmtypes.KindClientClosed {
+		t.Fatalf("call Kind = %q, want client_closed", callCaptured.last(t).Kind)
+	}
 	if streamObj.Closed() == 0 {
 		t.Errorf("Stream.Close() calls = 0, want at least 1")
 	}
@@ -505,6 +524,7 @@ func TestHandler_Stream_ContextCanceledRecordsClientClosed(t *testing.T) {
 // upstream stream — leaving later events un-consumed.
 func TestHandler_Stream_ClientDisconnect_MidStream(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
+	_, callRecorder := newCaptureCallRecorder()
 	streamObj := fake.NewStream(
 		fake.WithEvents([]*llmtypes.Event{
 			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: "one"}}}},
@@ -525,7 +545,7 @@ func TestHandler_Stream_ClientDisconnect_MidStream(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, callRecorder, HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -553,6 +573,7 @@ func TestHandler_Stream_ClientDisconnect_MidStream(t *testing.T) {
 // complete even though upstream finished cleanly.
 func TestHandler_Stream_ClientDisconnect_OnDone(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
+	_, callRecorder := newCaptureCallRecorder()
 	streamObj := fake.NewStream(
 		fake.WithEvents([]*llmtypes.Event{
 			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: "only"}}}},
@@ -571,7 +592,7 @@ func TestHandler_Stream_ClientDisconnect_OnDone(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, callRecorder, HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -590,6 +611,7 @@ func TestHandler_Stream_ClientDisconnect_OnDone(t *testing.T) {
 // just the first event.
 func TestHandler_Stream_ClientDisconnect_OnFirstEvent(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
+	_, callRecorder := newCaptureCallRecorder()
 	streamObj := fake.NewStream(
 		fake.WithEvents([]*llmtypes.Event{
 			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: "first"}}}},
@@ -609,7 +631,7 @@ func TestHandler_Stream_ClientDisconnect_OnFirstEvent(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, callRecorder, HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -630,6 +652,7 @@ func TestHandler_Stream_ClientDisconnect_OnFirstEvent(t *testing.T) {
 // (already on the wire), but ErrorKind reveals the terminal state.
 func TestHandler_NonStream_ClientDisconnect(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
+	_, callRecorder := newCaptureCallRecorder()
 	r := &fakeService{
 		buildResult: func(req *llmtypes.Request) *llmrouter.RouteResult {
 			return &llmrouter.RouteResult{
@@ -645,7 +668,7 @@ func TestHandler_NonStream_ClientDisconnect(t *testing.T) {
 			}
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, callRecorder, HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -691,6 +714,7 @@ func (d *disconnectAfterNWriter) Flush() {}
 
 func TestHandler_Stream_PreStreamServiceError(t *testing.T) {
 	captured, recorder := newCaptureRecorder()
+	callCaptured, callRecorder := newCaptureCallRecorder()
 	r := &fakeService{
 		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
 			return &llmrouter.RouteResult{
@@ -702,7 +726,7 @@ func TestHandler_Stream_PreStreamServiceError(t *testing.T) {
 			}, &llmtypes.Error{Kind: llmtypes.KindAuth, Message: "no key"}
 		},
 	}
-	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+	h := NewHandler(r, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, callRecorder, HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -726,8 +750,9 @@ func TestHandler_Stream_PreStreamServiceError(t *testing.T) {
 	if got.StatusCode != http.StatusUnauthorized {
 		t.Errorf("rec.StatusCode = %d, want 401", got.StatusCode)
 	}
-	if len(got.Attempts) != 1 || got.Attempts[0].Kind != llmtypes.KindAuth {
-		t.Errorf("Attempts[0] = %+v, want auth attempt", got.Attempts)
+	gotCall := callCaptured.last(t)
+	if len(gotCall.Attempts) != 1 || gotCall.Attempts[0].Kind != llmtypes.KindAuth {
+		t.Errorf("Attempts[0] = %+v, want auth attempt", gotCall.Attempts)
 	}
 }
 
@@ -741,7 +766,7 @@ func TestHandler_PanicInComplete_StampsAuditAndReturns500(t *testing.T) {
 			panic("boom in complete")
 		},
 	}
-	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, nil, HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -771,7 +796,7 @@ func TestHandler_PanicInStream_StampsAuditAndReturns500(t *testing.T) {
 			panic("boom in stream")
 		},
 	}
-	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, nil, HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -803,7 +828,7 @@ func TestHandler_PanicAfterResponseStarted_DoesNotCorruptWireBody(t *testing.T) 
 			panic("late boom")
 		},
 	}
-	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, nil, HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -837,7 +862,7 @@ func TestHandler_AbortHandlerPanic_Repropagates_NotStamped(t *testing.T) {
 			panic(http.ErrAbortHandler)
 		},
 	}
-	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, nil, HandlerConfig{})
 
 	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -862,11 +887,13 @@ func TestHandler_AbortHandlerPanic_Repropagates_NotStamped(t *testing.T) {
 // Panic audit status records the outcome, not any earlier wire status.
 func TestHandler_recoverPanic_OverridesPreStampedStatus(t *testing.T) {
 	_, recorder := newCaptureRecorder()
-	h := NewHandler(&fakeService{vendor: "opencode"}, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+	h := NewHandler(&fakeService{vendor: "opencode"}, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, nil, HandlerConfig{})
 
 	rec := &audit.Record{
-		RequestID:  "test-req-id",
-		StatusCode: http.StatusOK,
+		EventCommon: audit.EventCommon{
+			RequestID:  "test-req-id",
+			StatusCode: http.StatusOK,
+		},
 	}
 	inner := httptest.NewRecorder()
 	cw := &countingWriter{ResponseWriter: inner, status: http.StatusOK, wroteHeader: true}
@@ -915,7 +942,7 @@ func newCaptureRecorder() (*captureRecorder, audit.Recorder) {
 	return c, c
 }
 
-func (c *captureRecorder) Record(_ context.Context, r *audit.Record) {
+func (c *captureRecorder) RecordAudit(_ context.Context, r *audit.Record) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.records = append(c.records, r)
@@ -931,6 +958,40 @@ func (c *captureRecorder) last(t *testing.T) *audit.Record {
 		t.Fatalf("no records captured")
 	}
 	return c.records[len(c.records)-1]
+}
+
+type captureCallRecorder struct {
+	mu    sync.Mutex
+	calls []*audit.CallRecord
+}
+
+func newCaptureCallRecorder() (*captureCallRecorder, audit.CallRecorder) {
+	c := &captureCallRecorder{}
+	return c, c
+}
+
+func (c *captureCallRecorder) RecordCall(_ context.Context, r *audit.CallRecord) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls = append(c.calls, r)
+}
+
+func (c *captureCallRecorder) Close() error { return nil }
+
+func (c *captureCallRecorder) last(t *testing.T) *audit.CallRecord {
+	t.Helper()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.calls) == 0 {
+		t.Fatalf("no call records captured")
+	}
+	return c.calls[len(c.calls)-1]
+}
+
+func (c *captureCallRecorder) len() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.calls)
 }
 
 // stubbornStream simulates a misbehaving adapter whose Close does not

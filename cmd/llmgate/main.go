@@ -57,12 +57,9 @@ func run() error {
 		slog.String("phase", "v1-bypass"),
 	)
 	slog.SetDefault(logger)
-	// Two parallel structured-log streams share the same handler/stdout
-	// but stamp a "log" attr so downstream consumers (Loki/ELK) can
-	// filter cleanly: access lines describe HTTP transport, audit lines
-	// describe gateway-domain operations.
 	accessLog := logger.With(slog.String("log", "access"))
 	auditLog := logger.With(slog.String("log", "audit"))
+	callLog := logger.With(slog.String("log", "call"))
 
 	cat, err := catalog.Load()
 	if err != nil {
@@ -102,13 +99,17 @@ func run() error {
 	}
 
 	recorder := audit.Recorders{audit.NewSlogRecorder(auditLog)}
+	callRecorder := audit.CallRecorders{audit.NewSlogCallRecorder(callLog)}
 	defer func() {
 		if err := recorder.Close(); err != nil {
-			logger.Warn("recorder close failed", slog.String("err", err.Error()))
+			logger.Warn("audit recorder close failed", slog.String("err", err.Error()))
+		}
+		if err := callRecorder.Close(); err != nil {
+			logger.Warn("call recorder close failed", slog.String("err", err.Error()))
 		}
 	}()
 
-	handler := server.NewHandler(svc, logger, recorder, server.HandlerConfig{
+	handler := server.NewHandler(svc, logger, recorder, callRecorder, server.HandlerConfig{
 		RequestTimeout:    cfg.RequestTimeout,
 		StreamIdleTimeout: cfg.StreamIdleTimeout,
 	})

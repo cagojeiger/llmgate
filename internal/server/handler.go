@@ -26,8 +26,7 @@ type ChatService interface {
 type Handler struct {
 	service        ChatService
 	log            *slog.Logger
-	recorder       telemetry.AuditRecorder
-	callRecorder   telemetry.CallRecorder
+	events         telemetry.EventSink
 	lifecycle      telemetry.LifecycleObserver
 	serviceVersion string
 	environment    string
@@ -43,20 +42,19 @@ type HandlerConfig struct {
 	LifecycleObserver telemetry.LifecycleObserver
 }
 
-func NewHandler(service ChatService, log *slog.Logger, recorder telemetry.AuditRecorder, callRecorder telemetry.CallRecorder, cfg HandlerConfig) *Handler {
+func NewHandler(service ChatService, log *slog.Logger, events telemetry.EventSink, cfg HandlerConfig) *Handler {
 	if log == nil {
 		log = slog.Default()
 	}
-	if recorder == nil {
-		recorder = telemetry.NopAuditRecorder{}
+	if events == nil {
+		events = telemetry.NopSink{}
 	}
-	if callRecorder == nil {
-		callRecorder = nopCallRecorder{}
-	}
+	events = telemetry.NewRecoveringSink(events, log)
 	lifecycle := cfg.LifecycleObserver
 	if lifecycle == nil {
 		lifecycle = telemetry.NopLifecycleObserver{}
 	}
+	lifecycle = telemetry.NewRecoveringLifecycleObserver(lifecycle, log)
 	serviceVersion := cfg.ServiceVersion
 	if serviceVersion == "" {
 		serviceVersion = "dev"
@@ -68,8 +66,7 @@ func NewHandler(service ChatService, log *slog.Logger, recorder telemetry.AuditR
 	return &Handler{
 		service:        service,
 		log:            log,
-		recorder:       recorder,
-		callRecorder:   callRecorder,
+		events:         events,
 		lifecycle:      lifecycle,
 		serviceVersion: serviceVersion,
 		environment:    environment,
@@ -105,10 +102,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var call *telemetry.CallEvent
 	defer func() {
 		telemetry.FinishAuditEvent(rec, rec.StatusCode, rec.Kind, time.Since(start).Milliseconds())
-		h.recorder.RecordAudit(ctx, rec)
+		h.events.Emit(ctx, rec)
 		if telemetry.CallAttempted(call) {
 			telemetry.FinishCallFromAudit(call, rec)
-			h.callRecorder.RecordCall(ctx, call)
+			h.events.Emit(ctx, call)
 		}
 	}()
 	// Registered after the audit defer so it runs first and stamps the
@@ -259,8 +256,3 @@ func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *llmty
 
 	h.stream.Run(r.Context(), w, stream, rec, call)
 }
-
-type nopCallRecorder struct{}
-
-func (nopCallRecorder) RecordCall(context.Context, *telemetry.CallEvent) {}
-func (nopCallRecorder) Close() error                                     { return nil }

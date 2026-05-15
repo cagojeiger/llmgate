@@ -5,21 +5,35 @@ import (
 	"log/slog"
 )
 
-// SlogAuditRecorder emits each operational AuditEvent as one structured slog line. The
-// prefix names the backing technology (slog) — same convention as
-// bufio.Reader / slog.JSONHandler.
-type SlogAuditRecorder struct {
-	log *slog.Logger
+// SlogSink routes audit and call events to their log-specific sloggers while
+// preserving the existing Loki-friendly line shape.
+type SlogSink struct {
+	auditLog *slog.Logger
+	callLog  *slog.Logger
 }
 
-func NewSlogAuditRecorder(log *slog.Logger) *SlogAuditRecorder {
-	if log == nil {
-		log = slog.Default()
+func NewSlogSink(auditLog, callLog *slog.Logger) *SlogSink {
+	if auditLog == nil {
+		auditLog = slog.Default()
 	}
-	return &SlogAuditRecorder{log: log}
+	if callLog == nil {
+		callLog = slog.Default()
+	}
+	return &SlogSink{auditLog: auditLog, callLog: callLog}
 }
 
-func (r *SlogAuditRecorder) RecordAudit(ctx context.Context, rec *AuditEvent) {
+func (s *SlogSink) Emit(ctx context.Context, event Event) {
+	switch rec := event.(type) {
+	case *AuditEvent:
+		s.recordAudit(ctx, rec)
+	case *CallEvent:
+		s.recordCall(ctx, rec)
+	}
+}
+
+func (s *SlogSink) Close() error { return nil }
+
+func (s *SlogSink) recordAudit(ctx context.Context, rec *AuditEvent) {
 	if rec == nil {
 		return
 	}
@@ -53,24 +67,10 @@ func (r *SlogAuditRecorder) RecordAudit(ctx context.Context, rec *AuditEvent) {
 		attrs = append(attrs, slog.String("error_kind", string(rec.Kind)))
 	}
 
-	r.log.LogAttrs(ctx, slog.LevelInfo, "audit", attrs...)
+	s.auditLog.LogAttrs(ctx, slog.LevelInfo, "audit", attrs...)
 }
 
-func (r *SlogAuditRecorder) Close() error { return nil }
-
-// SlogCallRecorder emits each CallEvent as one structured slog line.
-type SlogCallRecorder struct {
-	log *slog.Logger
-}
-
-func NewSlogCallRecorder(log *slog.Logger) *SlogCallRecorder {
-	if log == nil {
-		log = slog.Default()
-	}
-	return &SlogCallRecorder{log: log}
-}
-
-func (r *SlogCallRecorder) RecordCall(ctx context.Context, rec *CallEvent) {
+func (s *SlogSink) recordCall(ctx context.Context, rec *CallEvent) {
 	if rec == nil {
 		return
 	}
@@ -124,10 +124,8 @@ func (r *SlogCallRecorder) RecordCall(ctx context.Context, rec *CallEvent) {
 		attrs = append(attrs, slog.Any("attempts", rec.Attempts))
 	}
 
-	r.log.LogAttrs(ctx, slog.LevelInfo, "call", attrs...)
+	s.callLog.LogAttrs(ctx, slog.LevelInfo, "call", attrs...)
 }
-
-func (r *SlogCallRecorder) Close() error { return nil }
 
 func commonAttrs(eventType string, common EventCommon) []slog.Attr {
 	attrs := []slog.Attr{

@@ -27,10 +27,17 @@ type recordingRecorder struct {
 	records []telemetry.AuditEvent
 }
 
-func (r *recordingRecorder) RecordAudit(_ context.Context, rec *telemetry.AuditEvent) {
+func (r *recordingRecorder) captureAudit(_ context.Context, rec *telemetry.AuditEvent) {
 	r.records = append(r.records, *rec)
 }
 func (r *recordingRecorder) Close() error { return nil }
+func (r *recordingRecorder) Emit(ctx context.Context, event telemetry.Event) {
+	rec, ok := event.(*telemetry.AuditEvent)
+	if !ok {
+		return
+	}
+	r.captureAudit(ctx, rec)
+}
 
 // stubService implements ChatService without doing any real work — the
 // handler tests in this file exercise auth, not routing, so a stub
@@ -212,7 +219,7 @@ func TestServer_AuthIntegration(t *testing.T) {
 		Vendor:    "anthropic",
 		ModelUsed: "claude-x",
 	}}
-	handler := NewHandler(stub, logger, rec, nil, HandlerConfig{})
+	handler := NewHandler(stub, logger, rec, HandlerConfig{})
 	srv := New(&config.Server{Addr: ":0"}, logger, handler, store, NewProbeState())
 	ts := httptest.NewServer(srv.Handler)
 	defer ts.Close()
@@ -305,7 +312,7 @@ func TestServer_AllowedAliasesRejectDisallowedModel(t *testing.T) {
 		stubCalled = true
 		return stub.resp, nil
 	}
-	handler := NewHandler(stub, logger, rec, nil, HandlerConfig{})
+	handler := NewHandler(stub, logger, rec, HandlerConfig{})
 	srv := New(&config.Server{Addr: ":0"}, logger, handler, store, NewProbeState())
 	ts := httptest.NewServer(srv.Handler)
 	defer ts.Close()
@@ -351,7 +358,7 @@ func TestServer_HealthzPublic(t *testing.T) {
 	// Smoke-only: probes are unauthenticated even when consumers are
 	// registered. Detailed probe-state coverage lives in probe_test.go.
 	store := writeStoreYAML(t, "alpha", "good-key")
-	handler := NewHandler(&stubService{}, slog.Default(), &recordingRecorder{}, nil, HandlerConfig{})
+	handler := NewHandler(&stubService{}, slog.Default(), &recordingRecorder{}, HandlerConfig{})
 	srv := New(&config.Server{Addr: ":0"}, slog.Default(), handler, store, NewProbeState())
 	ts := httptest.NewServer(srv.Handler)
 	defer ts.Close()

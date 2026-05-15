@@ -99,18 +99,14 @@ func run() error {
 		return err
 	}
 
-	recorder := telemetry.AuditRecorders{telemetry.NewSlogAuditRecorder(auditLog)}
-	callRecorder := telemetry.CallRecorders{telemetry.NewSlogCallRecorder(callLog)}
+	events := telemetry.NewSlogSink(auditLog, callLog)
 	defer func() {
-		if err := recorder.Close(); err != nil {
-			logger.Warn("audit recorder close failed", slog.String("err", err.Error()))
-		}
-		if err := callRecorder.Close(); err != nil {
-			logger.Warn("call recorder close failed", slog.String("err", err.Error()))
+		if err := events.Close(); err != nil {
+			logger.Warn("telemetry sink close failed", slog.String("err", err.Error()))
 		}
 	}()
 
-	handler := server.NewHandler(svc, logger, recorder, callRecorder, server.HandlerConfig{
+	handler := server.NewHandler(svc, logger, events, server.HandlerConfig{
 		RequestTimeout:    cfg.RequestTimeout,
 		StreamIdleTimeout: cfg.StreamIdleTimeout,
 		ServiceVersion:    version,

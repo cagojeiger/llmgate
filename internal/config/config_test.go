@@ -16,6 +16,7 @@ func resetEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
 		"LLMGATE_ADDR",
+		"LLMGATE_ENVIRONMENT",
 		"LLMGATE_SHUTDOWN_DRAIN_TIMEOUT",
 		"LLMGATE_LOG_LEVEL",
 		"LLMGATE_FALLBACK_ON",
@@ -40,6 +41,9 @@ func TestLoadServer_Defaults(t *testing.T) {
 	}
 	if cfg.Addr != ":8080" {
 		t.Errorf("Addr = %q, want :8080", cfg.Addr)
+	}
+	if cfg.Environment != "local" {
+		t.Errorf("Environment = %q, want local", cfg.Environment)
 	}
 	if cfg.ShutdownDrainTimeout != 5*time.Minute {
 		t.Errorf("ShutdownDrainTimeout = %v, want 5m", cfg.ShutdownDrainTimeout)
@@ -185,6 +189,7 @@ func TestLoadServer_RejectsInvalidCircuitJitter(t *testing.T) {
 func TestLoadServer_OverrideFromEnv(t *testing.T) {
 	resetEnv(t)
 	t.Setenv("LLMGATE_ADDR", "0.0.0.0:9090")
+	t.Setenv("LLMGATE_ENVIRONMENT", "prod")
 	t.Setenv("LLMGATE_SHUTDOWN_DRAIN_TIMEOUT", "12s")
 	t.Setenv("LLMGATE_LOG_LEVEL", "debug")
 
@@ -194,6 +199,9 @@ func TestLoadServer_OverrideFromEnv(t *testing.T) {
 	}
 	if cfg.Addr != "0.0.0.0:9090" {
 		t.Errorf("Addr = %q, want override", cfg.Addr)
+	}
+	if cfg.Environment != "prod" {
+		t.Errorf("Environment = %q, want prod", cfg.Environment)
 	}
 	if cfg.ShutdownDrainTimeout != 12*time.Second {
 		t.Errorf("ShutdownDrainTimeout = %v, want 12s", cfg.ShutdownDrainTimeout)

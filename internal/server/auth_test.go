@@ -266,6 +266,13 @@ func TestServer_AuthIntegration(t *testing.T) {
 		if got.AuthError != c.wantAuthError {
 			t.Errorf("[%s] auth_error = %q, want %q", c.label, got.AuthError, c.wantAuthError)
 		}
+		if c.wantAuthError != "" {
+			if got.AuthResult != telemetry.AuthResultFailure || got.PolicyResult != telemetry.PolicyResultDenied || got.DenyReason != telemetry.DenyReasonAuth {
+				t.Errorf("[%s] auth decision = %q/%q/%q, want failure/denied/auth", c.label, got.AuthResult, got.PolicyResult, got.DenyReason)
+			}
+		} else if got.AuthResult != telemetry.AuthResultSuccess || got.PolicyResult != telemetry.PolicyResultAllowed {
+			t.Errorf("[%s] success decision = %q/%q, want success/allowed", c.label, got.AuthResult, got.PolicyResult)
+		}
 		if c.wantClient != "" && got.ConsumerKeyID == "" {
 			t.Errorf("[%s] consumer_key_id empty on success record", c.label)
 		}
@@ -328,6 +335,12 @@ func TestServer_AllowedAliasesRejectDisallowedModel(t *testing.T) {
 	}
 	if got.Kind != llmtypes.KindForbidden || got.StatusCode != http.StatusForbidden {
 		t.Fatalf("audit kind/status = %q/%d, want forbidden/403", got.Kind, got.StatusCode)
+	}
+	if got.PolicyResult != telemetry.PolicyResultDenied || got.DenyReason != telemetry.DenyReasonModelNotAllowed {
+		t.Fatalf("audit policy decision = %q/%q, want denied/model_not_allowed", got.PolicyResult, got.DenyReason)
+	}
+	if got.ResourceType != "llm_model" || got.ResourceID != "smart" {
+		t.Fatalf("audit resource = %q/%q, want llm_model/smart", got.ResourceType, got.ResourceID)
 	}
 	if !strings.Contains(logBuf.String(), `"consumer_name":"alpha"`) {
 		t.Fatalf("access log missing consumer_name: %s", logBuf.String())

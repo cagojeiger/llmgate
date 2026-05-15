@@ -39,6 +39,20 @@ func CallAttempted(c *CallEvent) bool {
 	return c != nil && len(c.Attempts) > 0
 }
 
+func AttemptsCount(c *CallEvent) int {
+	if c == nil {
+		return 0
+	}
+	return len(c.Attempts)
+}
+
+func FinalAttempt(c *CallEvent) (llmtypes.Attempt, bool) {
+	if c == nil || len(c.Attempts) == 0 {
+		return llmtypes.Attempt{}, false
+	}
+	return c.Attempts[len(c.Attempts)-1], true
+}
+
 func FinishCallFromAudit(c *CallEvent, audit *AuditEvent) {
 	if c == nil || audit == nil {
 		return

@@ -7,6 +7,8 @@ import (
 )
 
 const (
+	ServiceName = "llmgate"
+
 	SchemaVersion  = 1
 	EventTypeAudit = "audit"
 	EventTypeCall  = "call"
@@ -17,6 +19,10 @@ const (
 type EventCommon struct {
 	Timestamp time.Time
 	RequestID string
+
+	ServiceName    string
+	ServiceVersion string
+	Environment    string
 
 	// Operation is the gateway-domain method name —
 	// "chat.completions" or "chat.completions.stream" — not the HTTP
@@ -40,19 +46,37 @@ type EventCommon struct {
 
 // CommonInput is the request-boundary data needed to start telemetry events.
 type CommonInput struct {
-	Timestamp     time.Time
-	RequestID     string
-	Operation     string
-	ConsumerName  string
-	ConsumerKeyID string
+	Timestamp      time.Time
+	RequestID      string
+	ServiceName    string
+	ServiceVersion string
+	Environment    string
+	Operation      string
+	ConsumerName   string
+	ConsumerKeyID  string
 }
 
 func NewEventCommon(in CommonInput) EventCommon {
+	serviceName := in.ServiceName
+	if serviceName == "" {
+		serviceName = ServiceName
+	}
+	serviceVersion := in.ServiceVersion
+	if serviceVersion == "" {
+		serviceVersion = "dev"
+	}
+	environment := in.Environment
+	if environment == "" {
+		environment = "local"
+	}
 	return EventCommon{
-		Timestamp:     in.Timestamp,
-		RequestID:     in.RequestID,
-		Operation:     in.Operation,
-		ConsumerName:  in.ConsumerName,
-		ConsumerKeyID: in.ConsumerKeyID,
+		Timestamp:      in.Timestamp,
+		RequestID:      in.RequestID,
+		ServiceName:    serviceName,
+		ServiceVersion: serviceVersion,
+		Environment:    environment,
+		Operation:      in.Operation,
+		ConsumerName:   in.ConsumerName,
+		ConsumerKeyID:  in.ConsumerKeyID,
 	}
 }

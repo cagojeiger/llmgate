@@ -11,6 +11,9 @@ import (
 
 type Server struct {
 	Addr string
+	// Environment labels logs and future telemetry events with the
+	// deployment boundary operators search by (local, staging, prod).
+	Environment string
 	// ShutdownDrainTimeout caps how long graceful shutdown waits for
 	// in-flight requests to finish before force-closing any survivors.
 	// Default 5m comfortably covers typical LLM streams; the
@@ -71,6 +74,7 @@ func LoadServer() (*Server, error) {
 
 	return &Server{
 		Addr:                 orDefault("LLMGATE_ADDR", ":8080"),
+		Environment:          orDefault("LLMGATE_ENVIRONMENT", "local"),
 		ShutdownDrainTimeout: drainTimeout,
 		LogLevel:             logLevel,
 		FallbackOn:           parseCSV("LLMGATE_FALLBACK_ON", "rate_limit,upstream,timeout,network"),

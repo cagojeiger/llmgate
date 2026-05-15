@@ -16,6 +16,7 @@ OpenAI SDK 와이어 호환 게이트웨이. 모델은 *기본 등록 단위*, *
 | [lifecycle.md](lifecycle.md) | 부팅 시퀀스 + 프로브 + 셧다운 / drain |
 | [request.md](request.md) | 요청 생애주기 + 스트리밍 폴백 경계 |
 | [logs.md](logs.md) | access / audit / call 로그 갈래와 키 스키마 |
+| [metrics.md](metrics.md) | Prometheus RED / USE 지표와 라벨 경계 |
 | [identity.md](identity.md) | 상태 위치 + 의도적 미지원 (V1 거절 목록) |
 | [adr/](adr/) | Accepted 결정 기록 (6개) |
 
@@ -81,7 +82,7 @@ graph LR
 
 ### 레이어와 의존 방향
 
-- **Delivery** (`internal/server/`) — HTTP 전송 책임. chi + middleware + auth + Handler + streamRelay + probes. SSE / `[DONE]` / idle timeout / 401 / readiness 같은 *와이어 시맨틱* 을 책임.
+- **Delivery** (`internal/server/`) — HTTP 전송 책임. chi + middleware + auth + Handler + streamRelay + probes + metrics. SSE / `[DONE]` / idle timeout / 401 / readiness 같은 *와이어 시맨틱* 을 책임.
 - **Routing** (`internal/llmrouter/`) — *standalone* 서비스. alias → chain 해석, fallback 적격 판정, 회로 차단. stdlib + `llmtypes` 만 import. HTTP 외 frontend (CLI / queue / gRPC) 가 `llmrouter.NewService(models, aliases, ...)` 만 호출하면 그대로 구동.
 - **Providers** (`internal/providers/openai|anthropic/`) — `llmtypes.Provider` 구현. vendor 와이어 차이 (status 분류 / 첫 이벤트 검증 / 와이어 정규화) 를 자기 안에 가둠.
 - **Contracts** (`internal/llmtypes/`) — Provider / Stream / Request / Response / Error / Attempt — 모든 런타임 레이어가 import 하는 *도메인 계약 모듈*. 런타임 호출 노드가 아니므로 시스템 지도에서 점선 import 로만 표시.
@@ -121,8 +122,8 @@ internal/providers/          벤더 어댑터
   └─ anthropic/              Anthropic ↔ OpenAI 와이어 변환
 internal/llmrouter/          별명 → chain, 폴백, 회로 (service.go + breaker.go)
 internal/streaming/          스트림 시작 검증 + close grace helper
-internal/server/             chi + middleware + auth + handler + streamRelay + probes
-internal/telemetry/          AuditEvent / CallEvent + EventSink + slog sink + lifecycle hooks
+internal/server/             chi + middleware + auth + handler + streamRelay + probes + metrics route
+internal/telemetry/          AuditEvent / CallEvent + EventSink + slog / Prometheus sinks + lifecycle hooks
 cmd/llmgate/                 wiring + shutdown
 scripts/gen-consumer.sh      호출자 발급 헬퍼
 docs/adr/                    Accepted 결정 기록

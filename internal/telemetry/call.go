@@ -23,6 +23,9 @@ type CallEvent struct {
 	Usage      *llmtypes.Usage
 	VendorCost string
 
+	FirstByteMS  int64
+	StreamChunks int
+
 	Attempts []llmtypes.Attempt
 }
 
@@ -117,10 +120,19 @@ func AdoptStreamSummary(c *CallEvent, sum *llmtypes.Summary, now time.Time) {
 	if sum == nil {
 		return
 	}
+	c.StreamChunks = sum.ChunkCount
 	if sum.Usage != nil {
 		c.Usage = sum.Usage
 	}
 	if sum.VendorCost != "" {
 		c.VendorCost = sum.VendorCost
+	}
+	if !sum.FirstByteAt.IsZero() && len(c.Attempts) > 0 {
+		started := c.Attempts[len(c.Attempts)-1].StartedAt
+		if !started.IsZero() {
+			if d := sum.FirstByteAt.Sub(started).Milliseconds(); d >= 0 {
+				c.FirstByteMS = d
+			}
+		}
 	}
 }

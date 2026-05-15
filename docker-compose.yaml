@@ -20,3 +20,32 @@ services:
       - ./catalog:/etc/llmgate/catalog:ro
       - ./consumers:/etc/llmgate/consumers:ro
     restart: "no"
+
+  prometheus:
+    image: prom/prometheus:v3.7.3
+    depends_on:
+      - llmgate
+    ports:
+      - "${LLMGATE_PROMETHEUS_PORT:-9090}:9090"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    restart: "no"
+
+  grafana:
+    image: grafana/grafana:12.3.0
+    depends_on:
+      - prometheus
+    ports:
+      - "${LLMGATE_GRAFANA_PORT:-3000}:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_USERS_DEFAULT_THEME: light
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    restart: "no"

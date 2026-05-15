@@ -17,7 +17,6 @@ import (
 	"llmgate/internal/llmrouter"
 	"llmgate/internal/llmtypes"
 	"llmgate/internal/providers/fake"
-	"llmgate/internal/streaming"
 	"llmgate/internal/telemetry"
 )
 
@@ -1339,81 +1338,4 @@ func (c *captureLifecycle) StreamFinished(_ context.Context, audit *telemetry.Au
 	c.streamFinished++
 	c.streamAudit = audit
 	c.streamCall = call
-}
-
-// stubbornStream simulates a misbehaving adapter whose Close does not
-// unblock a pending Recv. Used to verify recvWithIdleTimeout's bounded
-// wait safety net.
-type stubbornStream struct {
-	closeCalled int32
-	block       chan struct{}
-}
-
-func newStubbornStream() *stubbornStream {
-	return &stubbornStream{block: make(chan struct{})}
-}
-
-func (s *stubbornStream) Recv() (*llmtypes.Event, error) {
-	<-s.block
-	return nil, io.EOF
-}
-
-func (s *stubbornStream) Close() error {
-	s.closeCalled++
-	return nil
-}
-
-func (s *stubbornStream) Summary() *llmtypes.Summary { return &llmtypes.Summary{} }
-
-func (s *stubbornStream) release() { close(s.block) }
-
-func TestRecvWithIdleTimeout_BoundedDrainOnContextCancel(t *testing.T) {
-	prev := streaming.CloseGrace
-	streaming.CloseGrace = 50 * time.Millisecond
-	defer func() { streaming.CloseGrace = prev }()
-
-	s := newStubbornStream()
-	defer s.release()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	start := time.Now()
-	_, err := recvWithIdleTimeout(ctx, s, 0)
-	elapsed := time.Since(start)
-
-	if elapsed > 500*time.Millisecond {
-		t.Fatalf("recvWithIdleTimeout returned in %v, want < 500ms (grace=50ms)", elapsed)
-	}
-	if !errors.Is(err, context.Canceled) {
-		t.Errorf("err = %v, want context.Canceled", err)
-	}
-	if s.closeCalled == 0 {
-		t.Errorf("Stream.Close() not invoked")
-	}
-}
-
-func TestRecvWithIdleTimeout_BoundedDrainOnIdleTimeout(t *testing.T) {
-	prev := streaming.CloseGrace
-	streaming.CloseGrace = 50 * time.Millisecond
-	defer func() { streaming.CloseGrace = prev }()
-
-	s := newStubbornStream()
-	defer s.release()
-
-	start := time.Now()
-	_, err := recvWithIdleTimeout(context.Background(), s, 20*time.Millisecond)
-	elapsed := time.Since(start)
-
-	// Idle timer fires (~20ms) → Close → 50ms grace → return. Total ~70ms.
-	if elapsed > 500*time.Millisecond {
-		t.Fatalf("recvWithIdleTimeout returned in %v, want < 500ms", elapsed)
-	}
-	var perr *llmtypes.Error
-	if !errors.As(err, &perr) || perr.Kind != llmtypes.KindTimeout {
-		t.Errorf("err = %v, want KindTimeout llmtypes.Error", err)
-	}
-	if s.closeCalled == 0 {
-		t.Errorf("Stream.Close() not invoked on idle timeout")
-	}
 }

@@ -49,6 +49,7 @@ func (s *streamRelay) Run(ctx context.Context, w http.ResponseWriter, stream llm
 	defer func() { call.ResponseBytes = sink.Bytes() }()
 	sink.WriteHeaders()
 	rec.StatusCode = http.StatusOK
+	call.StatusCode = rec.StatusCode
 
 	for {
 		event, err := recvWithIdleTimeout(ctx, stream, s.idleTimeout)

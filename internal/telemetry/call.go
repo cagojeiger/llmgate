@@ -99,6 +99,9 @@ func AdoptStreamSummary(c *CallEvent, sum *llmtypes.Summary, now time.Time) {
 	if len(c.Attempts) > 0 {
 		last := &c.Attempts[len(c.Attempts)-1]
 		last.DurationMS = now.Sub(last.StartedAt).Milliseconds()
+		if last.StatusCode == 0 && c.StatusCode != 0 {
+			last.StatusCode = c.StatusCode
+		}
 		if last.Kind == "" && c.Kind != "" {
 			last.Kind = c.Kind
 		}

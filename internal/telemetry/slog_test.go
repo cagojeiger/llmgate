@@ -1,24 +1,14 @@
 package telemetry
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
-	"io"
-	"log/slog"
 	"strings"
 	"testing"
 	"time"
 
 	"llmgate/internal/llmtypes"
 )
-
-func newCapturingLogger() (*slog.Logger, *bytes.Buffer) {
-	buf := &bytes.Buffer{}
-	h := slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})
-	return slog.New(h), buf
-}
 
 func TestSlogSink_RecordAudit(t *testing.T) {
 	log, buf := newCapturingLogger()
@@ -158,45 +148,6 @@ func TestSlogSink_RecordCall(t *testing.T) {
 	}
 }
 
-func TestEventCommonDefaults(t *testing.T) {
-	got := NewEventCommon(CommonInput{RequestID: "req-1", Operation: "chat.completions"})
-	if got.ServiceName != "llmgate" || got.ServiceVersion != "dev" || got.Environment != "local" {
-		t.Fatalf("defaults = service_name=%q service_version=%q environment=%q", got.ServiceName, got.ServiceVersion, got.Environment)
-	}
-}
-
-func TestAuditDecisionHelpers(t *testing.T) {
-	rec := NewAuditEvent(NewEventCommon(CommonInput{}))
-	MarkAuthSuccess(rec)
-	SetResource(rec, "llm_model", "coder")
-	MarkPolicyAllowed(rec)
-	if rec.AuthResult != AuthResultSuccess || rec.PolicyResult != PolicyResultAllowed {
-		t.Fatalf("allowed decision = %+v", rec)
-	}
-	MarkAuthFailure(rec, AuthErrorFormat)
-	if rec.AuthResult != AuthResultFailure || rec.AuthError != AuthErrorFormat || rec.DenyReason != DenyReasonAuth {
-		t.Fatalf("auth failure = %+v", rec)
-	}
-	MarkPolicyDenied(rec, DenyReasonModelNotAllowed)
-	if rec.PolicyResult != PolicyResultDenied || rec.DenyReason != DenyReasonModelNotAllowed {
-		t.Fatalf("policy denial = %+v", rec)
-	}
-}
-
-func TestCallAttemptHelpers(t *testing.T) {
-	call := &CallEvent{Attempts: []llmtypes.Attempt{
-		{Vendor: "opencode", Model: "a", StatusCode: 429},
-		{Vendor: "opencode", Model: "b", StatusCode: 200},
-	}}
-	if AttemptsCount(call) != 2 {
-		t.Fatalf("AttemptsCount = %d, want 2", AttemptsCount(call))
-	}
-	final, ok := FinalAttempt(call)
-	if !ok || final.Model != "b" || final.StatusCode != 200 {
-		t.Fatalf("FinalAttempt = %+v/%v, want model b status 200", final, ok)
-	}
-}
-
 func TestSlogSink_DoNotLeakSensitiveMaterial(t *testing.T) {
 	log, buf := newCapturingLogger()
 	sink := NewSlogSink(log, log)
@@ -246,7 +197,12 @@ func TestSlogSink_OmitsAttemptsWhenSingle(t *testing.T) {
 	sink := NewSlogSink(log, log)
 
 	sink.Emit(context.Background(), &CallEvent{
-		EventCommon:    EventCommon{Timestamp: time.Now(), RequestID: "req-4", Operation: "chat.completions", StatusCode: 200},
+		EventCommon: EventCommon{
+			Timestamp:  time.Now(),
+			RequestID:  "req-4",
+			Operation:  "chat.completions",
+			StatusCode: 200,
+		},
 		ModelRequested: "deepseek-v4-flash",
 		Vendor:         "opencode",
 		ModelUsed:      "deepseek-v4-flash",
@@ -272,146 +228,5 @@ func TestSlogSink_RecordNil(t *testing.T) {
 	sink.Emit(context.Background(), (*CallEvent)(nil))
 	if buf.Len() != 0 {
 		t.Errorf("nil record should emit nothing, got %s", buf.String())
-	}
-}
-
-type panicSink struct{}
-
-func (panicSink) Emit(context.Context, Event) { panic("sink failed") }
-func (panicSink) Close() error                { return nil }
-
-type captureSink struct {
-	events []Event
-	err    error
-}
-
-func (c *captureSink) Emit(_ context.Context, event Event) {
-	c.events = append(c.events, event)
-}
-
-func (c *captureSink) Close() error { return nil }
-
-type closeErrSink struct {
-	err error
-}
-
-func (c closeErrSink) Emit(context.Context, Event) {}
-func (c closeErrSink) Close() error                { return c.err }
-
-func TestFanoutSink_FansOutEvents(t *testing.T) {
-	a, b := &captureSink{}, &captureSink{}
-	sinks := NewFanoutSink(nil, a, b)
-
-	sinks.Emit(context.Background(), &AuditEvent{})
-
-	if len(a.events) != 1 || len(b.events) != 1 {
-		t.Errorf("each sink should have 1 event, got a=%d b=%d", len(a.events), len(b.events))
-	}
-}
-
-func TestFanoutSink_IsolatesPanicAndContinuesFanout(t *testing.T) {
-	capture := &captureSink{}
-	sinks := NewFanoutSink(slog.New(slog.NewTextHandler(io.Discard, nil)), panicSink{}, capture)
-
-	sinks.Emit(context.Background(), &AuditEvent{})
-
-	if len(capture.events) != 1 {
-		t.Fatalf("events captured = %d, want 1", len(capture.events))
-	}
-}
-
-func TestFanoutSink_LogsPanic(t *testing.T) {
-	log, buf := newCapturingLogger()
-	sinks := NewFanoutSink(log, panicSink{})
-
-	sinks.Emit(context.Background(), &AuditEvent{})
-
-	if !strings.Contains(buf.String(), "telemetry sink panic") {
-		t.Fatalf("panic log missing: %s", buf.String())
-	}
-	if !strings.Contains(buf.String(), `"event_type":"audit"`) {
-		t.Fatalf("panic log missing event_type: %s", buf.String())
-	}
-}
-
-func TestRecoveringSink_IsolatesPanic(t *testing.T) {
-	sink := NewRecoveringSink(panicSink{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
-
-	sink.Emit(context.Background(), &AuditEvent{})
-}
-
-type captureLifecycleObserver struct {
-	requestStarted  int
-	requestFinished int
-	streamStarted   int
-	streamFinished  int
-}
-
-func (c *captureLifecycleObserver) RequestStarted(context.Context) {
-	c.requestStarted++
-}
-
-func (c *captureLifecycleObserver) RequestFinished(context.Context) {
-	c.requestFinished++
-}
-
-func (c *captureLifecycleObserver) StreamStarted(context.Context, EventCommon) {
-	c.streamStarted++
-}
-
-func (c *captureLifecycleObserver) StreamFinished(context.Context, *AuditEvent, *CallEvent) {
-	c.streamFinished++
-}
-
-func TestLifecycleObservers(t *testing.T) {
-	a, b := &captureLifecycleObserver{}, &captureLifecycleObserver{}
-	os := LifecycleObservers{a, nil, b}
-
-	os.RequestStarted(context.Background())
-	os.RequestFinished(context.Background())
-	os.StreamStarted(context.Background(), EventCommon{})
-	os.StreamFinished(context.Background(), &AuditEvent{}, &CallEvent{})
-
-	for name, got := range map[string]*captureLifecycleObserver{"a": a, "b": b} {
-		if got.requestStarted != 1 || got.requestFinished != 1 || got.streamStarted != 1 || got.streamFinished != 1 {
-			t.Errorf("%s lifecycle calls = %+v, want all 1", name, got)
-		}
-	}
-}
-
-type panicLifecycleObserver struct{}
-
-func (panicLifecycleObserver) RequestStarted(context.Context)             { panic("request started") }
-func (panicLifecycleObserver) RequestFinished(context.Context)            { panic("request finished") }
-func (panicLifecycleObserver) StreamStarted(context.Context, EventCommon) { panic("stream started") }
-func (panicLifecycleObserver) StreamFinished(context.Context, *AuditEvent, *CallEvent) {
-	panic("stream finished")
-}
-
-func TestRecoveringLifecycleObserver_IsolatesPanic(t *testing.T) {
-	observer := NewRecoveringLifecycleObserver(panicLifecycleObserver{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
-
-	observer.RequestStarted(context.Background())
-	observer.RequestFinished(context.Background())
-	observer.StreamStarted(context.Background(), EventCommon{})
-	observer.StreamFinished(context.Background(), &AuditEvent{}, &CallEvent{})
-}
-
-func TestFanoutSink_CloseReturnsFirstErrButStillRunsRest(t *testing.T) {
-	first := errors.New("first-failed")
-	second := errors.New("second-failed")
-	rs := NewFanoutSink(nil, closeErrSink{err: first}, closeErrSink{err: second}, &captureSink{})
-
-	got := rs.Close()
-	if !errors.Is(got, first) {
-		t.Errorf("Close = %v, want first-failed", got)
-	}
-}
-
-func TestNop(t *testing.T) {
-	var n NopSink
-	n.Emit(context.Background(), &AuditEvent{})
-	if err := n.Close(); err != nil {
-		t.Errorf("NopSink.Close = %v, want nil", err)
 	}
 }

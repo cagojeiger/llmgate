@@ -13,8 +13,8 @@ import (
 )
 
 // stubbornStream simulates a misbehaving adapter whose Close does not
-// unblock a pending Recv. Used to verify recvWithIdleTimeout's bounded
-// wait safety net.
+// unblock a pending Recv. Used to verify streamReceiver's bounded wait
+// safety net.
 type stubbornStream struct {
 	closeCalled int32
 	block       chan struct{}
@@ -125,23 +125,25 @@ func (s *countingStream) mustNotObserveRecv(t *testing.T) {
 	}
 }
 
-func TestRecvWithIdleTimeout_BoundedDrainOnContextCancel(t *testing.T) {
+func TestStreamReceiver_BoundedDrainOnContextCancel(t *testing.T) {
 	prev := streaming.CloseGrace
 	streaming.CloseGrace = 50 * time.Millisecond
 	defer func() { streaming.CloseGrace = prev }()
 
 	s := newStubbornStream()
 	defer s.release()
+	receiver := newStreamReceiver(s)
+	defer receiver.Stop()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	start := time.Now()
-	_, err := recvWithIdleTimeout(ctx, s, 0)
+	_, err := receiver.Recv(ctx, 0)
 	elapsed := time.Since(start)
 
 	if elapsed > 500*time.Millisecond {
-		t.Fatalf("recvWithIdleTimeout returned in %v, want < 500ms (grace=50ms)", elapsed)
+		t.Fatalf("streamReceiver.Recv returned in %v, want < 500ms (grace=50ms)", elapsed)
 	}
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("err = %v, want context.Canceled", err)
@@ -151,21 +153,23 @@ func TestRecvWithIdleTimeout_BoundedDrainOnContextCancel(t *testing.T) {
 	}
 }
 
-func TestRecvWithIdleTimeout_BoundedDrainOnIdleTimeout(t *testing.T) {
+func TestStreamReceiver_BoundedDrainOnIdleTimeout(t *testing.T) {
 	prev := streaming.CloseGrace
 	streaming.CloseGrace = 50 * time.Millisecond
 	defer func() { streaming.CloseGrace = prev }()
 
 	s := newStubbornStream()
 	defer s.release()
+	receiver := newStreamReceiver(s)
+	defer receiver.Stop()
 
 	start := time.Now()
-	_, err := recvWithIdleTimeout(context.Background(), s, 20*time.Millisecond)
+	_, err := receiver.Recv(context.Background(), 20*time.Millisecond)
 	elapsed := time.Since(start)
 
 	// Idle timer fires (~20ms) -> Close -> 50ms grace -> return. Total ~70ms.
 	if elapsed > 500*time.Millisecond {
-		t.Fatalf("recvWithIdleTimeout returned in %v, want < 500ms", elapsed)
+		t.Fatalf("streamReceiver.Recv returned in %v, want < 500ms", elapsed)
 	}
 	var perr *llmtypes.Error
 	if !errors.As(err, &perr) || perr.Kind != llmtypes.KindTimeout {

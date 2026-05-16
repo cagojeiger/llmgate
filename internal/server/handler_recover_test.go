@@ -143,7 +143,7 @@ func TestHandler_AbortHandlerPanic_Repropagates_NotStamped(t *testing.T) {
 }
 
 // Panic audit status records the outcome, not any earlier wire status.
-func TestHandler_recoverPanic_OverridesPreStampedStatus(t *testing.T) {
+func TestHandler_RecoverPanic_OverridesPreStampedStatus(t *testing.T) {
 	_, recorder := newCaptureAuditSink()
 	h := NewHandler(
 		&fakeService{vendor: "opencode"},

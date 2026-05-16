@@ -36,7 +36,13 @@ func newStreamRelay(log *slog.Logger, idleTimeout time.Duration) *streamRelay {
 // fully drained or a terminal condition was reached. rec/call are mutated in
 // place: StatusCode, ResponseBytes, Kind. The caller's deferred
 // stream.Close() and telemetry.AdoptStreamSummary() finalize the rest.
-func (s *streamRelay) Run(ctx context.Context, w http.ResponseWriter, stream llmtypes.Stream, rec *telemetry.AuditEvent, call *telemetry.CallEvent) {
+func (s *streamRelay) Run(
+	ctx context.Context,
+	w http.ResponseWriter,
+	stream llmtypes.Stream,
+	rec *telemetry.AuditEvent,
+	call *telemetry.CallEvent,
+) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		perr := &llmtypes.Error{Kind: llmtypes.KindUnknown, Message: "streaming unsupported"}
@@ -98,7 +104,12 @@ func (s *streamRelay) Run(ctx context.Context, w http.ResponseWriter, stream llm
 // recordClientClosed marks rec terminal state as a client disconnect.
 // Caller should return immediately afterwards — further writes would
 // fail the same way and SendDone would too.
-func (s *streamRelay) recordClientClosed(ctx context.Context, rec *telemetry.AuditEvent, call *telemetry.CallEvent, werr error) {
+func (s *streamRelay) recordClientClosed(
+	ctx context.Context,
+	rec *telemetry.AuditEvent,
+	call *telemetry.CallEvent,
+	werr error,
+) {
 	rec.Kind = llmtypes.KindClientClosed
 	call.Kind = rec.Kind
 	s.log.LogAttrs(ctx, slog.LevelInfo, "client disconnected mid-stream",
@@ -183,12 +194,4 @@ func streamContextError(err error) error {
 		return &llmtypes.Error{Kind: llmtypes.KindTimeout, Message: err.Error(), Cause: err}
 	}
 	return err
-}
-
-// recvWithIdleTimeout keeps the old single-call helper available for focused
-// tests; production stream relay paths reuse streamReceiver across chunks.
-func recvWithIdleTimeout(ctx context.Context, stream llmtypes.Stream, timeout time.Duration) (*llmtypes.Event, error) {
-	receiver := newStreamReceiver(stream)
-	defer receiver.Stop()
-	return receiver.Recv(ctx, timeout)
 }

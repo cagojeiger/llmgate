@@ -274,8 +274,16 @@ func TestServer_AuthIntegration(t *testing.T) {
 			t.Errorf("[%s] auth_error = %q, want %q", c.label, got.AuthError, c.wantAuthError)
 		}
 		if c.wantAuthError != "" {
-			if got.AuthResult != telemetry.AuthResultFailure || got.PolicyResult != telemetry.PolicyResultDenied || got.DenyReason != telemetry.DenyReasonAuth {
-				t.Errorf("[%s] auth decision = %q/%q/%q, want failure/denied/auth", c.label, got.AuthResult, got.PolicyResult, got.DenyReason)
+			if got.AuthResult != telemetry.AuthResultFailure ||
+				got.PolicyResult != telemetry.PolicyResultDenied ||
+				got.DenyReason != telemetry.DenyReasonAuth {
+				t.Errorf(
+					"[%s] auth decision = %q/%q/%q, want failure/denied/auth",
+					c.label,
+					got.AuthResult,
+					got.PolicyResult,
+					got.DenyReason,
+				)
 			}
 		} else if got.AuthResult != telemetry.AuthResultSuccess || got.PolicyResult != telemetry.PolicyResultAllowed {
 			t.Errorf("[%s] success decision = %q/%q, want success/allowed", c.label, got.AuthResult, got.PolicyResult)

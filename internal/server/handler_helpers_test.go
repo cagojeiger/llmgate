@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +17,53 @@ import (
 	"llmgate/internal/llmtypes"
 	"llmgate/internal/telemetry"
 )
+
+const (
+	chatCompletionsPath = "/v1/chat/completions"
+	chatBody            = `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
+	streamChatBody      = `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
+)
+
+type handlerHarness struct {
+	handler *Handler
+	audit   *captureAuditSink
+	calls   *captureCallSink
+}
+
+func newHandlerHarness(service ChatService, cfg HandlerConfig) *handlerHarness {
+	audit, auditSink := newCaptureAuditSink()
+	calls, callSink := newCaptureCallSink()
+	return &handlerHarness{
+		handler: newTestHandler(service, auditSink, callSink, cfg),
+		audit:   audit,
+		calls:   calls,
+	}
+}
+
+func (h *handlerHarness) serve(body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, chatCompletionsPath, strings.NewReader(body))
+	w := httptest.NewRecorder()
+	h.handler.ServeHTTP(w, req)
+	return w
+}
+
+func (h *handlerHarness) serveRequest(req *http.Request) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	h.handler.ServeHTTP(w, req)
+	return w
+}
+
+func streamRouteResult(req *llmtypes.Request, stream llmtypes.Stream, attempts ...llmtypes.Attempt) *llmrouter.RouteResult {
+	if len(attempts) == 0 {
+		attempts = []llmtypes.Attempt{{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()}}
+	}
+	return &llmrouter.RouteResult{
+		Stream:    stream,
+		Vendor:    "opencode",
+		ModelUsed: req.Model,
+		Attempts:  attempts,
+	}
+}
 
 // fakeService implements ChatService for handler tests. buildResult /
 // buildStreamResult let each test case shape the RouteResult —

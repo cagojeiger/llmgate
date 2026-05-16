@@ -14,8 +14,6 @@ import (
 )
 
 func TestHandler_Stream_NormalEOF(t *testing.T) {
-	captured, recorder := newCaptureAuditSink()
-	callCaptured, callSink := newCaptureCallSink()
 	lifecycle := &captureLifecycle{}
 	streamObj := fake.NewStream(
 		fake.WithEvents([]*llmtypes.Event{
@@ -28,24 +26,14 @@ func TestHandler_Stream_NormalEOF(t *testing.T) {
 	)
 	r := &fakeService{
 		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
-			return &llmrouter.RouteResult{
-				Stream:    streamObj,
-				Vendor:    "opencode",
-				ModelUsed: req.Model,
-				Attempts: []llmtypes.Attempt{
-					{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()},
-				},
-			}, nil
+			return streamRouteResult(req, streamObj), nil
 		},
 	}
-	h := newTestHandler(r, recorder, callSink, HandlerConfig{
+	h := newHandlerHarness(r, HandlerConfig{
 		LifecycleObserver: lifecycle,
 	})
 
-	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
+	w := h.serve(streamChatBody)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body = %s", w.Code, w.Body.String())
@@ -63,14 +51,14 @@ func TestHandler_Stream_NormalEOF(t *testing.T) {
 		t.Errorf("Stream.Close() calls = %d, want 1", got)
 	}
 
-	got := captured.last(t)
+	got := h.audit.last(t)
 	if got.Operation != "chat.completions.stream" {
 		t.Errorf("Operation = %q, want chat.completions.stream", got.Operation)
 	}
 	if got.StatusCode != 200 {
 		t.Errorf("StatusCode = %d, want 200", got.StatusCode)
 	}
-	gotCall := callCaptured.last(t)
+	gotCall := h.calls.last(t)
 	if gotCall.Usage == nil || gotCall.Usage.TotalTokens != 5 {
 		t.Errorf("Usage = %+v, want total=5 from Summary", gotCall.Usage)
 	}
@@ -104,8 +92,6 @@ func TestHandler_Stream_NormalEOF(t *testing.T) {
 }
 
 func TestHandler_Stream_RecvError_PropagatesErrorKind(t *testing.T) {
-	captured, recorder := newCaptureAuditSink()
-	callCaptured, callSink := newCaptureCallSink()
 	streamObj := fake.NewStream(
 		fake.WithEvents([]*llmtypes.Event{
 			{Choices: []llmtypes.ChoiceDelta{{Delta: llmtypes.Delta{Content: "partial"}}}},
@@ -115,22 +101,12 @@ func TestHandler_Stream_RecvError_PropagatesErrorKind(t *testing.T) {
 	)
 	r := &fakeService{
 		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
-			return &llmrouter.RouteResult{
-				Stream:    streamObj,
-				Vendor:    "opencode",
-				ModelUsed: req.Model,
-				Attempts: []llmtypes.Attempt{
-					{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()},
-				},
-			}, nil
+			return streamRouteResult(req, streamObj), nil
 		},
 	}
-	h := newTestHandler(r, recorder, callSink, HandlerConfig{})
+	h := newHandlerHarness(r, HandlerConfig{})
 
-	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
+	w := h.serve(streamChatBody)
 
 	// HTTP 200 was already written before the error — error rides as an
 	// SSE frame, then [DONE] terminates.
@@ -148,43 +124,31 @@ func TestHandler_Stream_RecvError_PropagatesErrorKind(t *testing.T) {
 		t.Errorf("body must end with [DONE]: %q", body2)
 	}
 
-	got := captured.last(t)
+	got := h.audit.last(t)
 	if got.Kind != llmtypes.KindUpstream {
 		t.Errorf("rec.Kind = %q, want upstream", got.Kind)
 	}
-	gotCall := callCaptured.last(t)
+	gotCall := h.calls.last(t)
 	if len(gotCall.Attempts) != 1 || gotCall.Attempts[0].Kind != llmtypes.KindUpstream {
 		t.Errorf("Attempts[0].Kind not propagated: %+v", gotCall.Attempts)
 	}
 }
 
 func TestHandler_Stream_IdleTimeoutSendsError(t *testing.T) {
-	captured, recorder := newCaptureAuditSink()
-	callCaptured, callSink := newCaptureCallSink()
 	streamObj := fake.NewStream(
 		fake.WithRecvDelay(50*time.Millisecond),
 		fake.WithSummary(&llmtypes.Summary{}),
 	)
 	r := &fakeService{
 		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
-			return &llmrouter.RouteResult{
-				Stream:    streamObj,
-				Vendor:    "opencode",
-				ModelUsed: req.Model,
-				Attempts: []llmtypes.Attempt{
-					{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()},
-				},
-			}, nil
+			return streamRouteResult(req, streamObj), nil
 		},
 	}
-	h := newTestHandler(r, recorder, callSink, HandlerConfig{
+	h := newHandlerHarness(r, HandlerConfig{
 		StreamIdleTimeout: time.Millisecond,
 	})
 
-	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
+	w := h.serve(streamChatBody)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (stream already started)", w.Code)
@@ -197,11 +161,11 @@ func TestHandler_Stream_IdleTimeoutSendsError(t *testing.T) {
 		t.Errorf("body must end with [DONE]: %q", body2)
 	}
 
-	got := captured.last(t)
+	got := h.audit.last(t)
 	if got.Kind != llmtypes.KindTimeout {
 		t.Errorf("rec.Kind = %q, want timeout", got.Kind)
 	}
-	gotCall := callCaptured.last(t)
+	gotCall := h.calls.last(t)
 	if len(gotCall.Attempts) != 1 || gotCall.Attempts[0].Kind != llmtypes.KindTimeout {
 		t.Errorf("Attempts[0].Kind not propagated: %+v", gotCall.Attempts)
 	}
@@ -211,32 +175,20 @@ func TestHandler_Stream_IdleTimeoutSendsError(t *testing.T) {
 }
 
 func TestHandler_Stream_RequestTimeoutSendsError(t *testing.T) {
-	captured, recorder := newCaptureAuditSink()
-	callCaptured, callSink := newCaptureCallSink()
 	streamObj := fake.NewStream(
 		fake.WithRecvDelay(50*time.Millisecond),
 		fake.WithSummary(&llmtypes.Summary{}),
 	)
 	r := &fakeService{
 		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
-			return &llmrouter.RouteResult{
-				Stream:    streamObj,
-				Vendor:    "opencode",
-				ModelUsed: req.Model,
-				Attempts: []llmtypes.Attempt{
-					{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()},
-				},
-			}, nil
+			return streamRouteResult(req, streamObj), nil
 		},
 	}
-	h := newTestHandler(r, recorder, callSink, HandlerConfig{
+	h := newHandlerHarness(r, HandlerConfig{
 		RequestTimeout: time.Millisecond,
 	})
 
-	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
+	w := h.serve(streamChatBody)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (stream already started)", w.Code)
@@ -249,52 +201,41 @@ func TestHandler_Stream_RequestTimeoutSendsError(t *testing.T) {
 		t.Errorf("body must end with [DONE]: %q", body2)
 	}
 
-	got := captured.last(t)
+	got := h.audit.last(t)
 	if got.Kind != llmtypes.KindTimeout {
 		t.Errorf("rec.Kind = %q, want timeout", got.Kind)
 	}
-	gotCall := callCaptured.last(t)
+	gotCall := h.calls.last(t)
 	if len(gotCall.Attempts) != 1 || gotCall.Attempts[0].Kind != llmtypes.KindTimeout {
 		t.Errorf("Attempts[0].Kind not propagated: %+v", gotCall.Attempts)
 	}
 }
 
 func TestHandler_Stream_ContextCanceledRecordsClientClosed(t *testing.T) {
-	captured, recorder := newCaptureAuditSink()
-	callCaptured, callSink := newCaptureCallSink()
 	streamObj := fake.NewStream(
 		fake.WithRecvDelay(50*time.Millisecond),
 		fake.WithSummary(&llmtypes.Summary{}),
 	)
 	r := &fakeService{
 		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
-			return &llmrouter.RouteResult{
-				Stream:    streamObj,
-				Vendor:    "opencode",
-				ModelUsed: req.Model,
-				Attempts: []llmtypes.Attempt{
-					{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()},
-				},
-			}, nil
+			return streamRouteResult(req, streamObj), nil
 		},
 	}
-	h := newTestHandler(r, recorder, callSink, HandlerConfig{})
+	h := newHandlerHarness(r, HandlerConfig{})
 
-	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
-	baseReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	baseReq := httptest.NewRequest(http.MethodPost, chatCompletionsPath, strings.NewReader(streamChatBody))
 	ctx, cancel := context.WithCancel(baseReq.Context())
 	req := baseReq.WithContext(ctx)
 	cancel()
 
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
+	h.serveRequest(req)
 
-	got := captured.last(t)
+	got := h.audit.last(t)
 	if got.Kind != llmtypes.KindClientClosed {
 		t.Fatalf("Kind = %q, want client_closed", got.Kind)
 	}
-	if callCaptured.last(t).Kind != llmtypes.KindClientClosed {
-		t.Fatalf("call Kind = %q, want client_closed", callCaptured.last(t).Kind)
+	if h.calls.last(t).Kind != llmtypes.KindClientClosed {
+		t.Fatalf("call Kind = %q, want client_closed", h.calls.last(t).Kind)
 	}
 	if streamObj.Closed() == 0 {
 		t.Errorf("Stream.Close() calls = 0, want at least 1")
@@ -302,8 +243,6 @@ func TestHandler_Stream_ContextCanceledRecordsClientClosed(t *testing.T) {
 }
 
 func TestHandler_Stream_PreStreamServiceError(t *testing.T) {
-	captured, recorder := newCaptureAuditSink()
-	callCaptured, callSink := newCaptureCallSink()
 	r := &fakeService{
 		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
 			return &llmrouter.RouteResult{
@@ -315,12 +254,9 @@ func TestHandler_Stream_PreStreamServiceError(t *testing.T) {
 			}, &llmtypes.Error{Kind: llmtypes.KindAuth, Message: "no key"}
 		},
 	}
-	h := newTestHandler(r, recorder, callSink, HandlerConfig{})
+	h := newHandlerHarness(r, HandlerConfig{})
 
-	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
+	w := h.serve(streamChatBody)
 
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401 (pre-stream error → JSON envelope)", w.Code)
@@ -332,14 +268,14 @@ func TestHandler_Stream_PreStreamServiceError(t *testing.T) {
 		t.Errorf("body missing auth envelope: %q", w.Body.String())
 	}
 
-	got := captured.last(t)
+	got := h.audit.last(t)
 	if got.Kind != llmtypes.KindAuth {
 		t.Errorf("rec.Kind = %q, want auth", got.Kind)
 	}
 	if got.StatusCode != http.StatusUnauthorized {
 		t.Errorf("rec.StatusCode = %d, want 401", got.StatusCode)
 	}
-	gotCall := callCaptured.last(t)
+	gotCall := h.calls.last(t)
 	if len(gotCall.Attempts) != 1 || gotCall.Attempts[0].Kind != llmtypes.KindAuth {
 		t.Errorf("Attempts[0] = %+v, want auth attempt", gotCall.Attempts)
 	}

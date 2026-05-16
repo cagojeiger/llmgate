@@ -1,10 +1,8 @@
 package anthropic
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
-	"net/http"
 	"strings"
 	"testing"
 
@@ -72,79 +70,17 @@ func collectStreamToolCalls(t *testing.T, stream llmtypes.Stream) (map[int]*stre
 }
 
 func TestCompleteStream_ToolUse_Standard(t *testing.T) {
-	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		writeSSEEvent(t, w, "message_start", `
-		{
-			"type": "message_start",
-			"message": {
-				"id": "msg-1",
-				"type": "message",
-				"role": "assistant",
-				"model": "claude-x",
-				"usage": {
-					"input_tokens": 3
-				}
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "content_block_start", `
-		{
-			"type": "content_block_start",
-			"index": 0,
-			"content_block": {
-				"type": "tool_use",
-				"id": "call-1",
-				"name": "get_time",
-				"input": {}
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "content_block_delta", `
-		{
-			"type": "content_block_delta",
-			"index": 0,
-			"delta": {
-				"type": "input_json_delta",
-				"partial_json": "{\"tz\":"
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "content_block_delta", `
-		{
-			"type": "content_block_delta",
-			"index": 0,
-			"delta": {
-				"type": "input_json_delta",
-				"partial_json": "\"UTC\"}"
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "content_block_stop", `{"type":"content_block_stop","index":0}`)
-		writeSSEEvent(t, w, "message_delta", `
-		{
-			"type": "message_delta",
-			"delta": {
-				"stop_reason": "tool_use",
-				"stop_sequence": null
-			},
-			"usage": {
-				"output_tokens": 5
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "message_stop", `{"type":"message_stop"}`)
-	}))
+	server := newAnthropicStreamServer(t, nil,
+		messageStart("msg-1", "claude-x", 3),
+		toolBlockStart(0, "call-1", "get_time", "{}"),
+		inputJSONDelta(0, `{"tz":`),
+		inputJSONDelta(0, `"UTC"}`),
+		blockStop(0),
+		messageDelta("tool_use", 5),
+		messageStop(),
+	)
 	defer server.Close()
-
-	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
-	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
-		Model:    "claude-x",
-		Messages: []llmtypes.Message{{Role: "user", Content: "what time?"}},
-	})
-	if err != nil {
-		t.Fatalf("CompleteStream: %v", err)
-	}
+	stream := openAnthropicTestStream(t, server, "claude-x", "what time?")
 	defer stream.Close()
 
 	acc, finish := collectStreamToolCalls(t, stream)
@@ -171,59 +107,15 @@ func TestCompleteStream_ToolUse_Standard(t *testing.T) {
 }
 
 func TestCompleteStream_ToolUse_ZeroArgFlushedOnStop(t *testing.T) {
-	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		writeSSEEvent(t, w, "message_start", `
-		{
-			"type": "message_start",
-			"message": {
-				"id": "msg-1",
-				"type": "message",
-				"role": "assistant",
-				"model": "claude-x",
-				"usage": {
-					"input_tokens": 2
-				}
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "content_block_start", `
-		{
-			"type": "content_block_start",
-			"index": 0,
-			"content_block": {
-				"type": "tool_use",
-				"id": "call-1",
-				"name": "noop",
-				"input": {}
-			}
-		}
-		`)
-		// no input_json_delta: zero-argument tool
-		writeSSEEvent(t, w, "content_block_stop", `{"type":"content_block_stop","index":0}`)
-		writeSSEEvent(t, w, "message_delta", `
-		{
-			"type": "message_delta",
-			"delta": {
-				"stop_reason": "tool_use"
-			},
-			"usage": {
-				"output_tokens": 1
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "message_stop", `{"type":"message_stop"}`)
-	}))
+	server := newAnthropicStreamServer(t, nil,
+		messageStart("msg-1", "claude-x", 2),
+		toolBlockStart(0, "call-1", "noop", "{}"),
+		blockStop(0),
+		messageDelta("tool_use", 1),
+		messageStop(),
+	)
 	defer server.Close()
-
-	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
-	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
-		Model:    "claude-x",
-		Messages: []llmtypes.Message{{Role: "user", Content: "go"}},
-	})
-	if err != nil {
-		t.Fatalf("CompleteStream: %v", err)
-	}
+	stream := openAnthropicTestStream(t, server, "claude-x", "go")
 	defer stream.Close()
 
 	acc, _ := collectStreamToolCalls(t, stream)
@@ -240,91 +132,19 @@ func TestCompleteStream_ToolUse_ZeroArgFlushedOnStop(t *testing.T) {
 }
 
 func TestCompleteStream_ToolUse_MultipleCalls(t *testing.T) {
-	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		writeSSEEvent(t, w, "message_start", `
-		{
-			"type": "message_start",
-			"message": {
-				"id": "msg-1",
-				"type": "message",
-				"role": "assistant",
-				"model": "claude-x",
-				"usage": {
-					"input_tokens": 4
-				}
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "content_block_start", `
-		{
-			"type": "content_block_start",
-			"index": 0,
-			"content_block": {
-				"type": "tool_use",
-				"id": "a",
-				"name": "first",
-				"input": {}
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "content_block_delta", `
-		{
-			"type": "content_block_delta",
-			"index": 0,
-			"delta": {
-				"type": "input_json_delta",
-				"partial_json": "{\"k\":1}"
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "content_block_stop", `{"type":"content_block_stop","index":0}`)
-		writeSSEEvent(t, w, "content_block_start", `
-		{
-			"type": "content_block_start",
-			"index": 1,
-			"content_block": {
-				"type": "tool_use",
-				"id": "b",
-				"name": "second",
-				"input": {}
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "content_block_delta", `
-		{
-			"type": "content_block_delta",
-			"index": 1,
-			"delta": {
-				"type": "input_json_delta",
-				"partial_json": "{\"k\":2}"
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "content_block_stop", `{"type":"content_block_stop","index":1}`)
-		writeSSEEvent(t, w, "message_delta", `
-		{
-			"type": "message_delta",
-			"delta": {
-				"stop_reason": "tool_use"
-			},
-			"usage": {
-				"output_tokens": 3
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "message_stop", `{"type":"message_stop"}`)
-	}))
+	server := newAnthropicStreamServer(t, nil,
+		messageStart("msg-1", "claude-x", 4),
+		toolBlockStart(0, "a", "first", "{}"),
+		inputJSONDelta(0, `{"k":1}`),
+		blockStop(0),
+		toolBlockStart(1, "b", "second", "{}"),
+		inputJSONDelta(1, `{"k":2}`),
+		blockStop(1),
+		messageDelta("tool_use", 3),
+		messageStop(),
+	)
 	defer server.Close()
-
-	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
-	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
-		Model:    "claude-x",
-		Messages: []llmtypes.Message{{Role: "user", Content: "do both"}},
-	})
-	if err != nil {
-		t.Fatalf("CompleteStream: %v", err)
-	}
+	stream := openAnthropicTestStream(t, server, "claude-x", "do both")
 	defer stream.Close()
 
 	acc, _ := collectStreamToolCalls(t, stream)
@@ -340,89 +160,19 @@ func TestCompleteStream_ToolUse_MultipleCalls(t *testing.T) {
 }
 
 func TestCompleteStream_ToolUse_MixedTextAndToolCall(t *testing.T) {
-	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		writeSSEEvent(t, w, "message_start", `
-		{
-			"type": "message_start",
-			"message": {
-				"id": "msg-1",
-				"type": "message",
-				"role": "assistant",
-				"model": "claude-x",
-				"usage": {
-					"input_tokens": 2
-				}
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "content_block_start", `
-		{
-			"type": "content_block_start",
-			"index": 0,
-			"content_block": {
-				"type": "text",
-				"text": ""
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "content_block_delta", `
-		{
-			"type": "content_block_delta",
-			"index": 0,
-			"delta": {
-				"type": "text_delta",
-				"text": "let me check"
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "content_block_stop", `{"type":"content_block_stop","index":0}`)
-		writeSSEEvent(t, w, "content_block_start", `
-		{
-			"type": "content_block_start",
-			"index": 1,
-			"content_block": {
-				"type": "tool_use",
-				"id": "call-1",
-				"name": "lookup",
-				"input": {}
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "content_block_delta", `
-		{
-			"type": "content_block_delta",
-			"index": 1,
-			"delta": {
-				"type": "input_json_delta",
-				"partial_json": "{\"q\":\"x\"}"
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "content_block_stop", `{"type":"content_block_stop","index":1}`)
-		writeSSEEvent(t, w, "message_delta", `
-		{
-			"type": "message_delta",
-			"delta": {
-				"stop_reason": "tool_use"
-			},
-			"usage": {
-				"output_tokens": 4
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "message_stop", `{"type":"message_stop"}`)
-	}))
+	server := newAnthropicStreamServer(t, nil,
+		messageStart("msg-1", "claude-x", 2),
+		textBlockStart(0),
+		textDelta(0, "let me check"),
+		blockStop(0),
+		toolBlockStart(1, "call-1", "lookup", "{}"),
+		inputJSONDelta(1, `{"q":"x"}`),
+		blockStop(1),
+		messageDelta("tool_use", 4),
+		messageStop(),
+	)
 	defer server.Close()
-
-	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
-	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
-		Model:    "claude-x",
-		Messages: []llmtypes.Message{{Role: "user", Content: "go"}},
-	})
-	if err != nil {
-		t.Fatalf("CompleteStream: %v", err)
-	}
+	stream := openAnthropicTestStream(t, server, "claude-x", "go")
 	defer stream.Close()
 
 	var content strings.Builder

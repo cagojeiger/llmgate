@@ -10,7 +10,6 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
-	"time"
 
 	"llmgate/internal/llmtypes"
 )
@@ -42,7 +41,6 @@ func writeSSEEvent(t *testing.T, w http.ResponseWriter, event, payload string) {
 	if flusher, ok := w.(http.Flusher); ok {
 		flusher.Flush()
 	}
-	time.Sleep(time.Millisecond)
 }
 
 func compactJSONPayload(t *testing.T, payload string) string {

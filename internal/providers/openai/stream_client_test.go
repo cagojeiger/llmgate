@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	"llmgate/internal/llmtypes"
 )
@@ -296,7 +295,6 @@ func writeSSEChunk(t *testing.T, w http.ResponseWriter, payload string) {
 	if flusher, ok := w.(http.Flusher); ok {
 		flusher.Flush()
 	}
-	time.Sleep(time.Millisecond)
 }
 
 func compactJSONPayload(t *testing.T, payload string) string {

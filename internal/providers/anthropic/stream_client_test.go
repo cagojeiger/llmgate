@@ -1,7 +1,6 @@
 package anthropic
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -13,7 +12,7 @@ import (
 )
 
 func TestCompleteStream_Success(t *testing.T) {
-	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newAnthropicStreamServer(t, func(t *testing.T, r *http.Request) {
 		if got := r.Header.Get("Accept"); got != "text/event-stream" {
 			t.Errorf("Accept = %q, want text/event-stream", got)
 		}
@@ -25,89 +24,18 @@ func TestCompleteStream_Success(t *testing.T) {
 		if raw["stream"] != true {
 			t.Fatalf("stream = %v, want true", raw["stream"])
 		}
-
-		w.Header().Set("Content-Type", "text/event-stream")
-		writeSSEEvent(t, w, "message_start", `
-		{
-			"type": "message_start",
-			"message": {
-				"id": "msg-1",
-				"type": "message",
-				"role": "assistant",
-				"model": "minimax-m2.5",
-				"usage": {
-					"input_tokens": 3
-				}
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "ping", `{"type":"ping"}`)
-		writeSSEEvent(t, w, "content_block_start", `
-		{
-			"type": "content_block_start",
-			"index": 0,
-			"content_block": {
-				"type": "text",
-				"text": ""
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "content_block_delta", `
-		{
-			"type": "content_block_delta",
-			"index": 0,
-			"delta": {
-				"type": "thinking_delta",
-				"thinking": "because"
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "content_block_delta", `
-		{
-			"type": "content_block_delta",
-			"index": 0,
-			"delta": {
-				"type": "text_delta",
-				"text": "hel"
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "content_block_delta", `
-		{
-			"type": "content_block_delta",
-			"index": 0,
-			"delta": {
-				"type": "text_delta",
-				"text": "lo"
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "message_delta", `
-		{
-			"type": "message_delta",
-			"delta": {
-				"stop_reason": "end_turn",
-				"stop_sequence": null
-			},
-			"usage": {
-				"output_tokens": 2,
-				"cache_creation_input_tokens": 1,
-				"cache_read_input_tokens": 2
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "message_stop", `{"type":"message_stop"}`)
-	}))
+	},
+		messageStart("msg-1", "minimax-m2.5", 3),
+		pingEvent(),
+		textBlockStart(0),
+		thinkingDelta(0, "because"),
+		textDelta(0, "hel"),
+		textDelta(0, "lo"),
+		messageDeltaWithCache("end_turn", 2, 1, 2),
+		messageStop(),
+	)
 	defer server.Close()
-
-	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
-	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
-		Model:    "minimax-m2.5",
-		Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
-	})
-	if err != nil {
-		t.Fatalf("CompleteStream returned error: %v", err)
-	}
+	stream := openAnthropicTestStream(t, server, "minimax-m2.5", "ping")
 	defer stream.Close()
 
 	var content strings.Builder
@@ -167,40 +95,18 @@ func TestCompleteStream_Success(t *testing.T) {
 }
 
 func TestCompleteStream_ErrorMidFlight(t *testing.T) {
-	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		writeSSEEvent(t, w, "message_start", `
-		{
-			"type": "message_start",
-			"message": {
-				"id": "msg-1",
-				"type": "message",
-				"role": "assistant",
-				"model": "minimax-m2.5",
-				"usage": {
-					"input_tokens": 1
-				}
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "error", `{"type":"error","error":{"type":"overloaded_error","message":"stream exploded"}}`)
-	}))
+	server := newAnthropicStreamServer(t, nil,
+		messageStart("msg-1", "minimax-m2.5", 1),
+		streamError("overloaded_error", "stream exploded"),
+	)
 	defer server.Close()
-
-	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
-	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
-		Model:    "minimax-m2.5",
-		Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
-	})
-	if err != nil {
-		t.Fatalf("CompleteStream returned error: %v", err)
-	}
+	stream := openAnthropicTestStream(t, server, "minimax-m2.5", "ping")
 	defer stream.Close()
 
 	if _, err := stream.Recv(); err != nil {
 		t.Fatalf("first Recv() error = %v", err)
 	}
-	_, err = stream.Recv()
+	_, err := stream.Recv()
 	perr := requireProviderError(t, err)
 	if perr.Kind != llmtypes.KindUpstream {
 		t.Fatalf("Kind = %q, want %q", perr.Kind, llmtypes.KindUpstream)
@@ -214,43 +120,12 @@ func TestCompleteStream_ErrorMidFlight(t *testing.T) {
 }
 
 func TestCompleteStream_NoMessageStop(t *testing.T) {
-	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		writeSSEEvent(t, w, "message_start", `
-		{
-			"type": "message_start",
-			"message": {
-				"id": "msg-1",
-				"type": "message",
-				"role": "assistant",
-				"model": "minimax-m2.5",
-				"usage": {
-					"input_tokens": 1
-				}
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "content_block_delta", `
-		{
-			"type": "content_block_delta",
-			"index": 0,
-			"delta": {
-				"type": "text_delta",
-				"text": "a"
-			}
-		}
-		`)
-	}))
+	server := newAnthropicStreamServer(t, nil,
+		messageStart("msg-1", "minimax-m2.5", 1),
+		textDelta(0, "a"),
+	)
 	defer server.Close()
-
-	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
-	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
-		Model:    "minimax-m2.5",
-		Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
-	})
-	if err != nil {
-		t.Fatalf("CompleteStream returned error: %v", err)
-	}
+	stream := openAnthropicTestStream(t, server, "minimax-m2.5", "ping")
 	defer stream.Close()
 
 	if _, err := stream.Recv(); err != nil {
@@ -259,7 +134,7 @@ func TestCompleteStream_NoMessageStop(t *testing.T) {
 	if _, err := stream.Recv(); err != nil {
 		t.Fatalf("second Recv() error = %v", err)
 	}
-	_, err = stream.Recv()
+	_, err := stream.Recv()
 	perr := requireProviderError(t, err)
 	if perr.Kind != llmtypes.KindUpstream {
 		t.Fatalf("Kind = %q, want %q", perr.Kind, llmtypes.KindUpstream)
@@ -270,47 +145,14 @@ func TestCompleteStream_NoMessageStop(t *testing.T) {
 }
 
 func TestCompleteStream_PingIgnored(t *testing.T) {
-	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		writeSSEEvent(t, w, "ping", `{"type":"ping"}`)
-		writeSSEEvent(t, w, "message_start", `
-		{
-			"type": "message_start",
-			"message": {
-				"id": "msg-1",
-				"type": "message",
-				"role": "assistant",
-				"model": "minimax-m2.5",
-				"usage": {
-					"input_tokens": 1
-				}
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "message_delta", `
-		{
-			"type": "message_delta",
-			"delta": {
-				"stop_reason": "end_turn",
-				"stop_sequence": null
-			},
-			"usage": {
-				"output_tokens": 1
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "message_stop", `{"type":"message_stop"}`)
-	}))
+	server := newAnthropicStreamServer(t, nil,
+		pingEvent(),
+		messageStart("msg-1", "minimax-m2.5", 1),
+		messageDelta("end_turn", 1),
+		messageStop(),
+	)
 	defer server.Close()
-
-	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
-	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
-		Model:    "minimax-m2.5",
-		Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
-	})
-	if err != nil {
-		t.Fatalf("CompleteStream returned error: %v", err)
-	}
+	stream := openAnthropicTestStream(t, server, "minimax-m2.5", "ping")
 	defer stream.Close()
 
 	event, err := stream.Recv()
@@ -323,56 +165,14 @@ func TestCompleteStream_PingIgnored(t *testing.T) {
 }
 
 func TestStreamSummary_Success(t *testing.T) {
-	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		writeSSEEvent(t, w, "message_start", `
-		{
-			"type": "message_start",
-			"message": {
-				"id": "msg-1",
-				"type": "message",
-				"role": "assistant",
-				"model": "minimax-m2.5",
-				"usage": {
-					"input_tokens": 3
-				}
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "content_block_delta", `
-		{
-			"type": "content_block_delta",
-			"index": 0,
-			"delta": {
-				"type": "text_delta",
-				"text": "hi"
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "message_delta", `
-		{
-			"type": "message_delta",
-			"delta": {
-				"stop_reason": "end_turn",
-				"stop_sequence": null
-			},
-			"usage": {
-				"output_tokens": 2
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "message_stop", `{"type":"message_stop"}`)
-	}))
+	server := newAnthropicStreamServer(t, nil,
+		messageStart("msg-1", "minimax-m2.5", 3),
+		textDelta(0, "hi"),
+		messageDelta("end_turn", 2),
+		messageStop(),
+	)
 	defer server.Close()
-
-	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
-	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
-		Model:    "minimax-m2.5",
-		Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
-	})
-	if err != nil {
-		t.Fatalf("CompleteStream: %v", err)
-	}
+	stream := openAnthropicTestStream(t, server, "minimax-m2.5", "ping")
 	defer stream.Close()
 
 	for {
@@ -408,43 +208,12 @@ func TestStreamSummary_PartialOnError(t *testing.T) {
 	// message_start arrives (prompt tokens known) but stream cuts off before
 	// message_delta. Summary should expose prompt-side tokens for audit even
 	// though completion never finished.
-	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		writeSSEEvent(t, w, "message_start", `
-		{
-			"type": "message_start",
-			"message": {
-				"id": "msg-1",
-				"type": "message",
-				"role": "assistant",
-				"model": "minimax-m2.5",
-				"usage": {
-					"input_tokens": 7
-				}
-			}
-		}
-		`)
-		writeSSEEvent(t, w, "content_block_delta", `
-		{
-			"type": "content_block_delta",
-			"index": 0,
-			"delta": {
-				"type": "text_delta",
-				"text": "a"
-			}
-		}
-		`)
-	}))
+	server := newAnthropicStreamServer(t, nil,
+		messageStart("msg-1", "minimax-m2.5", 7),
+		textDelta(0, "a"),
+	)
 	defer server.Close()
-
-	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
-	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
-		Model:    "minimax-m2.5",
-		Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
-	})
-	if err != nil {
-		t.Fatalf("CompleteStream: %v", err)
-	}
+	stream := openAnthropicTestStream(t, server, "minimax-m2.5", "ping")
 	defer stream.Close()
 
 	if _, err := stream.Recv(); err != nil {

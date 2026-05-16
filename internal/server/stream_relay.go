@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"llmgate/internal/llmtypes"
@@ -51,8 +52,10 @@ func (s *streamRelay) Run(ctx context.Context, w http.ResponseWriter, stream llm
 	rec.StatusCode = http.StatusOK
 	call.StatusCode = rec.StatusCode
 
+	receiver := newStreamReceiver(stream)
+	defer receiver.Stop()
 	for {
-		event, err := recvWithIdleTimeout(ctx, stream, s.idleTimeout)
+		event, err := receiver.Recv(ctx, s.idleTimeout)
 		if errors.Is(err, io.EOF) {
 			if werr := sink.SendDone(); werr != nil {
 				s.recordClientClosed(ctx, rec, call, werr)
@@ -109,16 +112,49 @@ type recvResult struct {
 	err   error
 }
 
-// recvWithIdleTimeout pulls the next event from stream, bounded by the
-// idle timeout (no event between Recv calls). On timeout the stream is
-// closed and a bounded grace period waits for the goroutine to exit;
-// see streaming.CloseGrace for the safety net rationale.
-func recvWithIdleTimeout(ctx context.Context, stream llmtypes.Stream, timeout time.Duration) (*llmtypes.Event, error) {
-	ch := make(chan recvResult, 1)
-	go func() {
-		event, err := stream.Recv()
-		ch <- recvResult{event: event, err: err}
-	}()
+type streamReceiver struct {
+	stream   llmtypes.Stream
+	requests chan struct{}
+	results  chan recvResult
+	stopOnce sync.Once
+}
+
+func newStreamReceiver(stream llmtypes.Stream) *streamReceiver {
+	r := &streamReceiver{
+		stream:   stream,
+		requests: make(chan struct{}),
+		results:  make(chan recvResult, 1),
+	}
+	go r.run()
+	return r
+}
+
+func (r *streamReceiver) run() {
+	for range r.requests {
+		event, err := r.stream.Recv()
+		r.results <- recvResult{event: event, err: err}
+		if err != nil {
+			return
+		}
+	}
+}
+
+func (r *streamReceiver) Stop() {
+	r.stopOnce.Do(func() {
+		close(r.requests)
+	})
+}
+
+// Recv pulls one event from stream, bounded by the idle timeout (no event
+// between Recv calls). The worker goroutine is reused for the whole stream,
+// while Run still requests only one Recv after each downstream write.
+func (r *streamReceiver) Recv(ctx context.Context, timeout time.Duration) (*llmtypes.Event, error) {
+	select {
+	case r.requests <- struct{}{}:
+	case <-ctx.Done():
+		_ = r.stream.Close()
+		return nil, streamContextError(ctx.Err())
+	}
 
 	var timeoutC <-chan time.Time
 	var timer *time.Timer
@@ -129,18 +165,30 @@ func recvWithIdleTimeout(ctx context.Context, stream llmtypes.Stream, timeout ti
 	}
 
 	select {
-	case got := <-ch:
+	case got := <-r.results:
 		return got.event, got.err
 	case <-timeoutC:
-		_ = stream.Close()
-		streaming.DrainRecvOrAbandon(ch, streaming.CloseGrace)
+		_ = r.stream.Close()
+		streaming.DrainRecvOrAbandon(r.results, streaming.CloseGrace)
 		return nil, &llmtypes.Error{Kind: llmtypes.KindTimeout, Message: "stream idle timeout"}
 	case <-ctx.Done():
-		_ = stream.Close()
-		streaming.DrainRecvOrAbandon(ch, streaming.CloseGrace)
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, &llmtypes.Error{Kind: llmtypes.KindTimeout, Message: ctx.Err().Error(), Cause: ctx.Err()}
-		}
-		return nil, ctx.Err()
+		_ = r.stream.Close()
+		streaming.DrainRecvOrAbandon(r.results, streaming.CloseGrace)
+		return nil, streamContextError(ctx.Err())
 	}
+}
+
+func streamContextError(err error) error {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return &llmtypes.Error{Kind: llmtypes.KindTimeout, Message: err.Error(), Cause: err}
+	}
+	return err
+}
+
+// recvWithIdleTimeout keeps the old single-call helper available for focused
+// tests; production stream relay paths reuse streamReceiver across chunks.
+func recvWithIdleTimeout(ctx context.Context, stream llmtypes.Stream, timeout time.Duration) (*llmtypes.Event, error) {
+	receiver := newStreamReceiver(stream)
+	defer receiver.Stop()
+	return receiver.Recv(ctx, timeout)
 }

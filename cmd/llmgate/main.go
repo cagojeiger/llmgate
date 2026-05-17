@@ -13,6 +13,9 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"llmgate/internal/catalog"
 	"llmgate/internal/config"
@@ -99,7 +102,21 @@ func run() error {
 		return err
 	}
 
-	events := telemetry.NewSlogSink(auditLog, callLog)
+	metricsRegistry := prometheus.NewRegistry()
+	metricsRegistry.MustRegister(
+		collectors.NewGoCollector(),
+		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+	)
+	metricsRecorder, err := telemetry.NewPrometheusRecorder(metricsRegistry)
+	if err != nil {
+		return fmt.Errorf("build prometheus recorder: %w", err)
+	}
+
+	events := telemetry.NewFanoutSink(logger,
+		telemetry.NewSlogSink(auditLog, callLog),
+		metricsRecorder,
+	)
+	lifecycle := telemetry.LifecycleObservers{metricsRecorder}
 	defer func() {
 		if err := events.Close(); err != nil {
 			logger.Warn("telemetry sink close failed", slog.String("err", err.Error()))
@@ -111,9 +128,20 @@ func run() error {
 		StreamIdleTimeout: cfg.StreamIdleTimeout,
 		ServiceVersion:    version,
 		Environment:       cfg.Environment,
+		LifecycleObserver: lifecycle,
 	})
 	probe := server.NewProbeState()
-	srv := server.New(cfg, accessLog, handler, consumerStore, probe)
+	srv := server.NewWithOptions(server.ServerOptions{
+		Config:    cfg,
+		Log:       accessLog,
+		Handler:   handler,
+		Consumers: consumerStore,
+		Probe:     probe,
+		MetricsHandler: promhttp.HandlerFor(metricsRegistry, promhttp.HandlerOpts{
+			MaxRequestsInFlight: 5,
+			Timeout:             5 * time.Second,
+		}),
+	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

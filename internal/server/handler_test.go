@@ -212,8 +212,10 @@ func TestAdoptStreamSummary_FinalizesAttemptAndRecord(t *testing.T) {
 		},
 	}
 	sum := &llmtypes.Summary{
-		Usage:      &llmtypes.Usage{PromptTokens: 5, CompletionTokens: 7, TotalTokens: 12},
-		VendorCost: `"0.001"`,
+		Usage:       &llmtypes.Usage{PromptTokens: 5, CompletionTokens: 7, TotalTokens: 12},
+		VendorCost:  `"0.001"`,
+		ChunkCount:  3,
+		FirstByteAt: started.Add(75 * time.Millisecond),
 	}
 
 	telemetry.AdoptStreamSummary(call, sum, now)
@@ -223,6 +225,12 @@ func TestAdoptStreamSummary_FinalizesAttemptAndRecord(t *testing.T) {
 	}
 	if call.VendorCost != `"0.001"` {
 		t.Errorf("call.VendorCost = %q, want \"0.001\"", call.VendorCost)
+	}
+	if call.StreamChunks != 3 {
+		t.Errorf("call.StreamChunks = %d, want 3", call.StreamChunks)
+	}
+	if call.FirstByteMS != 75 {
+		t.Errorf("call.FirstByteMS = %d, want 75", call.FirstByteMS)
 	}
 	last := call.Attempts[0]
 	if last.DurationMS != 250 {

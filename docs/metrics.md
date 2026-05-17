@@ -40,6 +40,11 @@ Grafana 는 로컬 개발 편의를 위해 anonymous admin 으로 열린다. Pro
 개인 `docker-compose.override.yaml` 이 llmgate host port 를 바꾸더라도 Prometheus 는 compose
 내부 DNS 인 `llmgate:8080` 을 scrape 하므로 영향을 받지 않는다.
 
+로컬 compose 의 Prometheus 설정은 단일 `llmgate:8080` target 을 scrape 한다. 운영의 멀티 pod
+환경에서는 ServiceMonitor / PodMonitor / scrape discovery 가 각 pod 의 `/metrics` 를 scrape 해야
+한다. 대시보드는 gateway RED 와 LLM 지표를 pod 전체로 합산하고, runtime resource 지표는
+`instance` 별로 보여 한 pod 만 과부하인 상황을 구분한다.
+
 ## 운영 범위
 
 llmgate 는 request-driven gateway 이므로 운영 대시보드는 세 층을 함께 본다.

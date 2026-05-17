@@ -48,7 +48,7 @@
       },
       "id": 1,
       "options": {
-        "content": "Use this view when latency rises but LLM/vendor panels do not explain it.\n\n- In-flight requests/streams show gateway saturation.\n- Goroutines and threads should scale with load and return after load drops.\n- Memory and GC separate heap pressure from RSS growth.\n- CPU and file descriptors catch local host/container resource limits.",
+        "content": "Use this view when latency rises but LLM/vendor panels do not explain it.\n\n- Runtime panels show each scraped llmgate instance so one hot pod is visible.\n- In-flight requests/streams show gateway saturation per pod.\n- Goroutines and threads should scale with load and return after load drops.\n- Memory and GC separate heap pressure from RSS growth.\n- CPU and file descriptors catch local host/container resource limits.",
         "mode": "markdown"
       },
       "pluginVersion": "12.3.0",
@@ -95,12 +95,12 @@
       "targets": [
         {
           "expr": "llmgate_inflight_requests{job=\"llmgate\"}",
-          "legendFormat": "requests",
+          "legendFormat": "requests {{instance}}",
           "refId": "A"
         },
         {
           "expr": "llmgate_inflight_streams{job=\"llmgate\"}",
-          "legendFormat": "streams",
+          "legendFormat": "streams {{instance}}",
           "refId": "B"
         }
       ],
@@ -147,12 +147,12 @@
       "targets": [
         {
           "expr": "go_goroutines{job=\"llmgate\"}",
-          "legendFormat": "goroutines",
+          "legendFormat": "goroutines {{instance}}",
           "refId": "A"
         },
         {
           "expr": "go_threads{job=\"llmgate\"}",
-          "legendFormat": "threads",
+          "legendFormat": "threads {{instance}}",
           "refId": "B"
         }
       ],
@@ -199,7 +199,7 @@
       "targets": [
         {
           "expr": "rate(process_cpu_seconds_total{job=\"llmgate\"}[5m])",
-          "legendFormat": "cpu cores",
+          "legendFormat": "cpu {{instance}}",
           "refId": "A"
         }
       ],
@@ -246,17 +246,17 @@
       "targets": [
         {
           "expr": "process_resident_memory_bytes{job=\"llmgate\"}",
-          "legendFormat": "rss",
+          "legendFormat": "rss {{instance}}",
           "refId": "A"
         },
         {
           "expr": "go_memstats_heap_inuse_bytes{job=\"llmgate\"}",
-          "legendFormat": "heap in-use",
+          "legendFormat": "heap in-use {{instance}}",
           "refId": "B"
         },
         {
           "expr": "go_memstats_heap_alloc_bytes{job=\"llmgate\"}",
-          "legendFormat": "heap alloc",
+          "legendFormat": "heap alloc {{instance}}",
           "refId": "C"
         }
       ],
@@ -303,12 +303,12 @@
       "targets": [
         {
           "expr": "rate(go_gc_duration_seconds_sum{job=\"llmgate\"}[5m]) / clamp_min(rate(go_gc_duration_seconds_count{job=\"llmgate\"}[5m]), 0.001)",
-          "legendFormat": "avg pause",
+          "legendFormat": "avg pause {{instance}}",
           "refId": "A"
         },
         {
           "expr": "go_gc_duration_seconds{job=\"llmgate\", quantile=\"1\"}",
-          "legendFormat": "max observed pause",
+          "legendFormat": "max pause {{instance}}",
           "refId": "B"
         }
       ],
@@ -355,7 +355,7 @@
       "targets": [
         {
           "expr": "process_open_fds{job=\"llmgate\"} / process_max_fds{job=\"llmgate\"}",
-          "legendFormat": "fd usage",
+          "legendFormat": "fd {{instance}}",
           "refId": "A"
         }
       ],

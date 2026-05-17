@@ -19,6 +19,7 @@ func resetEnv(t *testing.T) {
 		"LLMGATE_ENVIRONMENT",
 		"LLMGATE_SHUTDOWN_DRAIN_TIMEOUT",
 		"LLMGATE_LOG_LEVEL",
+		"LLMGATE_METRICS_ENABLED",
 		"LLMGATE_FALLBACK_ON",
 		"LLMGATE_CIRCUIT_FAILURES",
 		"LLMGATE_CIRCUIT_OPEN_DURATION",
@@ -51,6 +52,9 @@ func TestLoadServer_Defaults(t *testing.T) {
 	if cfg.LogLevel != slog.LevelInfo {
 		t.Errorf("LogLevel = %v, want info", cfg.LogLevel)
 	}
+	if cfg.MetricsEnabled {
+		t.Errorf("MetricsEnabled = true, want false")
+	}
 	if !reflect.DeepEqual(cfg.FallbackOn, []string{"rate_limit", "upstream", "timeout", "network"}) {
 		t.Errorf("FallbackOn = %v, want default transient classes", cfg.FallbackOn)
 	}
@@ -74,6 +78,32 @@ func TestLoadServer_Defaults(t *testing.T) {
 	}
 	if cfg.StreamIdleTimeout != time.Minute {
 		t.Errorf("StreamIdleTimeout = %v, want 1m", cfg.StreamIdleTimeout)
+	}
+}
+
+func TestLoadServer_MetricsEnabledOverride(t *testing.T) {
+	resetEnv(t)
+	t.Setenv("LLMGATE_METRICS_ENABLED", "true")
+
+	cfg, err := LoadServer()
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if !cfg.MetricsEnabled {
+		t.Errorf("MetricsEnabled = false, want true")
+	}
+}
+
+func TestLoadServer_RejectsInvalidMetricsEnabled(t *testing.T) {
+	resetEnv(t)
+	t.Setenv("LLMGATE_METRICS_ENABLED", "sometimes")
+
+	_, err := LoadServer()
+	if err == nil {
+		t.Fatal("LoadServer: want error for invalid LLMGATE_METRICS_ENABLED")
+	}
+	if !strings.Contains(err.Error(), "LLMGATE_METRICS_ENABLED") {
+		t.Errorf("err = %v, want mention of failing key", err)
 	}
 }
 

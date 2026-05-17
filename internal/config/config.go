@@ -22,6 +22,9 @@ type Server struct {
 	// app-side force close fires before SIGKILL.
 	ShutdownDrainTimeout time.Duration
 	LogLevel             slog.Level
+	// MetricsEnabled controls whether the public Prometheus scrape endpoint
+	// is mounted. Metrics are still recorded internally when disabled.
+	MetricsEnabled bool
 
 	// Routing fallback, breaker, and timeout settings.
 	FallbackOn        []string
@@ -71,12 +74,17 @@ func LoadServer() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	metricsEnabled, err := boolEnv("LLMGATE_METRICS_ENABLED", "false")
+	if err != nil {
+		return nil, err
+	}
 
 	return &Server{
 		Addr:                 orDefault("LLMGATE_ADDR", ":8080"),
 		Environment:          orDefault("LLMGATE_ENVIRONMENT", "local"),
 		ShutdownDrainTimeout: drainTimeout,
 		LogLevel:             logLevel,
+		MetricsEnabled:       metricsEnabled,
 		FallbackOn:           parseCSV("LLMGATE_FALLBACK_ON", "rate_limit,upstream,timeout,network"),
 		CircuitFailures:      circuitFailures,
 		CircuitOpen:          circuitOpen,
@@ -145,6 +153,15 @@ func parseLogLevel(key, def string) (slog.Level, error) {
 		return 0, fmt.Errorf("%s must be a valid slog level, got %q: %w", key, raw, err)
 	}
 	return level, nil
+}
+
+func boolEnv(key, def string) (bool, error) {
+	raw := orDefault(key, def)
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, fmt.Errorf("%s must be a boolean, got %q: %w", key, raw, err)
+	}
+	return v, nil
 }
 
 // parseCSV reads a comma-separated env value, trims tokens, and drops blanks.

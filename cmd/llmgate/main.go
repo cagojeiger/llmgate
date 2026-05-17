@@ -131,16 +131,20 @@ func run() error {
 		LifecycleObserver: lifecycle,
 	})
 	probe := server.NewProbeState()
-	srv := server.NewWithOptions(server.ServerOptions{
-		Config:    cfg,
-		Log:       accessLog,
-		Handler:   handler,
-		Consumers: consumerStore,
-		Probe:     probe,
-		MetricsHandler: promhttp.HandlerFor(metricsRegistry, promhttp.HandlerOpts{
+	var metricsHandler http.Handler
+	if cfg.MetricsEnabled {
+		metricsHandler = promhttp.HandlerFor(metricsRegistry, promhttp.HandlerOpts{
 			MaxRequestsInFlight: 5,
 			Timeout:             5 * time.Second,
-		}),
+		})
+	}
+	srv := server.NewWithOptions(server.ServerOptions{
+		Config:         cfg,
+		Log:            accessLog,
+		Handler:        handler,
+		Consumers:      consumerStore,
+		Probe:          probe,
+		MetricsHandler: metricsHandler,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

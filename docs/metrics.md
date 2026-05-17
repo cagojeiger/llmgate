@@ -8,6 +8,9 @@ Prometheus scrape endpoint:
 GET /metrics
 ```
 
+`/metrics` 는 기본 비활성이다. 노출하려면 프로세스 환경에 `LLMGATE_METRICS_ENABLED=true` 를
+설정한다.
+
 `/metrics` 는 `/healthz/*` 처럼 auth / access-log / request-id middleware 밖에 있다.
 Prometheus scrape 트래픽이 앱 요청 지표를 오염시키지 않게 하기 위해서다. 외부 노출 제어는
 k8s ServiceMonitor / 네트워크 정책 / ingress 정책의 책임이다.

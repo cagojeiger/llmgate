@@ -349,18 +349,18 @@
       },
       "targets": [
         {
-          "expr": "llmgate_inflight_requests{job=\"llmgate\"}",
-          "legendFormat": "in-flight requests",
+          "expr": "sum(llmgate_inflight_requests{job=\"llmgate\"})",
+          "legendFormat": "in-flight requests total",
           "refId": "A"
         },
         {
-          "expr": "llmgate_inflight_streams{job=\"llmgate\"}",
-          "legendFormat": "in-flight streams",
+          "expr": "sum(llmgate_inflight_streams{job=\"llmgate\"})",
+          "legendFormat": "in-flight streams total",
           "refId": "B"
         },
         {
-          "expr": "go_goroutines{job=\"llmgate\"}",
-          "legendFormat": "goroutines",
+          "expr": "sum(go_goroutines{job=\"llmgate\"})",
+          "legendFormat": "goroutines total",
           "refId": "C"
         }
       ],
@@ -721,12 +721,12 @@
           "targets": [
             {
               "expr": "go_goroutines{job=\"llmgate\"}",
-              "legendFormat": "goroutines",
+              "legendFormat": "goroutines {{instance}}",
               "refId": "A"
             },
             {
               "expr": "go_threads{job=\"llmgate\"}",
-              "legendFormat": "threads",
+              "legendFormat": "threads {{instance}}",
               "refId": "B"
             }
           ],
@@ -773,17 +773,17 @@
           "targets": [
             {
               "expr": "process_resident_memory_bytes{job=\"llmgate\"}",
-              "legendFormat": "rss",
+              "legendFormat": "rss {{instance}}",
               "refId": "A"
             },
             {
               "expr": "go_memstats_heap_inuse_bytes{job=\"llmgate\"}",
-              "legendFormat": "heap in-use",
+              "legendFormat": "heap in-use {{instance}}",
               "refId": "B"
             },
             {
               "expr": "go_memstats_heap_alloc_bytes{job=\"llmgate\"}",
-              "legendFormat": "heap alloc",
+              "legendFormat": "heap alloc {{instance}}",
               "refId": "C"
             }
           ],
@@ -830,12 +830,12 @@
           "targets": [
             {
               "expr": "rate(process_cpu_seconds_total{job=\"llmgate\"}[5m])",
-              "legendFormat": "cpu cores",
+              "legendFormat": "cpu {{instance}}",
               "refId": "A"
             },
             {
               "expr": "process_open_fds{job=\"llmgate\"} / process_max_fds{job=\"llmgate\"}",
-              "legendFormat": "fd usage",
+              "legendFormat": "fd {{instance}}",
               "refId": "B"
             }
           ],

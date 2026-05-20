@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"llmgate/internal/events/llmresult"
+	"llmgate/internal/domain/llmresult"
 )
 
 const (

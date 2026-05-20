@@ -3,8 +3,8 @@ package server
 import (
 	"context"
 
-	"llmgate/internal/events/llmresult"
-	llmresultsink "llmgate/internal/events/llmresult/sink"
+	"llmgate/internal/domain/llmresult"
+	llmresultsink "llmgate/internal/domain/llmresult/sink"
 	"llmgate/internal/llmtypes"
 	"llmgate/internal/telemetry"
 )

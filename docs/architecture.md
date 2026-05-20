@@ -23,9 +23,9 @@ OpenAI SDK 와이어 호환 게이트웨이. 모델은 *기본 등록 단위*, *
 ## 시스템 지도
 
 게이트웨이는 **3 개의 런타임 레이어** (Delivery / Routing / Providers) 와 모두가 import 하는
-**도메인 계약 모듈** (`llmtypes`) 로 구성된다. 런타임 호출 흐름은 Agent → Delivery → Routing →
-Providers 의 단방향이고, `llmtypes` 는 호출 노드가 아니라 *타입 계약 import 대상* 이므로
-점선으로만 연결된다.
+**도메인 모듈** (`llmtypes`, `llmresult`) 로 구성된다. 런타임 호출 흐름은 Agent → Delivery →
+Routing → Providers 의 단방향이고, 도메인 모듈은 호출 노드가 아니라 *타입 계약 / durable
+payload import 대상* 이므로 점선으로만 연결된다.
 
 ```mermaid
 graph LR
@@ -54,8 +54,9 @@ graph LR
         Anth[Anthropic Adapter]
     end
 
-    subgraph Contracts["llmtypes — shared contracts (import-only)"]
+    subgraph Domain["Domain — shared contracts + durable payloads (import-only)"]
         Types["Provider / Stream<br/>Request / Response / Error / Attempt"]
+        LLMResult["llmresult<br/>finalized request/response event"]
     end
 
     UpOAI[OpenAI-protocol upstream]
@@ -69,6 +70,7 @@ graph LR
     Handler --> Response
     StreamRelay --> Response
     Handler -.finalized data boundary.-> ResultEvent
+    ResultEvent -.type.-> LLMResult
     Service -->|Provider.Complete| OAI
     Service -->|Provider.Complete| Anth
     OAI --> UpOAI
@@ -80,15 +82,15 @@ graph LR
     Telemetry --> SlogSink
     SlogSink --> Stdout
 
-    Delivery -.imports.-> Contracts
-    Routing -.imports.-> Contracts
-    Providers -.imports.-> Contracts
+    Delivery -.imports.-> Domain
+    Routing -.imports.-> Domain
+    Providers -.imports.-> Domain
 ```
 
 ### 레이어와 의존 방향
 
 - **Delivery** (`internal/server`, `internal/platform/http/*`) — HTTP 전송 책임. chi + middleware + auth + Handler + streamRelay + response wire helpers + probes + metrics. SSE / `[DONE]` / idle timeout / 401 / readiness 같은 *와이어 시맨틱* 을 책임.
-- **Events** (`internal/events/`) — 운영 telemetry 와 분리된 분석/학습용 durable event 모델. `llmresult` 는 finalized request/response payload 경계이고, `llmresult/sink` 는 요청 경로와 remote publish 를 분리하는 bounded delivery 경계이며, NATS publisher 는 이 경계 뒤에서 event 를 durable broker 로 보낸다.
+- **Domain** (`internal/domain/*`, `internal/llmtypes`) — 호출 계약과 분석/학습용 durable event 모델. `llmresult` 는 finalized request/response payload 경계이고, `llmresult/sink` 는 요청 경로와 remote publish 를 분리하는 bounded delivery 경계이며, NATS publisher 는 이 경계 뒤에서 event 를 durable broker 로 보낸다.
 - **Routing** (`internal/llmrouter/`) — *standalone* 서비스. alias → chain 해석, fallback 적격 판정, 회로 차단. stdlib + `llmtypes` 만 import. HTTP 외 frontend (CLI / queue / gRPC) 가 `llmrouter.NewService(models, aliases, ...)` 만 호출하면 그대로 구동.
 - **Providers** (`internal/providers/openai|anthropic/`) — `llmtypes.Provider` 구현. vendor 와이어 차이 (status 분류 / 첫 이벤트 검증 / 와이어 정규화) 를 자기 안에 가둠.
 - **Contracts** (`internal/llmtypes/`) — Provider / Stream / Request / Response / Error / Attempt — 모든 런타임 레이어가 import 하는 *도메인 계약 모듈*. 런타임 호출 노드가 아니므로 시스템 지도에서 점선 import 로만 표시.
@@ -105,8 +107,8 @@ graph LR
 | Delivery | LifecycleObserver | request / stream 시작·종료 hook. live gauge 같은 관측값용이며 완료된 사실은 telemetry event 로 남김 |
 | Delivery | Telemetry EventSink | finalized `AuditEvent` / `CallEvent` delivery boundary. panic isolation 으로 요청 경로와 sink 결함을 분리 |
 | Delivery | SlogSink | 기본 sink. audit / call event 를 Loki-friendly stdout JSON 라인으로 라우팅 |
-| Events | llmresult | 학습/분석용 finalized LLM result schema. 원본 OpenAI-shaped request 와 최종 response 를 포함할 수 있는 durable payload 경계 |
-| Events | llmresult/sink | result event delivery pipeline. no-op / panic recovery / bounded async queue 를 제공해 Handler 에 remote backpressure 가 역류하지 않게 함 |
+| Domain | llmresult | 학습/분석용 finalized LLM result schema. 원본 OpenAI-shaped request 와 최종 response 를 포함할 수 있는 durable payload 경계 |
+| Domain | llmresult/sink | result event delivery pipeline. no-op / panic recovery / bounded async queue 를 제공해 Handler 에 remote backpressure 가 역류하지 않게 함 |
 | Platform | nats/llmresult | finalized event 를 JSON 으로 인코딩해 NATS JetStream 에 publish 하는 원격 sink |
 | Routing | llmrouter.Service | 별명 → chain 해석, 폴백 적격 판정, 회로 차단 ([ADR 004](adr/004-fallback-policy.md)). non-stream 시도당 한도의 권위자 ([ADR 005](adr/005-timeout-authority.md)). stdlib + llmtypes 만 import |
 | Providers | OpenAI Adapter | OpenAI 와이어 호출. status 분류 + 첫 이벤트 검증 ([ADR 004](adr/004-fallback-policy.md)) |

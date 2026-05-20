@@ -6,7 +6,7 @@ import (
 	"log/slog"
 
 	"llmgate/internal/config"
-	llmresultsink "llmgate/internal/events/llmresult/sink"
+	llmresultsink "llmgate/internal/domain/llmresult/sink"
 	natsllmresult "llmgate/internal/platform/nats/llmresult"
 )
 

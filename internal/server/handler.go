@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"llmgate/internal/events/llmresult"
-	llmresultsink "llmgate/internal/events/llmresult/sink"
+	"llmgate/internal/domain/llmresult"
+	llmresultsink "llmgate/internal/domain/llmresult/sink"
 	"llmgate/internal/llmrouter"
 	"llmgate/internal/llmtypes"
 	"llmgate/internal/platform/http/response"

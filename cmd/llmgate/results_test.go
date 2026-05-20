@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"llmgate/internal/config"
-	llmresultsink "llmgate/internal/events/llmresult/sink"
+	llmresultsink "llmgate/internal/domain/llmresult/sink"
 )
 
 func TestBuildResultSink_DisabledByDefault(t *testing.T) {

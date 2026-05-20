@@ -66,7 +66,7 @@ reason 을 `CallEvent` 에 finalize. streaming 구간의 live gauge 는 `Lifecyc
 ## telemetry delivery boundary
 
 Handler 는 audit / call 을 별도 recorder 에 직접 쓰지 않고 `telemetry.EventSink` 로 finalized
-event 를 emit 한다. 기본 wiring 은 `SlogSink` 가 audit / call 로그 라인을 stdout 으로 라우팅한다.
+event 를 emit 한다. 기본 wiring 은 `platform/telemetry/slog` sink 가 audit / call 로그 라인을 stdout 으로 라우팅한다.
 이 경계는 추후 messaging stream sink 를 추가해도 요청 처리 코드가 바뀌지 않도록 둔 것이다.
 
 sink 와 lifecycle observer 는 panic isolation 으로 감싸진다. 로그 / 관측 sink 의 결함이 API 응답

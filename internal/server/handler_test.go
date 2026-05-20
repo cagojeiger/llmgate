@@ -11,7 +11,7 @@ import (
 
 	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/routing"
-	"llmgate/internal/telemetry"
+	"llmgate/internal/domain/telemetry"
 )
 
 func TestHandler_SingleAttempt_RecordPopulated(t *testing.T) {

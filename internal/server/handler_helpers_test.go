@@ -17,7 +17,8 @@ import (
 	llmresultsink "llmgate/internal/domain/llmresult/sink"
 	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/routing"
-	"llmgate/internal/telemetry"
+	"llmgate/internal/domain/telemetry"
+	slogtelemetry "llmgate/internal/platform/telemetry/slog"
 )
 
 const (
@@ -259,7 +260,7 @@ func newLogContractSink() (*bytes.Buffer, *bytes.Buffer, telemetry.EventSink) {
 	callBuf := &bytes.Buffer{}
 	auditLog := slog.New(slog.NewJSONHandler(auditBuf, nil)).With(slog.String("log", "audit"))
 	callLog := slog.New(slog.NewJSONHandler(callBuf, nil)).With(slog.String("log", "call"))
-	return auditBuf, callBuf, telemetry.NewSlogSink(auditLog, callLog)
+	return auditBuf, callBuf, slogtelemetry.NewSink(auditLog, callLog)
 }
 
 func decodeSingleLogLine(t *testing.T, buf *bytes.Buffer) map[string]any {

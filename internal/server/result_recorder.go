@@ -6,7 +6,7 @@ import (
 	"llmgate/internal/domain/llmresult"
 	llmresultsink "llmgate/internal/domain/llmresult/sink"
 	"llmgate/internal/domain/llmtypes"
-	"llmgate/internal/telemetry"
+	"llmgate/internal/domain/telemetry"
 )
 
 type resultRecorder struct {

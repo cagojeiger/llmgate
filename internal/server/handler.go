@@ -14,8 +14,8 @@ import (
 	llmresultsink "llmgate/internal/domain/llmresult/sink"
 	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/routing"
+	"llmgate/internal/domain/telemetry"
 	"llmgate/internal/platform/http/response"
-	"llmgate/internal/telemetry"
 )
 
 const maxChatRequestBytes = 1 << 20

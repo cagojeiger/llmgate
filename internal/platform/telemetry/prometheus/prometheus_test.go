@@ -1,4 +1,4 @@
-package telemetry
+package promtelemetry
 
 import (
 	"context"
@@ -9,17 +9,18 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"llmgate/internal/domain/llmtypes"
+	"llmgate/internal/domain/telemetry"
 )
 
 func TestPrometheusRecorder_RecordAudit(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	r, err := NewPrometheusRecorder(reg)
+	r, err := NewRecorder(reg)
 	if err != nil {
-		t.Fatalf("NewPrometheusRecorder: %v", err)
+		t.Fatalf("NewRecorder: %v", err)
 	}
 
-	r.Emit(context.Background(), &AuditEvent{
-		EventCommon: EventCommon{
+	r.Emit(context.Background(), &telemetry.AuditEvent{
+		EventCommon: telemetry.EventCommon{
 			Operation:  "chat.completions",
 			StatusCode: http.StatusBadGateway,
 			Kind:       llmtypes.KindUpstream,
@@ -46,13 +47,13 @@ func TestPrometheusRecorder_RecordAudit(t *testing.T) {
 
 func TestPrometheusRecorder_LabelsEmptyErrorKindAsNone(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	r, err := NewPrometheusRecorder(reg)
+	r, err := NewRecorder(reg)
 	if err != nil {
-		t.Fatalf("NewPrometheusRecorder: %v", err)
+		t.Fatalf("NewRecorder: %v", err)
 	}
 
-	r.Emit(context.Background(), &AuditEvent{
-		EventCommon: EventCommon{
+	r.Emit(context.Background(), &telemetry.AuditEvent{
+		EventCommon: telemetry.EventCommon{
 			Operation:  "chat.completions.stream",
 			StatusCode: http.StatusOK,
 			DurationMS: 250,
@@ -70,15 +71,15 @@ func TestPrometheusRecorder_LabelsEmptyErrorKindAsNone(t *testing.T) {
 
 func TestPrometheusRecorder_LifecycleGauges(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	r, err := NewPrometheusRecorder(reg)
+	r, err := NewRecorder(reg)
 	if err != nil {
-		t.Fatalf("NewPrometheusRecorder: %v", err)
+		t.Fatalf("NewRecorder: %v", err)
 	}
 
 	r.RequestStarted(context.Background())
 	r.RequestStarted(context.Background())
 	r.RequestFinished(context.Background())
-	r.StreamStarted(context.Background(), EventCommon{})
+	r.StreamStarted(context.Background(), telemetry.EventCommon{})
 	r.StreamFinished(context.Background(), nil, nil)
 
 	if got := findGaugeValue(t, reg, "llmgate_inflight_requests"); got != 1 {
@@ -91,14 +92,14 @@ func TestPrometheusRecorder_LifecycleGauges(t *testing.T) {
 
 func TestPrometheusRecorder_RecordCallAttemptsAndTokens(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	r, err := NewPrometheusRecorder(reg)
+	r, err := NewRecorder(reg)
 	if err != nil {
-		t.Fatalf("NewPrometheusRecorder: %v", err)
+		t.Fatalf("NewRecorder: %v", err)
 	}
 
 	started := time.Now().Add(-2 * time.Second)
-	r.Emit(context.Background(), &CallEvent{
-		EventCommon: EventCommon{
+	r.Emit(context.Background(), &telemetry.CallEvent{
+		EventCommon: telemetry.EventCommon{
 			Operation:  "chat.completions",
 			StatusCode: http.StatusOK,
 			DurationMS: 2000,
@@ -205,13 +206,13 @@ func TestPrometheusRecorder_RecordCallAttemptsAndTokens(t *testing.T) {
 
 func TestPrometheusRecorder_RecordFallbackRequest(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	r, err := NewPrometheusRecorder(reg)
+	r, err := NewRecorder(reg)
 	if err != nil {
-		t.Fatalf("NewPrometheusRecorder: %v", err)
+		t.Fatalf("NewRecorder: %v", err)
 	}
 
-	r.Emit(context.Background(), &CallEvent{
-		EventCommon: EventCommon{
+	r.Emit(context.Background(), &telemetry.CallEvent{
+		EventCommon: telemetry.EventCommon{
 			Operation:  "chat.completions",
 			StatusCode: http.StatusOK,
 		},
@@ -251,13 +252,13 @@ func TestPrometheusRecorder_RecordFallbackRequest(t *testing.T) {
 
 func TestPrometheusRecorder_RecordStreamFirstByteAndChunks(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	r, err := NewPrometheusRecorder(reg)
+	r, err := NewRecorder(reg)
 	if err != nil {
-		t.Fatalf("NewPrometheusRecorder: %v", err)
+		t.Fatalf("NewRecorder: %v", err)
 	}
 
-	r.Emit(context.Background(), &CallEvent{
-		EventCommon: EventCommon{
+	r.Emit(context.Background(), &telemetry.CallEvent{
+		EventCommon: telemetry.EventCommon{
 			Operation:  "chat.completions.stream",
 			StatusCode: http.StatusOK,
 		},
@@ -311,9 +312,9 @@ func TestPrometheusRecorder_RecordStreamFirstByteAndChunks(t *testing.T) {
 
 func TestPrometheusRecorder_RecordNil(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	r, err := NewPrometheusRecorder(reg)
+	r, err := NewRecorder(reg)
 	if err != nil {
-		t.Fatalf("NewPrometheusRecorder: %v", err)
+		t.Fatalf("NewRecorder: %v", err)
 	}
 
 	r.Emit(context.Background(), nil)
@@ -334,13 +335,13 @@ func TestPrometheusRecorder_RecordNil(t *testing.T) {
 
 func BenchmarkPrometheusRecorder_EmitCall(b *testing.B) {
 	reg := prometheus.NewRegistry()
-	r, err := NewPrometheusRecorder(reg)
+	r, err := NewRecorder(reg)
 	if err != nil {
-		b.Fatalf("NewPrometheusRecorder: %v", err)
+		b.Fatalf("NewRecorder: %v", err)
 	}
 	ctx := context.Background()
-	ev := &CallEvent{
-		EventCommon: EventCommon{
+	ev := &telemetry.CallEvent{
+		EventCommon: telemetry.EventCommon{
 			Operation:  "chat.completions.stream",
 			StatusCode: http.StatusOK,
 			DurationMS: 2200,

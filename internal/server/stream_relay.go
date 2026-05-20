@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"llmgate/internal/domain/llmtypes"
+	"llmgate/internal/domain/telemetry"
 	"llmgate/internal/platform/http/response"
 	"llmgate/internal/streaming"
-	"llmgate/internal/telemetry"
 )
 
 // streamRelay owns the SSE wire transcript for one streaming

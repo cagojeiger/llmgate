@@ -2,7 +2,7 @@ package llmresult
 
 import (
 	"llmgate/internal/domain/llmtypes"
-	"llmgate/internal/telemetry"
+	"llmgate/internal/domain/telemetry"
 )
 
 type BuildInput struct {

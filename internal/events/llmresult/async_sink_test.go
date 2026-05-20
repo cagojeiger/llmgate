@@ -1,0 +1,201 @@
+package llmresult
+
+import (
+	"context"
+	"errors"
+	"io"
+	"log/slog"
+	"sync"
+	"testing"
+	"time"
+)
+
+func TestAsyncSink_EmitDoesNotWaitForTransport(t *testing.T) {
+	next := newBlockingResultSink()
+	sink := NewAsyncSink(next, discardLogger(), 1)
+	defer sink.Close()
+	defer next.release()
+
+	sink.Emit(context.Background(), &Event{RequestID: "req-1"})
+	next.waitStarted(t)
+
+	start := time.Now()
+	sink.Emit(context.Background(), &Event{RequestID: "req-2"})
+	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
+		t.Fatalf("Emit blocked for %v, want non-blocking enqueue", elapsed)
+	}
+}
+
+func TestAsyncSink_DropsWhenQueueFull(t *testing.T) {
+	next := newBlockingResultSink()
+	sink := NewAsyncSink(next, discardLogger(), 1)
+	defer sink.Close()
+	defer next.release()
+
+	sink.Emit(context.Background(), &Event{RequestID: "req-1"})
+	next.waitStarted(t)
+	sink.Emit(context.Background(), &Event{RequestID: "req-2"})
+	sink.Emit(context.Background(), &Event{RequestID: "req-3"})
+
+	if got := sink.Dropped(); got != 1 {
+		t.Fatalf("Dropped = %d, want 1", got)
+	}
+}
+
+func TestAsyncSink_CloseDrainsQueueThenClosesNext(t *testing.T) {
+	next := &captureResultSink{}
+	sink := NewAsyncSink(next, discardLogger(), 10)
+
+	sink.Emit(context.Background(), &Event{RequestID: "req-1"})
+	sink.Emit(context.Background(), &Event{RequestID: "req-2"})
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if got := next.len(); got != 2 {
+		t.Fatalf("captured events = %d, want 2", got)
+	}
+	if !next.closed {
+		t.Fatal("next sink was not closed")
+	}
+}
+
+func TestAsyncSink_CloseReturnsNextCloseError(t *testing.T) {
+	want := errors.New("close failed")
+	sink := NewAsyncSink(&closeErrorSink{err: want}, discardLogger(), 1)
+
+	if got := sink.Close(); !errors.Is(got, want) {
+		t.Fatalf("Close() error = %v, want %v", got, want)
+	}
+}
+
+func TestAsyncSink_CloseIsIdempotent(t *testing.T) {
+	next := &captureResultSink{}
+	sink := NewAsyncSink(next, discardLogger(), 1)
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("first Close() error = %v", err)
+	}
+	if err := sink.Close(); err != nil {
+		t.Fatalf("second Close() error = %v", err)
+	}
+	if got := next.closeCount(); got != 1 {
+		t.Fatalf("next Close calls = %d, want 1", got)
+	}
+}
+
+func TestAsyncSink_RecoversWorkerPanic(t *testing.T) {
+	next := &panicOnceResultSink{}
+	sink := NewAsyncSink(next, discardLogger(), 2)
+
+	sink.Emit(context.Background(), &Event{RequestID: "req-1"})
+	sink.Emit(context.Background(), &Event{RequestID: "req-2"})
+
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if got := next.len(); got != 1 {
+		t.Fatalf("captured events after panic = %d, want 1", got)
+	}
+}
+
+type blockingResultSink struct {
+	started  chan struct{}
+	releasec chan struct{}
+	once     sync.Once
+}
+
+func newBlockingResultSink() *blockingResultSink {
+	return &blockingResultSink{
+		started:  make(chan struct{}),
+		releasec: make(chan struct{}),
+	}
+}
+
+func (s *blockingResultSink) Emit(context.Context, *Event) {
+	s.once.Do(func() { close(s.started) })
+	<-s.releasec
+}
+
+func (s *blockingResultSink) Close() error { return nil }
+
+func (s *blockingResultSink) release() {
+	close(s.releasec)
+}
+
+func (s *blockingResultSink) waitStarted(t *testing.T) {
+	t.Helper()
+	select {
+	case <-s.started:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for blocking sink")
+	}
+}
+
+type captureResultSink struct {
+	mu     sync.Mutex
+	events []*Event
+	closed bool
+	closes int
+}
+
+func (s *captureResultSink) Emit(_ context.Context, event *Event) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, event)
+}
+
+func (s *captureResultSink) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closed = true
+	s.closes++
+	return nil
+}
+
+func (s *captureResultSink) len() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.events)
+}
+
+func (s *captureResultSink) closeCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closes
+}
+
+type closeErrorSink struct {
+	err error
+}
+
+func (s *closeErrorSink) Emit(context.Context, *Event) {}
+func (s *closeErrorSink) Close() error                 { return s.err }
+
+type panicOnceResultSink struct {
+	mu      sync.Mutex
+	events  []*Event
+	paniced bool
+}
+
+func (s *panicOnceResultSink) Emit(_ context.Context, event *Event) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.paniced {
+		s.paniced = true
+		panic("boom")
+	}
+	s.events = append(s.events, event)
+}
+
+func (s *panicOnceResultSink) Close() error { return nil }
+
+func (s *panicOnceResultSink) len() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.events)
+}
+
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}

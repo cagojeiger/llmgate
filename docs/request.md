@@ -83,3 +83,7 @@ payload 뒤에 붙는다.
 Handler 는 요청 종료 시점에 finalized `AuditEvent` / `CallEvent` 와 원본 request / 최종 response 를
 묶어 `llmresult.Event` 를 만든다. 기본 `ResultSink` 는 no-op 이므로 transport 를 설정하지 않으면
 기존 HTTP 응답과 운영 telemetry 동작은 그대로 유지된다.
+
+원격 transport 는 `llmresult.AsyncSink` 로 감싸서 붙인다. Handler 의 `Emit` 은 bounded queue 에
+넣는 데서 끝나고, queue 가 가득 차면 요청을 막지 않고 drop 한다. 실제 NATS publish 는 queue 뒤
+worker 에서 수행한다.

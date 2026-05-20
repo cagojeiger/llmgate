@@ -11,7 +11,7 @@ sequenceDiagram
     participant A as Agent
     participant M as auth middleware
     participant H as Handler
-    participant S as llmrouter.Service
+    participant S as routing.Service
     participant P as Adapter
     participant T as Telemetry EventSink
     participant L as LifecycleObserver
@@ -45,13 +45,13 @@ Time ─────────────────────────
    └────────┬────────┘    └─────────┬───────┘    └──────────┬───────────┘
             │                       │                       │
         ✅ fallback              ✅ fallback              ❌ no fallback
-        (llmrouter.Service)      (llmrouter.Service)      SSE error frame
+        (routing.Service)      (routing.Service)      SSE error frame
                                                           + [DONE], 종결
 
    ◄────────── 폴백 가능 영역 ──────────►◄────── 폴백 불가 ──────►
 ```
 
-`llmrouter.Service` 는 status open / first event 단계의 실패만 받는다 — 와이어 분류는
+`routing.Service` 는 status open / first event 단계의 실패만 받는다 — 와이어 분류는
 adapter 가 끝낸 상태이므로 폴백 적격 판정 ([ADR 004](adr/004-fallback-policy.md)) 을
 non-stream 과 같은 규칙으로 적용. 스트림 시작에 별도 timeout 을 만들지 않고 Handler 의
 request context 를 그대로 넘긴다 ([ADR 005](adr/005-timeout-authority.md)) — 시작 / 첫 이벤트 /

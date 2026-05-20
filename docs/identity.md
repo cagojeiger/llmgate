@@ -13,9 +13,9 @@
 | 호출자 등록 (해시만) | `consumers/` yaml | 외부 갱신 시 재시작 |
 | 호출자 raw 키 | **gateway 보관 안 함** (호출자 측 vault) | — |
 | 라우팅 정책 + 서버 런타임 | env → Server config | 프로세스 수명 |
-| 회로 차단 상태 | `llmrouter.Service` breakerStore (per-process) | 프로세스 수명 |
+| 회로 차단 상태 | `routing.Service` breakerStore (per-process) | 프로세스 수명 |
 | 호출자 lookup | consumers Store (per-process) | 프로세스 수명 |
-| 요청별 시도 이력 | `llmrouter.RouteResult.Attempts` → `telemetry.CallEvent` | 요청 1 회 |
+| 요청별 시도 이력 | `routing.RouteResult.Attempts` → `telemetry.CallEvent` | 요청 1 회 |
 | 운영 / 보안 감사 event | `telemetry.EventSink` → `SlogSink` → stdout JSON | 로그 보존 정책 |
 | LLM 호출 결과 event | `telemetry.EventSink` → `SlogSink` → stdout JSON | 로그 보존 정책 |
 | live 요청 / 스트림 상태 | `telemetry.LifecycleObserver` hook | 프로세스 수명 |

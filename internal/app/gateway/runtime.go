@@ -16,7 +16,7 @@ import (
 	"llmgate/internal/config"
 	"llmgate/internal/consumers"
 	llmresultsink "llmgate/internal/domain/llmresult/sink"
-	"llmgate/internal/llmrouter"
+	"llmgate/internal/domain/routing"
 	"llmgate/internal/server"
 	"llmgate/internal/telemetry"
 )
@@ -93,7 +93,7 @@ func BuildRuntime(ctx context.Context, in RuntimeInput) (*Runtime, error) {
 		return nil, err
 	}
 
-	policy := llmrouter.FallbackPolicy{
+	policy := routing.FallbackPolicy{
 		OnKinds:         in.Config.FallbackOn,
 		CircuitFailures: in.Config.CircuitFailures,
 		CircuitOpen:     in.Config.CircuitOpen,
@@ -101,7 +101,7 @@ func BuildRuntime(ctx context.Context, in RuntimeInput) (*Runtime, error) {
 		CircuitJitter:   in.Config.CircuitJitter,
 		CompleteTimeout: in.Config.CompleteTimeout,
 	}
-	svc, err := llmrouter.NewService(models, aliases, policy, in.Logger)
+	svc, err := routing.NewService(models, aliases, policy, in.Logger)
 	if err != nil {
 		return nil, err
 	}

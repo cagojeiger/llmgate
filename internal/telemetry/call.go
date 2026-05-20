@@ -3,7 +3,7 @@ package telemetry
 import (
 	"time"
 
-	"llmgate/internal/llmrouter"
+	"llmgate/internal/domain/routing"
 	"llmgate/internal/llmtypes"
 )
 
@@ -66,7 +66,7 @@ func FinishCallFromAudit(c *CallEvent, audit *AuditEvent) {
 	c.Kind = audit.Kind
 }
 
-func AdoptRouteResult(c *CallEvent, result *llmrouter.RouteResult) {
+func AdoptRouteResult(c *CallEvent, result *routing.RouteResult) {
 	if c == nil || result == nil {
 		return
 	}

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"llmgate/internal/llmrouter"
+	"llmgate/internal/domain/routing"
 	"llmgate/internal/llmtypes"
 	"llmgate/internal/providers/fake"
 )
@@ -75,7 +75,7 @@ func TestHandler_LLMResult_StreamAssemblesFinalResponse(t *testing.T) {
 		}),
 	)
 	r := &fakeService{
-		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
+		buildStreamResult: func(req *llmtypes.Request) (*routing.RouteResult, error) {
 			return streamRouteResult(req, streamObj), nil
 		},
 	}
@@ -124,7 +124,7 @@ func TestHandler_LLMResult_StreamErrorOmitsPartialResponse(t *testing.T) {
 		fake.WithSummary(&llmtypes.Summary{ChunkCount: 1}),
 	)
 	r := &fakeService{
-		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
+		buildStreamResult: func(req *llmtypes.Request) (*routing.RouteResult, error) {
 			return streamRouteResult(req, streamObj), nil
 		},
 	}

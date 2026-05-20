@@ -1,4 +1,4 @@
-package llmrouter
+package routing
 
 import (
 	"context"
@@ -172,7 +172,7 @@ func chatRequest(model, content string) *llmtypes.Request {
 	}
 }
 
-// buildTestModels turns a catalog into the llmrouter.Models map by
+// buildTestModels turns a catalog into the routing.Models map by
 // picking the openai or anthropic provider per the catalog model's
 // Protocol field. Tests use this in place of the production
 // gateway.BuildRouterInputs. nil anth gets a

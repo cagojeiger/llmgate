@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"llmgate/internal/llmrouter"
+	"llmgate/internal/domain/routing"
 	"llmgate/internal/llmtypes"
 	"llmgate/internal/providers/fake"
 	"llmgate/internal/telemetry"
@@ -83,8 +83,8 @@ func TestHandler_LogContract_StreamSuccess(t *testing.T) {
 		}),
 	)
 	svc := &fakeService{
-		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
-			return &llmrouter.RouteResult{
+		buildStreamResult: func(req *llmtypes.Request) (*routing.RouteResult, error) {
+			return &routing.RouteResult{
 				Stream:    streamObj,
 				Vendor:    "opencode",
 				ModelUsed: req.Model,

@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"llmgate/internal/catalog"
-	"llmgate/internal/llmrouter"
+	"llmgate/internal/domain/routing"
 	"llmgate/internal/llmtypes"
 	"llmgate/internal/providers/anthropic"
 	"llmgate/internal/providers/openai"
@@ -16,7 +16,7 @@ import (
 
 // BuildRouterInputs walks the catalog and turns it into the runtime shape the
 // Service expects: model id to Provider, alias name to ordered model chain.
-func BuildRouterInputs(cat *catalog.Catalog) (llmrouter.Models, llmrouter.Aliases, error) {
+func BuildRouterInputs(cat *catalog.Catalog) (routing.Models, routing.Aliases, error) {
 	return buildRouterInputs(cat, map[llmtypes.Protocol]providerFactory{
 		llmtypes.ProtocolOpenAI:    openaiFactory,
 		llmtypes.ProtocolAnthropic: anthropicFactory,
@@ -24,12 +24,12 @@ func BuildRouterInputs(cat *catalog.Catalog) (llmrouter.Models, llmrouter.Aliase
 }
 
 // providerFactory builds the Provider for one catalog model. This package
-// bridges catalog yaml shape and env-driven credential lookup; llmrouter stays
+// bridges catalog yaml shape and env-driven credential lookup; routing stays
 // catalog-agnostic.
 type providerFactory func(*catalog.Model) (llmtypes.Provider, error)
 
-func buildRouterInputs(cat *catalog.Catalog, factories map[llmtypes.Protocol]providerFactory) (llmrouter.Models, llmrouter.Aliases, error) {
-	models := make(llmrouter.Models, len(cat.Models))
+func buildRouterInputs(cat *catalog.Catalog, factories map[llmtypes.Protocol]providerFactory) (routing.Models, routing.Aliases, error) {
+	models := make(routing.Models, len(cat.Models))
 	for id, m := range cat.Models {
 		f, ok := factories[m.Protocol]
 		if !ok {
@@ -41,7 +41,7 @@ func buildRouterInputs(cat *catalog.Catalog, factories map[llmtypes.Protocol]pro
 		}
 		models[id] = p
 	}
-	aliases := make(llmrouter.Aliases, len(cat.Aliases))
+	aliases := make(routing.Aliases, len(cat.Aliases))
 	for name, a := range cat.Aliases {
 		aliases[name] = append([]string(nil), a.Chain...)
 	}

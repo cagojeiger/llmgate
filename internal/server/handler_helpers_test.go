@@ -15,7 +15,7 @@ import (
 
 	"llmgate/internal/domain/llmresult"
 	llmresultsink "llmgate/internal/domain/llmresult/sink"
-	"llmgate/internal/llmrouter"
+	"llmgate/internal/domain/routing"
 	"llmgate/internal/llmtypes"
 	"llmgate/internal/telemetry"
 )
@@ -55,11 +55,11 @@ func (h *handlerHarness) serveRequest(req *http.Request) *httptest.ResponseRecor
 	return w
 }
 
-func streamRouteResult(req *llmtypes.Request, stream llmtypes.Stream, attempts ...llmtypes.Attempt) *llmrouter.RouteResult {
+func streamRouteResult(req *llmtypes.Request, stream llmtypes.Stream, attempts ...llmtypes.Attempt) *routing.RouteResult {
 	if len(attempts) == 0 {
 		attempts = []llmtypes.Attempt{{Vendor: "opencode", Model: req.Model, StartedAt: time.Now()}}
 	}
-	return &llmrouter.RouteResult{
+	return &routing.RouteResult{
 		Stream:    stream,
 		Vendor:    "opencode",
 		ModelUsed: req.Model,
@@ -73,19 +73,19 @@ func streamRouteResult(req *llmtypes.Request, stream llmtypes.Stream, attempts .
 // path without spinning up a real Service.
 type fakeService struct {
 	vendor            string
-	buildResult       func(req *llmtypes.Request) *llmrouter.RouteResult
-	buildStreamResult func(req *llmtypes.Request) (*llmrouter.RouteResult, error)
+	buildResult       func(req *llmtypes.Request) *routing.RouteResult
+	buildStreamResult func(req *llmtypes.Request) (*routing.RouteResult, error)
 }
 
-func (f *fakeService) Complete(_ context.Context, req *llmtypes.Request) (*llmrouter.RouteResult, error) {
+func (f *fakeService) Complete(_ context.Context, req *llmtypes.Request) (*routing.RouteResult, error) {
 	return f.buildResult(req), nil
 }
 
-func (f *fakeService) CompleteStream(_ context.Context, req *llmtypes.Request) (*llmrouter.RouteResult, error) {
+func (f *fakeService) CompleteStream(_ context.Context, req *llmtypes.Request) (*routing.RouteResult, error) {
 	if f.buildStreamResult != nil {
 		return f.buildStreamResult(req)
 	}
-	return &llmrouter.RouteResult{}, &llmtypes.Error{
+	return &routing.RouteResult{}, &llmtypes.Error{
 		Kind:    llmtypes.KindUpstream,
 		Message: "stream not implemented in this fake",
 	}
@@ -108,8 +108,8 @@ func newTestHandler(
 func okFakeService() *fakeService {
 	return &fakeService{
 		vendor: "opencode",
-		buildResult: func(req *llmtypes.Request) *llmrouter.RouteResult {
-			return &llmrouter.RouteResult{
+		buildResult: func(req *llmtypes.Request) *routing.RouteResult {
+			return &routing.RouteResult{
 				Response: &llmtypes.Response{
 					Model:   req.Model,
 					Choices: []llmtypes.Choice{{Index: 0, Message: llmtypes.Message{Role: "assistant", Content: "ok"}}},

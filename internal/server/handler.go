@@ -12,7 +12,7 @@ import (
 
 	"llmgate/internal/domain/llmresult"
 	llmresultsink "llmgate/internal/domain/llmresult/sink"
-	"llmgate/internal/llmrouter"
+	"llmgate/internal/domain/routing"
 	"llmgate/internal/llmtypes"
 	"llmgate/internal/platform/http/response"
 	"llmgate/internal/telemetry"
@@ -22,8 +22,8 @@ const maxChatRequestBytes = 1 << 20
 
 // ChatService is the upstream contract Handler needs.
 type ChatService interface {
-	Complete(ctx context.Context, req *llmtypes.Request) (*llmrouter.RouteResult, error)
-	CompleteStream(ctx context.Context, req *llmtypes.Request) (*llmrouter.RouteResult, error)
+	Complete(ctx context.Context, req *llmtypes.Request) (*routing.RouteResult, error)
+	CompleteStream(ctx context.Context, req *llmtypes.Request) (*routing.RouteResult, error)
 }
 
 type Handler struct {

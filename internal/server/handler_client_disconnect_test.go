@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"llmgate/internal/llmrouter"
+	"llmgate/internal/domain/routing"
 	"llmgate/internal/llmtypes"
 	"llmgate/internal/providers/fake"
 )
@@ -29,8 +29,8 @@ func TestHandler_Stream_ClientDisconnect_MidStream(t *testing.T) {
 		fake.WithSummary(&llmtypes.Summary{}),
 	)
 	r := &fakeService{
-		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
-			return &llmrouter.RouteResult{
+		buildStreamResult: func(req *llmtypes.Request) (*routing.RouteResult, error) {
+			return &routing.RouteResult{
 				Stream:    streamObj,
 				Vendor:    "opencode",
 				ModelUsed: req.Model,
@@ -76,8 +76,8 @@ func TestHandler_Stream_ClientDisconnect_OnDone(t *testing.T) {
 		fake.WithSummary(&llmtypes.Summary{}),
 	)
 	r := &fakeService{
-		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
-			return &llmrouter.RouteResult{
+		buildStreamResult: func(req *llmtypes.Request) (*routing.RouteResult, error) {
+			return &routing.RouteResult{
 				Stream:    streamObj,
 				Vendor:    "opencode",
 				ModelUsed: req.Model,
@@ -115,8 +115,8 @@ func TestHandler_Stream_ClientDisconnect_OnFirstEvent(t *testing.T) {
 		fake.WithSummary(&llmtypes.Summary{}),
 	)
 	r := &fakeService{
-		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
-			return &llmrouter.RouteResult{
+		buildStreamResult: func(req *llmtypes.Request) (*routing.RouteResult, error) {
+			return &routing.RouteResult{
 				Stream:    streamObj,
 				Vendor:    "opencode",
 				ModelUsed: req.Model,
@@ -149,8 +149,8 @@ func TestHandler_NonStream_ClientDisconnect(t *testing.T) {
 	captured, recorder := newCaptureAuditSink()
 	_, callSink := newCaptureCallSink()
 	r := &fakeService{
-		buildResult: func(req *llmtypes.Request) *llmrouter.RouteResult {
-			return &llmrouter.RouteResult{
+		buildResult: func(req *llmtypes.Request) *routing.RouteResult {
+			return &routing.RouteResult{
 				Response: &llmtypes.Response{
 					Model:   req.Model,
 					Choices: []llmtypes.Choice{{Index: 0, Message: llmtypes.Message{Role: "assistant", Content: "ok"}}},

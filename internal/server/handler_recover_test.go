@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"llmgate/internal/llmrouter"
+	"llmgate/internal/domain/routing"
 	"llmgate/internal/llmtypes"
 	"llmgate/internal/platform/http/response"
 	"llmgate/internal/telemetry"
@@ -21,7 +21,7 @@ func TestHandler_PanicInComplete_StampsAuditAndReturns500(t *testing.T) {
 	rec, recorder := newCaptureAuditSink()
 	svc := &fakeService{
 		vendor: "opencode",
-		buildResult: func(req *llmtypes.Request) *llmrouter.RouteResult {
+		buildResult: func(req *llmtypes.Request) *routing.RouteResult {
 			panic("boom in complete")
 		},
 	}
@@ -51,7 +51,7 @@ func TestHandler_PanicInStream_StampsAuditAndReturns500(t *testing.T) {
 	rec, recorder := newCaptureAuditSink()
 	svc := &fakeService{
 		vendor: "opencode",
-		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
+		buildStreamResult: func(req *llmtypes.Request) (*routing.RouteResult, error) {
 			panic("boom in stream")
 		},
 	}
@@ -83,7 +83,7 @@ func TestHandler_PanicAfterResponseStarted_DoesNotCorruptWireBody(t *testing.T) 
 	rec, recorder := newCaptureAuditSink()
 	svc := &fakeService{
 		vendor: "opencode",
-		buildResult: func(req *llmtypes.Request) *llmrouter.RouteResult {
+		buildResult: func(req *llmtypes.Request) *routing.RouteResult {
 			panic("late boom")
 		},
 	}
@@ -118,7 +118,7 @@ func TestHandler_AbortHandlerPanic_Repropagates_NotStamped(t *testing.T) {
 	rec, recorder := newCaptureAuditSink()
 	svc := &fakeService{
 		vendor: "opencode",
-		buildResult: func(req *llmtypes.Request) *llmrouter.RouteResult {
+		buildResult: func(req *llmtypes.Request) *routing.RouteResult {
 			panic(http.ErrAbortHandler)
 		},
 	}

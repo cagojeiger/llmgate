@@ -44,8 +44,8 @@ graph LR
         SlogSink[SlogSink]
     end
 
-    subgraph Routing["LLM Routing — standalone service<br/>(internal/llmrouter)"]
-        Service["llmrouter.Service<br/>alias + fallback + breaker"]
+    subgraph Routing["LLM Routing — standalone service<br/>(internal/domain/routing)"]
+        Service["routing.Service<br/>alias + fallback + breaker"]
     end
 
     subgraph Providers[Provider Adapters]
@@ -92,7 +92,7 @@ graph LR
 - **Delivery** (`internal/server`, `internal/platform/http/*`) — HTTP 전송 책임. chi + middleware + auth + Handler + streamRelay + response wire helpers + probes + metrics. SSE / `[DONE]` / idle timeout / 401 / readiness 같은 *와이어 시맨틱* 을 책임.
 - **Domain** (`internal/domain/*`, `internal/llmtypes`) — 호출 계약과 분석/학습용 durable event 모델. `llmresult` 는 finalized request/response payload 경계이고, `llmresult/sink` 는 요청 경로와 remote publish 를 분리하는 bounded delivery 경계이며, NATS publisher 는 이 경계 뒤에서 event 를 durable broker 로 보낸다.
 - **App** (`internal/app/gateway`) — catalog / consumers 로딩, provider / router / telemetry / sink / HTTP server 조립, listen / graceful shutdown 실행 책임. `cmd/llmgate` 는 CLI entrypoint 와 process input 준비에 집중한다.
-- **Routing** (`internal/llmrouter/`) — *standalone* 서비스. alias → chain 해석, fallback 적격 판정, 회로 차단. stdlib + `llmtypes` 만 import. HTTP 외 frontend (CLI / queue / gRPC) 가 `llmrouter.NewService(models, aliases, ...)` 만 호출하면 그대로 구동.
+- **Routing** (`internal/domain/routing/`) — *standalone* 서비스. alias → chain 해석, fallback 적격 판정, 회로 차단. stdlib + `llmtypes` 만 import. HTTP 외 frontend (CLI / queue / gRPC) 가 `routing.NewService(models, aliases, ...)` 만 호출하면 그대로 구동.
 - **Providers** (`internal/providers/openai|anthropic/`) — `llmtypes.Provider` 구현. vendor 와이어 차이 (status 분류 / 첫 이벤트 검증 / 와이어 정규화) 를 자기 안에 가둠.
 - **Contracts** (`internal/llmtypes/`) — Provider / Stream / Request / Response / Error / Attempt — 모든 런타임 레이어가 import 하는 *도메인 계약 모듈*. 런타임 호출 노드가 아니므로 시스템 지도에서 점선 import 로만 표시.
 - **boundary**: Routing 이 Delivery 로 돌려주는 형식은 `llmtypes.Stream` (인터페이스) / `llmtypes.Response` (struct). 둘 다 HTTP 모름. ADR 004 의 *first-event boundary* = 시간축에서의 레이어 경계 표현.
@@ -112,7 +112,7 @@ graph LR
 | Domain | llmresult/sink | result event delivery pipeline. no-op / panic recovery / bounded async queue 를 제공해 Handler 에 remote backpressure 가 역류하지 않게 함 |
 | Platform | nats/llmresult | finalized event 를 JSON 으로 인코딩해 NATS JetStream 에 publish 하는 원격 sink |
 | App | gateway | catalog / consumers 를 로드하고 provider, router input, telemetry, result sink, HTTP server 를 조립한 뒤 listen / graceful shutdown 을 실행 |
-| Routing | llmrouter.Service | 별명 → chain 해석, 폴백 적격 판정, 회로 차단 ([ADR 004](adr/004-fallback-policy.md)). non-stream 시도당 한도의 권위자 ([ADR 005](adr/005-timeout-authority.md)). stdlib + llmtypes 만 import |
+| Routing | routing.Service | 별명 → chain 해석, 폴백 적격 판정, 회로 차단 ([ADR 004](adr/004-fallback-policy.md)). non-stream 시도당 한도의 권위자 ([ADR 005](adr/005-timeout-authority.md)). stdlib + llmtypes 만 import |
 | Providers | OpenAI Adapter | OpenAI 와이어 호출. status 분류 + 첫 이벤트 검증 ([ADR 004](adr/004-fallback-policy.md)) |
 | Providers | Anthropic Adapter | Anthropic ↔ OpenAI 와이어 양방향 변환 (tools / tool_choice / tool_calls / tool_use). status 분류 + 첫 이벤트 검증 ([ADR 004](adr/004-fallback-policy.md)) |
 | Boot data | consumers Store | 부팅 시 yaml → sha256 → consumer 매핑 read-only. 0 개면 부팅 fail ([ADR 003](adr/003-consumers.md)). Delivery 의 auth middleware 가 소비 |
@@ -162,7 +162,7 @@ internal/platform/
   upstream/                  shared upstream HTTP request + SSE reader
 
 internal/app/
-  gateway/                   config/catalog/consumer/provider/server 조립
+  gateway/                   catalog/consumer/provider/server 런타임 조립
 ```
 
 이 표는 현재 파일 위치 목록이 아니라 목표 소유권 지도다. 현재 트리는 마이그레이션 중이므로

@@ -1,4 +1,4 @@
-package llmrouter
+package routing
 
 import (
 	"io"

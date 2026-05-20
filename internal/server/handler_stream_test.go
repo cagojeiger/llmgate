@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"llmgate/internal/llmrouter"
+	"llmgate/internal/domain/routing"
 	"llmgate/internal/llmtypes"
 	"llmgate/internal/providers/fake"
 )
@@ -25,7 +25,7 @@ func TestHandler_Stream_NormalEOF(t *testing.T) {
 		}),
 	)
 	r := &fakeService{
-		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
+		buildStreamResult: func(req *llmtypes.Request) (*routing.RouteResult, error) {
 			return streamRouteResult(req, streamObj), nil
 		},
 	}
@@ -100,7 +100,7 @@ func TestHandler_Stream_RecvError_PropagatesErrorKind(t *testing.T) {
 		fake.WithSummary(&llmtypes.Summary{}),
 	)
 	r := &fakeService{
-		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
+		buildStreamResult: func(req *llmtypes.Request) (*routing.RouteResult, error) {
 			return streamRouteResult(req, streamObj), nil
 		},
 	}
@@ -140,7 +140,7 @@ func TestHandler_Stream_IdleTimeoutSendsError(t *testing.T) {
 		fake.WithSummary(&llmtypes.Summary{}),
 	)
 	r := &fakeService{
-		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
+		buildStreamResult: func(req *llmtypes.Request) (*routing.RouteResult, error) {
 			return streamRouteResult(req, streamObj), nil
 		},
 	}
@@ -180,7 +180,7 @@ func TestHandler_Stream_RequestTimeoutSendsError(t *testing.T) {
 		fake.WithSummary(&llmtypes.Summary{}),
 	)
 	r := &fakeService{
-		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
+		buildStreamResult: func(req *llmtypes.Request) (*routing.RouteResult, error) {
 			return streamRouteResult(req, streamObj), nil
 		},
 	}
@@ -217,7 +217,7 @@ func TestHandler_Stream_ContextCanceledRecordsClientClosed(t *testing.T) {
 		fake.WithSummary(&llmtypes.Summary{}),
 	)
 	r := &fakeService{
-		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
+		buildStreamResult: func(req *llmtypes.Request) (*routing.RouteResult, error) {
 			return streamRouteResult(req, streamObj), nil
 		},
 	}
@@ -244,8 +244,8 @@ func TestHandler_Stream_ContextCanceledRecordsClientClosed(t *testing.T) {
 
 func TestHandler_Stream_PreStreamServiceError(t *testing.T) {
 	r := &fakeService{
-		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
-			return &llmrouter.RouteResult{
+		buildStreamResult: func(req *llmtypes.Request) (*routing.RouteResult, error) {
+			return &routing.RouteResult{
 				Vendor:    "opencode",
 				ModelUsed: req.Model,
 				Attempts: []llmtypes.Attempt{

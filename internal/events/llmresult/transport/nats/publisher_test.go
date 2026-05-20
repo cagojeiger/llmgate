@@ -2,24 +2,24 @@ package nats
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
 	natsgo "github.com/nats-io/nats.go"
 
-	"llmgate/internal/events/llmresult/transport"
+	"llmgate/internal/events/llmresult"
 )
 
 func TestPublisher_PublishWritesSubjectHeadersAndPayload(t *testing.T) {
 	js := &fakeJetStream{}
 	p := newPublisher(js, "RESULTS", "results.finalized")
 
-	err := p.Publish(context.Background(), transport.Message{
-		ContentType:   transport.ContentTypeJSON,
-		EventType:     "llm.result.finalized",
-		RequestID:     "req-1",
-		SchemaVersion: 1,
-		Payload:       []byte(`{"ok":true}`),
+	err := p.Publish(context.Background(), &llmresult.Event{
+		SchemaVersion:  llmresult.SchemaVersion,
+		EventType:      llmresult.EventType,
+		RequestID:      "req-1",
+		ModelRequested: "smart",
 	})
 	if err != nil {
 		t.Fatalf("Publish() error = %v", err)
@@ -31,13 +31,17 @@ func TestPublisher_PublishWritesSubjectHeadersAndPayload(t *testing.T) {
 	if got.Subject != "results.finalized" {
 		t.Fatalf("Subject = %q, want results.finalized", got.Subject)
 	}
-	if string(got.Data) != `{"ok":true}` {
-		t.Fatalf("Data = %q", string(got.Data))
+	var decoded llmresult.Event
+	if err := json.Unmarshal(got.Data, &decoded); err != nil {
+		t.Fatalf("Data is not event JSON: %v", err)
 	}
-	if got.Header.Get(headerContentType) != transport.ContentTypeJSON {
+	if decoded.RequestID != "req-1" || decoded.ModelRequested != "smart" {
+		t.Fatalf("decoded event = %+v", decoded)
+	}
+	if got.Header.Get(headerContentType) != contentTypeJSON {
 		t.Fatalf("Content-Type = %q", got.Header.Get(headerContentType))
 	}
-	if got.Header.Get(headerEventType) != "llm.result.finalized" {
+	if got.Header.Get(headerEventType) != llmresult.EventType {
 		t.Fatalf("event header = %q", got.Header.Get(headerEventType))
 	}
 	if got.Header.Get(headerRequestID) != "req-1" {
@@ -45,6 +49,14 @@ func TestPublisher_PublishWritesSubjectHeadersAndPayload(t *testing.T) {
 	}
 	if got.Header.Get(headerSchemaVersion) != "1" {
 		t.Fatalf("schema header = %q", got.Header.Get(headerSchemaVersion))
+	}
+}
+
+func TestPublisher_RejectsNilEvent(t *testing.T) {
+	p := newPublisher(&fakeJetStream{}, "RESULTS", "results.finalized")
+
+	if err := p.Publish(context.Background(), nil); err == nil {
+		t.Fatal("Publish(nil) error = nil, want error")
 	}
 }
 

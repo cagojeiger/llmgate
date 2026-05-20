@@ -9,7 +9,7 @@ import (
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 
 	"llmgate/internal/config"
-	"llmgate/internal/consumers"
+	"llmgate/internal/domain/consumers"
 )
 
 type ServerOptions struct {

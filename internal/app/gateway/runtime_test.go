@@ -11,7 +11,7 @@ import (
 
 	"llmgate/internal/catalog"
 	"llmgate/internal/config"
-	"llmgate/internal/consumers"
+	"llmgate/internal/domain/consumers"
 	"llmgate/internal/domain/llmtypes"
 )
 

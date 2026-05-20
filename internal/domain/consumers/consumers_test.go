@@ -32,9 +32,9 @@ func writeClientDir(t *testing.T, files map[string]string) string {
 	return dir
 }
 
-// repoConsumersDir points at the repo's consumers/ directory from the
-// internal/consumers package's working directory at test time.
-const repoConsumersDir = "../../consumers"
+// repoConsumersDir points at the repo's consumers/ directory from this
+// package's working directory at test time.
+const repoConsumersDir = "../../../consumers"
 
 func TestLoadDir_RepoConsumers(t *testing.T) {
 	store, err := LoadDir(repoConsumersDir)

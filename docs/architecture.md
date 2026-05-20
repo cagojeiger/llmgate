@@ -92,7 +92,7 @@ graph LR
 ### 레이어와 의존 방향
 
 - **Delivery** (`internal/platform/http/server`, `internal/platform/http/*`) — HTTP 전송 책임. chi + middleware + auth + Handler + streamRelay + response wire helpers + probes + metrics. SSE / `[DONE]` / idle timeout / 401 / readiness 같은 *와이어 시맨틱* 을 책임.
-- **Domain** (`internal/domain/*`) — 호출 계약과 분석/학습용 durable event 모델. `llmtypes` 는 OpenAI-shaped DTO / Provider 계약이고, `llmresult` 는 finalized request/response payload 경계이며, `telemetry` 는 audit / call event fact 와 sink/lifecycle 계약이다. `llmresult/sink` 는 요청 경로와 remote publish 를 분리하는 bounded delivery 경계다.
+- **Domain** (`internal/domain/*`) — 호출 계약과 분석/학습용 durable event 모델. `llmtypes` 는 OpenAI-shaped DTO / Provider 계약이고, `consumers` 는 호출자 identity / allowed_aliases 등록 계약이며, `llmresult` 는 finalized request/response payload 경계이고, `telemetry` 는 audit / call event fact 와 sink/lifecycle 계약이다. `llmresult/sink` 는 요청 경로와 remote publish 를 분리하는 bounded delivery 경계다.
 - **App** (`internal/app/gateway`) — catalog / consumers 로딩, provider / router / telemetry / sink / HTTP server 조립, listen / graceful shutdown 실행 책임. `cmd/llmgate` 는 CLI entrypoint 와 process input 준비에 집중한다.
 - **Routing** (`internal/domain/routing/`) — *standalone* 서비스. alias → chain 해석, fallback 적격 판정, 회로 차단. stdlib + `llmtypes` 만 import. HTTP 외 frontend (CLI / queue / gRPC) 가 `routing.NewService(models, aliases, ...)` 만 호출하면 그대로 구동.
 - **Providers** (`internal/providers/openai|anthropic/`) — `llmtypes.Provider` 구현. vendor 와이어 차이 (status 분류 / 첫 이벤트 검증 / 와이어 정규화) 를 자기 안에 가둠.
@@ -118,7 +118,7 @@ graph LR
 | Routing | routing.Service | 별명 → chain 해석, 폴백 적격 판정, 회로 차단 ([ADR 004](adr/004-fallback-policy.md)). non-stream 시도당 한도의 권위자 ([ADR 005](adr/005-timeout-authority.md)). stdlib + llmtypes 만 import |
 | Providers | OpenAI Adapter | OpenAI 와이어 호출. status 분류 + 첫 이벤트 검증 ([ADR 004](adr/004-fallback-policy.md)) |
 | Providers | Anthropic Adapter | Anthropic ↔ OpenAI 와이어 양방향 변환 (tools / tool_choice / tool_calls / tool_use). status 분류 + 첫 이벤트 검증 ([ADR 004](adr/004-fallback-policy.md)) |
-| Boot data | consumers Store | 부팅 시 yaml → sha256 → consumer 매핑 read-only. 0 개면 부팅 fail ([ADR 003](adr/003-consumers.md)). Delivery 의 auth middleware 가 소비 |
+| Domain | consumers Store | 부팅 시 yaml → sha256 → consumer 매핑 read-only. 0 개면 부팅 fail ([ADR 003](adr/003-consumers.md)). Delivery 의 auth middleware 가 소비 |
 
 각 컴포넌트의 단일 책임 (*권위자가 한 명*) 결정 근거는 [ADR 001](adr/001-component-boundaries.md).
 
@@ -143,6 +143,7 @@ internal/app/        부팅 조립, provider 생성, shutdown
 
 ```text
 internal/domain/
+  consumers/                 caller identity + allowed_aliases registry
   llmtypes/                  공통 계약 + OpenAI-shaped DTO + ErrorKind
   streaming/                 Stream contract helpers + first-event validation
   telemetry/                 audit/call event facts + sink/lifecycle contracts

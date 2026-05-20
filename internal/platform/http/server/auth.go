@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"llmgate/internal/consumers"
+	"llmgate/internal/domain/consumers"
 	"llmgate/internal/domain/telemetry"
 )
 

@@ -14,7 +14,7 @@ import (
 
 	"llmgate/internal/catalog"
 	"llmgate/internal/config"
-	"llmgate/internal/consumers"
+	"llmgate/internal/domain/consumers"
 	llmresultsink "llmgate/internal/domain/llmresult/sink"
 	"llmgate/internal/domain/routing"
 	"llmgate/internal/domain/telemetry"

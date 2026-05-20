@@ -15,7 +15,7 @@ import (
 	"testing"
 
 	"llmgate/internal/config"
-	"llmgate/internal/consumers"
+	"llmgate/internal/domain/consumers"
 	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/routing"
 	"llmgate/internal/domain/telemetry"

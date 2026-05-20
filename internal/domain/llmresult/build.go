@@ -1,7 +1,7 @@
 package llmresult
 
 import (
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/telemetry"
 )
 

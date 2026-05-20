@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/platform/upstream"
 	"llmgate/internal/streaming"
 )

@@ -3,8 +3,8 @@ package telemetry
 import (
 	"time"
 
+	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/routing"
-	"llmgate/internal/llmtypes"
 )
 
 // CallEvent captures the result of one gateway LLM request. Attempts contains

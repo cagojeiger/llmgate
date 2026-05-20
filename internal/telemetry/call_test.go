@@ -3,7 +3,7 @@ package telemetry
 import (
 	"testing"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 func TestCallAttemptHelpers(t *testing.T) {

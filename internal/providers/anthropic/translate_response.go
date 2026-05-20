@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 func toOpenAIResponse(in *anthropicResponse) (*llmtypes.Response, error) {

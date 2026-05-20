@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/routing"
-	"llmgate/internal/llmtypes"
 	"llmgate/internal/telemetry"
 )
 

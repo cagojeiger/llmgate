@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/routing"
-	"llmgate/internal/llmtypes"
 	"llmgate/internal/platform/http/response"
 	"llmgate/internal/telemetry"
 )

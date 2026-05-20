@@ -12,7 +12,7 @@ import (
 	"llmgate/internal/catalog"
 	"llmgate/internal/config"
 	"llmgate/internal/consumers"
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 func TestBuildRuntime_WiresServerAndPublicEndpoints(t *testing.T) {

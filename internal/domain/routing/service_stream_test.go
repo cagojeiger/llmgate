@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/providers/fake"
 )
 

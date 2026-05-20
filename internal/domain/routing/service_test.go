@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"llmgate/internal/catalog"
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/providers/fake"
 )
 

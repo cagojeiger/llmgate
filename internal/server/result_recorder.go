@@ -5,7 +5,7 @@ import (
 
 	"llmgate/internal/domain/llmresult"
 	llmresultsink "llmgate/internal/domain/llmresult/sink"
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/telemetry"
 )
 

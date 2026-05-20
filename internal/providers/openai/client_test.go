@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 func requireProviderError(t *testing.T, err error) *llmtypes.Error {

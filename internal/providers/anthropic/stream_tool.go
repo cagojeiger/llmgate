@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 // streamToolCallState tracks the state of one Anthropic tool_use block

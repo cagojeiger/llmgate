@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 // rawBodyLimit caps the raw-body bytes preserved on *llmtypes.Error.Raw

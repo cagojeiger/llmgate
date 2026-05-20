@@ -3,7 +3,7 @@ package openai
 import (
 	"testing"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 func TestParseStreamError_UsesOpenAIKindClassifier(t *testing.T) {

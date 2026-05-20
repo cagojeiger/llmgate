@@ -15,8 +15,8 @@ import (
 
 	"llmgate/internal/domain/llmresult"
 	llmresultsink "llmgate/internal/domain/llmresult/sink"
+	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/routing"
-	"llmgate/internal/llmtypes"
 	"llmgate/internal/telemetry"
 )
 

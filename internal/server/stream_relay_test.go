@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/streaming"
 )
 

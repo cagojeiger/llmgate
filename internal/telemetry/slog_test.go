@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 func TestSlogSink_RecordAudit(t *testing.T) {

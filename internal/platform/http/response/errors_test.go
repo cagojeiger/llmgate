@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 // Transport failures may carry IPs, hostnames, or DNS details in their

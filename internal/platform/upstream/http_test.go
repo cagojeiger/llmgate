@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 func TestParseRetryAfter(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 func toAnthropicRequest(req *llmtypes.Request, defaultMaxTokens int, stream bool) ([]byte, error) {

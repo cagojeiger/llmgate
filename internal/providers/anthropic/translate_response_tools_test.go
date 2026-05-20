@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 // strPtr returns a pointer to the given string for fields like StopReason

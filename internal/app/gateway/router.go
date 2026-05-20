@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"llmgate/internal/catalog"
+	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/routing"
-	"llmgate/internal/llmtypes"
 	"llmgate/internal/providers/anthropic"
 	"llmgate/internal/providers/openai"
 )

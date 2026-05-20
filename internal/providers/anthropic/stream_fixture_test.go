@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 type anthropicSSEFixture struct {

@@ -3,7 +3,7 @@ package telemetry
 import (
 	"time"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 const (

@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"strings"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 // StatusError carries a non-2xx HTTP response from an SSE stream-open

@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 func WriteError(w http.ResponseWriter, err error) {

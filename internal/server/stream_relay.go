@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/platform/http/response"
 	"llmgate/internal/streaming"
 	"llmgate/internal/telemetry"

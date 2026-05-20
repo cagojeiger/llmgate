@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"strings"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/platform/upstream"
 )
 

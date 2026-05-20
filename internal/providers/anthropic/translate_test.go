@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 // decodeRequestBody marshals a Request through toAnthropicRequest and

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 func TestCompleteStream_Success(t *testing.T) {

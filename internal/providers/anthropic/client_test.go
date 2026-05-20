@@ -11,7 +11,7 @@ import (
 	"sync"
 	"testing"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 func writeAnthropicResponse(t *testing.T, w http.ResponseWriter, stopReason string) {

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 func TestComplete_Success(t *testing.T) {

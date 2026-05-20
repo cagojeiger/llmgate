@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"io"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/platform/upstream"
 )
 

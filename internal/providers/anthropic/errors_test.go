@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 func TestClassify_ContentFilterOverridesStatus(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 // stubbornStream simulates a misbehaving adapter: Recv blocks forever

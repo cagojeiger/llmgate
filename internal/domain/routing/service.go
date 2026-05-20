@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 // Models maps a model id to the provider that serves it. The id is the

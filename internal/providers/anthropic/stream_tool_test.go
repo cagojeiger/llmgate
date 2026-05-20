@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 // streamToolCallAcc replays the OpenAI streaming tool_calls deltas back

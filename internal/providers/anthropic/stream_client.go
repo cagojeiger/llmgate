@@ -7,7 +7,7 @@ import (
 	"io"
 	"sync/atomic"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/platform/upstream"
 	"llmgate/internal/streaming"
 )

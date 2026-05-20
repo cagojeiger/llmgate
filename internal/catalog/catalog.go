@@ -37,7 +37,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 const defaultDir = "./catalog"

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 func TestSSEReader_NormalDoneTermination(t *testing.T) {

@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"llmgate/internal/catalog"
+	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/routing"
-	"llmgate/internal/llmtypes"
 )
 
 func TestBuildRouterInputs_MissingAuthDoesNotBlockOtherModels(t *testing.T) {

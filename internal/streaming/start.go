@@ -5,7 +5,7 @@ import (
 	"errors"
 	"io"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 // ValidateStreamStart eagerly reads one event from raw to confirm the

@@ -2,7 +2,7 @@
 package telemetry
 
 import (
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 // AuthError names the failure mode at the gateway auth boundary. The

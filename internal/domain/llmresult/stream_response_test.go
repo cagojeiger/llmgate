@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 func TestStreamResponseBuilder_AssemblesTextAndReasoning(t *testing.T) {

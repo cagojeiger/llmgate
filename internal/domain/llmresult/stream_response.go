@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"sort"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 // StreamResponseBuilder turns OpenAI-shaped stream chunks into the same final

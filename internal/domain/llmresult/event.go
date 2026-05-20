@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"llmgate/internal/llmtypes"
+	"llmgate/internal/domain/llmtypes"
 )
 
 const (

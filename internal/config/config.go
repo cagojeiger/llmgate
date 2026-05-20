@@ -40,6 +40,8 @@ type Server struct {
 	LLMResultNATSStream     string
 	LLMResultNATSSubject    string
 	LLMResultAsyncQueueSize int
+	LLMResultAsyncBatchSize int
+	LLMResultAsyncFlush     time.Duration
 }
 
 func LoadServer() (*Server, error) {
@@ -83,6 +85,14 @@ func LoadServer() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	llmResultBatchSize, err := nonNegativeInt("LLMGATE_LLMRESULT_ASYNC_BATCH_SIZE", "100")
+	if err != nil {
+		return nil, err
+	}
+	llmResultFlush, err := nonNegativeDuration("LLMGATE_LLMRESULT_ASYNC_FLUSH_INTERVAL", "1s")
+	if err != nil {
+		return nil, err
+	}
 
 	return &Server{
 		Addr:                    orDefault("LLMGATE_ADDR", ":8080"),
@@ -101,6 +111,8 @@ func LoadServer() (*Server, error) {
 		LLMResultNATSStream:     orDefault("LLMGATE_LLMRESULT_NATS_STREAM", "LLMRESULT"),
 		LLMResultNATSSubject:    orDefault("LLMGATE_LLMRESULT_NATS_SUBJECT", "llmgate.llmresult.finalized"),
 		LLMResultAsyncQueueSize: llmResultQueueSize,
+		LLMResultAsyncBatchSize: llmResultBatchSize,
+		LLMResultAsyncFlush:     llmResultFlush,
 	}, nil
 }
 

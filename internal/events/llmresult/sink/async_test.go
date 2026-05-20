@@ -14,7 +14,11 @@ import (
 
 func TestAsyncSink_EmitDoesNotWaitForTransport(t *testing.T) {
 	next := newBlockingResultSink()
-	sink := NewAsyncSink(next, discardLogger(), 1)
+	sink := NewAsyncSinkWithConfig(next, discardLogger(), AsyncConfig{
+		QueueSize:     1,
+		BatchSize:     1,
+		FlushInterval: time.Hour,
+	})
 	defer sink.Close()
 	defer next.release()
 
@@ -30,7 +34,11 @@ func TestAsyncSink_EmitDoesNotWaitForTransport(t *testing.T) {
 
 func TestAsyncSink_DropsWhenQueueFull(t *testing.T) {
 	next := newBlockingResultSink()
-	sink := NewAsyncSink(next, discardLogger(), 1)
+	sink := NewAsyncSinkWithConfig(next, discardLogger(), AsyncConfig{
+		QueueSize:     1,
+		BatchSize:     1,
+		FlushInterval: time.Hour,
+	})
 	defer sink.Close()
 	defer next.release()
 
@@ -44,9 +52,43 @@ func TestAsyncSink_DropsWhenQueueFull(t *testing.T) {
 	}
 }
 
+func TestAsyncSink_FlushesWhenBatchSizeReached(t *testing.T) {
+	next := &captureResultSink{}
+	sink := NewAsyncSinkWithConfig(next, discardLogger(), AsyncConfig{
+		QueueSize:     10,
+		BatchSize:     2,
+		FlushInterval: time.Hour,
+	})
+	defer sink.Close()
+
+	sink.Emit(context.Background(), &llmresult.Event{RequestID: "req-1"})
+	assertEventuallyLen(t, next, 0)
+
+	sink.Emit(context.Background(), &llmresult.Event{RequestID: "req-2"})
+	waitLen(t, next, 2)
+}
+
+func TestAsyncSink_FlushesWhenIntervalElapses(t *testing.T) {
+	next := &captureResultSink{}
+	sink := NewAsyncSinkWithConfig(next, discardLogger(), AsyncConfig{
+		QueueSize:     10,
+		BatchSize:     100,
+		FlushInterval: 10 * time.Millisecond,
+	})
+	defer sink.Close()
+
+	sink.Emit(context.Background(), &llmresult.Event{RequestID: "req-1"})
+
+	waitLen(t, next, 1)
+}
+
 func TestAsyncSink_CloseDrainsQueueThenClosesNext(t *testing.T) {
 	next := &captureResultSink{}
-	sink := NewAsyncSink(next, discardLogger(), 10)
+	sink := NewAsyncSinkWithConfig(next, discardLogger(), AsyncConfig{
+		QueueSize:     10,
+		BatchSize:     100,
+		FlushInterval: time.Hour,
+	})
 
 	sink.Emit(context.Background(), &llmresult.Event{RequestID: "req-1"})
 	sink.Emit(context.Background(), &llmresult.Event{RequestID: "req-2"})
@@ -73,7 +115,11 @@ func TestAsyncSink_CloseReturnsNextCloseError(t *testing.T) {
 
 func TestAsyncSink_CloseIsIdempotent(t *testing.T) {
 	next := &captureResultSink{}
-	sink := NewAsyncSink(next, discardLogger(), 1)
+	sink := NewAsyncSinkWithConfig(next, discardLogger(), AsyncConfig{
+		QueueSize:     1,
+		BatchSize:     1,
+		FlushInterval: time.Hour,
+	})
 
 	if err := sink.Close(); err != nil {
 		t.Fatalf("first Close() error = %v", err)
@@ -88,7 +134,11 @@ func TestAsyncSink_CloseIsIdempotent(t *testing.T) {
 
 func TestAsyncSink_RecoversWorkerPanic(t *testing.T) {
 	next := &panicOnceResultSink{}
-	sink := NewAsyncSink(next, discardLogger(), 2)
+	sink := NewAsyncSinkWithConfig(next, discardLogger(), AsyncConfig{
+		QueueSize:     2,
+		BatchSize:     2,
+		FlushInterval: time.Hour,
+	})
 
 	sink.Emit(context.Background(), &llmresult.Event{RequestID: "req-1"})
 	sink.Emit(context.Background(), &llmresult.Event{RequestID: "req-2"})
@@ -165,6 +215,31 @@ func (s *captureResultSink) closeCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.closes
+}
+
+func waitLen(t *testing.T, sink *captureResultSink, want int) {
+	t.Helper()
+	deadline := time.After(500 * time.Millisecond)
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if got := sink.len(); got == want {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("captured events = %d, want %d", sink.len(), want)
+		case <-ticker.C:
+		}
+	}
+}
+
+func assertEventuallyLen(t *testing.T, sink *captureResultSink, want int) {
+	t.Helper()
+	time.Sleep(20 * time.Millisecond)
+	if got := sink.len(); got != want {
+		t.Fatalf("captured events = %d, want %d", got, want)
+	}
 }
 
 type closeErrorSink struct {

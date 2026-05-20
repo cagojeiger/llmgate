@@ -5,11 +5,22 @@ import (
 	"log/slog"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"llmgate/internal/events/llmresult"
 )
 
-const DefaultAsyncQueueSize = 1000
+const (
+	DefaultAsyncQueueSize     = 1000
+	DefaultAsyncBatchSize     = 100
+	DefaultAsyncFlushInterval = time.Second
+)
+
+type AsyncConfig struct {
+	QueueSize     int
+	BatchSize     int
+	FlushInterval time.Duration
+}
 
 // AsyncSink decouples result-event production from remote transports. Emit is
 // non-blocking: when the bounded queue is full, the event is dropped.
@@ -17,10 +28,12 @@ type AsyncSink struct {
 	next Sink
 	log  *slog.Logger
 
-	mu     sync.RWMutex
-	closed bool
-	queue  chan *llmresult.Event
-	done   chan struct{}
+	mu            sync.RWMutex
+	closed        bool
+	queue         chan *llmresult.Event
+	done          chan struct{}
+	batchSize     int
+	flushInterval time.Duration
 
 	closeOnce sync.Once
 	closeErr  error
@@ -28,23 +41,40 @@ type AsyncSink struct {
 }
 
 func NewAsyncSink(next Sink, log *slog.Logger, queueSize int) *AsyncSink {
+	return NewAsyncSinkWithConfig(next, log, AsyncConfig{QueueSize: queueSize})
+}
+
+func NewAsyncSinkWithConfig(next Sink, log *slog.Logger, cfg AsyncConfig) *AsyncSink {
 	if next == nil {
 		next = NopSink{}
 	}
 	if log == nil {
 		log = slog.Default()
 	}
-	if queueSize <= 0 {
-		queueSize = DefaultAsyncQueueSize
-	}
+	cfg = cfg.withDefaults()
 	s := &AsyncSink{
-		next:  next,
-		log:   log,
-		queue: make(chan *llmresult.Event, queueSize),
-		done:  make(chan struct{}),
+		next:          next,
+		log:           log,
+		queue:         make(chan *llmresult.Event, cfg.QueueSize),
+		done:          make(chan struct{}),
+		batchSize:     cfg.BatchSize,
+		flushInterval: cfg.FlushInterval,
 	}
 	go s.run()
 	return s
+}
+
+func (c AsyncConfig) withDefaults() AsyncConfig {
+	if c.QueueSize <= 0 {
+		c.QueueSize = DefaultAsyncQueueSize
+	}
+	if c.BatchSize <= 0 {
+		c.BatchSize = DefaultAsyncBatchSize
+	}
+	if c.FlushInterval <= 0 {
+		c.FlushInterval = DefaultAsyncFlushInterval
+	}
+	return c
 }
 
 func (s *AsyncSink) Emit(ctx context.Context, event *llmresult.Event) {
@@ -91,7 +121,45 @@ func (s *AsyncSink) Dropped() uint64 {
 
 func (s *AsyncSink) run() {
 	defer close(s.done)
-	for event := range s.queue {
+	batch := make([]*llmresult.Event, 0, s.batchSize)
+	timer := time.NewTimer(s.flushInterval)
+	stopTimer(timer)
+	timerActive := false
+
+	for {
+		select {
+		case event, ok := <-s.queue:
+			if !ok {
+				stopTimer(timer)
+				s.emitBatch(batch)
+				return
+			}
+			batch = append(batch, event)
+			if len(batch) == 1 {
+				timer.Reset(s.flushInterval)
+				timerActive = true
+			}
+			if len(batch) >= s.batchSize {
+				stopTimer(timer)
+				timerActive = false
+				s.emitBatch(batch)
+				batch = batch[:0]
+			}
+		case <-timer.C:
+			timerActive = false
+			s.emitBatch(batch)
+			batch = batch[:0]
+		}
+
+		if len(batch) == 0 && timerActive {
+			stopTimer(timer)
+			timerActive = false
+		}
+	}
+}
+
+func (s *AsyncSink) emitBatch(events []*llmresult.Event) {
+	for _, event := range events {
 		s.emitOne(event)
 	}
 }
@@ -123,4 +191,13 @@ func eventRequestID(event *llmresult.Event) string {
 		return ""
 	}
 	return event.RequestID
+}
+
+func stopTimer(timer *time.Timer) {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
 }

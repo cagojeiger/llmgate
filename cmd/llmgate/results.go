@@ -22,5 +22,9 @@ func buildResultSink(ctx context.Context, cfg *config.Server, log *slog.Logger) 
 	if err != nil {
 		return nil, fmt.Errorf("build llm result nats publisher: %w", err)
 	}
-	return llmresultsink.NewAsyncSink(publisher, log, cfg.LLMResultAsyncQueueSize), nil
+	return llmresultsink.NewAsyncSinkWithConfig(publisher, log, llmresultsink.AsyncConfig{
+		QueueSize:     cfg.LLMResultAsyncQueueSize,
+		BatchSize:     cfg.LLMResultAsyncBatchSize,
+		FlushInterval: cfg.LLMResultAsyncFlush,
+	}), nil
 }

@@ -31,6 +31,8 @@ func resetEnv(t *testing.T) {
 		"LLMGATE_LLMRESULT_NATS_STREAM",
 		"LLMGATE_LLMRESULT_NATS_SUBJECT",
 		"LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE",
+		"LLMGATE_LLMRESULT_ASYNC_BATCH_SIZE",
+		"LLMGATE_LLMRESULT_ASYNC_FLUSH_INTERVAL",
 	} {
 		t.Setenv(k, "")
 	}
@@ -90,6 +92,12 @@ func TestLoadServer_Defaults(t *testing.T) {
 	}
 	if cfg.LLMResultAsyncQueueSize != 1000 {
 		t.Errorf("LLMResultAsyncQueueSize = %d, want 1000", cfg.LLMResultAsyncQueueSize)
+	}
+	if cfg.LLMResultAsyncBatchSize != 100 {
+		t.Errorf("LLMResultAsyncBatchSize = %d, want 100", cfg.LLMResultAsyncBatchSize)
+	}
+	if cfg.LLMResultAsyncFlush != time.Second {
+		t.Errorf("LLMResultAsyncFlush = %v, want 1s", cfg.LLMResultAsyncFlush)
 	}
 }
 
@@ -195,6 +203,8 @@ func TestLoadServer_LLMResultNATSOverrides(t *testing.T) {
 	t.Setenv("LLMGATE_LLMRESULT_NATS_STREAM", "RESULTS")
 	t.Setenv("LLMGATE_LLMRESULT_NATS_SUBJECT", "results.finalized")
 	t.Setenv("LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE", "25")
+	t.Setenv("LLMGATE_LLMRESULT_ASYNC_BATCH_SIZE", "5")
+	t.Setenv("LLMGATE_LLMRESULT_ASYNC_FLUSH_INTERVAL", "250ms")
 
 	cfg, err := LoadServer()
 	if err != nil {
@@ -212,6 +222,12 @@ func TestLoadServer_LLMResultNATSOverrides(t *testing.T) {
 	if cfg.LLMResultAsyncQueueSize != 25 {
 		t.Errorf("LLMResultAsyncQueueSize = %d, want 25", cfg.LLMResultAsyncQueueSize)
 	}
+	if cfg.LLMResultAsyncBatchSize != 5 {
+		t.Errorf("LLMResultAsyncBatchSize = %d, want 5", cfg.LLMResultAsyncBatchSize)
+	}
+	if cfg.LLMResultAsyncFlush != 250*time.Millisecond {
+		t.Errorf("LLMResultAsyncFlush = %v, want 250ms", cfg.LLMResultAsyncFlush)
+	}
 }
 
 func TestLoadServer_RejectsNegativeLLMResultQueueSize(t *testing.T) {
@@ -223,6 +239,32 @@ func TestLoadServer_RejectsNegativeLLMResultQueueSize(t *testing.T) {
 		t.Fatal("LoadServer: want error for negative LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE")
 	}
 	if !strings.Contains(err.Error(), "LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE") {
+		t.Errorf("err = %v, want mention of failing key", err)
+	}
+}
+
+func TestLoadServer_RejectsNegativeLLMResultBatchSize(t *testing.T) {
+	resetEnv(t)
+	t.Setenv("LLMGATE_LLMRESULT_ASYNC_BATCH_SIZE", "-1")
+
+	_, err := LoadServer()
+	if err == nil {
+		t.Fatal("LoadServer: want error for negative LLMGATE_LLMRESULT_ASYNC_BATCH_SIZE")
+	}
+	if !strings.Contains(err.Error(), "LLMGATE_LLMRESULT_ASYNC_BATCH_SIZE") {
+		t.Errorf("err = %v, want mention of failing key", err)
+	}
+}
+
+func TestLoadServer_RejectsNegativeLLMResultFlushInterval(t *testing.T) {
+	resetEnv(t)
+	t.Setenv("LLMGATE_LLMRESULT_ASYNC_FLUSH_INTERVAL", "-1s")
+
+	_, err := LoadServer()
+	if err == nil {
+		t.Fatal("LoadServer: want error for negative LLMGATE_LLMRESULT_ASYNC_FLUSH_INTERVAL")
+	}
+	if !strings.Contains(err.Error(), "LLMGATE_LLMRESULT_ASYNC_FLUSH_INTERVAL") {
 		t.Errorf("err = %v, want mention of failing key", err)
 	}
 }

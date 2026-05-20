@@ -49,3 +49,5 @@ internal/app/        부팅 조립, provider 생성, shutdown
 3. NATS result publisher 를 `internal/platform/nats/llmresult` 쪽으로 이동한다.
 4. LLM result schema / assembly 를 `internal/domain/llmresult/*` 쪽으로 이동한다.
 5. 런타임 조립 코드를 `internal/app` 으로 옮겨 `cmd/llmgate` 를 얇게 만든다.
+6. routing service 를 `internal/domain/routing` 쪽으로 이동한다.
+7. OpenAI-shaped DTO / provider contract 를 `internal/domain/llmtypes` 쪽으로 이동한다.

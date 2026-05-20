@@ -16,7 +16,7 @@ import (
 
 	"llmgate/internal/config"
 	"llmgate/internal/consumers"
-	"llmgate/internal/llmrouter"
+	"llmgate/internal/domain/routing"
 	"llmgate/internal/llmtypes"
 	"llmgate/internal/telemetry"
 )
@@ -44,18 +44,18 @@ func (r *recordingRecorder) Emit(ctx context.Context, event telemetry.Event) {
 // keeps test isolation tight. Complete is what serveComplete calls;
 // stream is unused in these tests.
 type stubService struct {
-	resp     *llmrouter.RouteResult
+	resp     *routing.RouteResult
 	err      error
-	complete func(context.Context, *llmtypes.Request) (*llmrouter.RouteResult, error)
+	complete func(context.Context, *llmtypes.Request) (*routing.RouteResult, error)
 }
 
-func (s *stubService) Complete(ctx context.Context, req *llmtypes.Request) (*llmrouter.RouteResult, error) {
+func (s *stubService) Complete(ctx context.Context, req *llmtypes.Request) (*routing.RouteResult, error) {
 	if s.complete != nil {
 		return s.complete(ctx, req)
 	}
 	return s.resp, s.err
 }
-func (s *stubService) CompleteStream(context.Context, *llmtypes.Request) (*llmrouter.RouteResult, error) {
+func (s *stubService) CompleteStream(context.Context, *llmtypes.Request) (*routing.RouteResult, error) {
 	return s.resp, s.err
 }
 
@@ -208,7 +208,7 @@ func TestServer_AuthIntegration(t *testing.T) {
 	logBuf := &bytes.Buffer{}
 	logger := slog.New(slog.NewJSONHandler(logBuf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	stub := &stubService{resp: &llmrouter.RouteResult{
+	stub := &stubService{resp: &routing.RouteResult{
 		Response: &llmtypes.Response{
 			ID:      "resp-1",
 			Object:  "chat.completion",
@@ -313,10 +313,10 @@ func TestServer_AllowedAliasesRejectDisallowedModel(t *testing.T) {
 	logBuf := &bytes.Buffer{}
 	logger := slog.New(slog.NewJSONHandler(logBuf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	stubCalled := false
-	stub := &stubService{resp: &llmrouter.RouteResult{
+	stub := &stubService{resp: &routing.RouteResult{
 		Response: &llmtypes.Response{ID: "resp-1", Object: "chat.completion", Model: "smart"},
 	}}
-	stub.complete = func(context.Context, *llmtypes.Request) (*llmrouter.RouteResult, error) {
+	stub.complete = func(context.Context, *llmtypes.Request) (*routing.RouteResult, error) {
 		stubCalled = true
 		return stub.resp, nil
 	}

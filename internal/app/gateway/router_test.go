@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"llmgate/internal/catalog"
-	"llmgate/internal/llmrouter"
+	"llmgate/internal/domain/routing"
 	"llmgate/internal/llmtypes"
 )
 
@@ -47,7 +47,7 @@ func TestBuildRouterInputs_MissingAuthDoesNotBlockOtherModels(t *testing.T) {
 	if got := models["opencode-ok"].Name(); got != "opencode" {
 		t.Fatalf("opencode provider name = %q, want opencode", got)
 	}
-	svc, err := llmrouter.NewService(models, aliases, llmrouter.FallbackPolicy{}, slog.Default())
+	svc, err := routing.NewService(models, aliases, routing.FallbackPolicy{}, slog.Default())
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}

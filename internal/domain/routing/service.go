@@ -1,10 +1,10 @@
-// Package llmrouter contains the transport-independent routing service:
+// Package routing contains the transport-independent routing service:
 // model alias resolution, fallback policy, and per-process circuit-breaker
 // state. The package depends only on stdlib + provider abstractions — no
 // HTTP, no yaml, no catalog. Wiring (catalog yaml → Models / Aliases) is
 // the caller's responsibility, so Service stays standalone — any that any
 // frontend (HTTP, CLI, queue, gRPC) can drive.
-package llmrouter
+package routing
 
 import (
 	"context"

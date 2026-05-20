@@ -1,4 +1,4 @@
-package main
+package gateway
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 )
 
 func TestBuildResultSink_DisabledByDefault(t *testing.T) {
-	got, err := buildResultSink(context.Background(), &config.Server{}, discardLogger())
+	got, err := BuildResultSink(context.Background(), &config.Server{}, discardLogger())
 	if err != nil {
 		t.Fatalf("buildResultSink() error = %v", err)
 	}

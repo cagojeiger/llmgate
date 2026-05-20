@@ -1,4 +1,4 @@
-package server
+package response
 
 import (
 	"errors"
@@ -14,7 +14,7 @@ import (
 func TestSSEWriter_WriteHeaders(t *testing.T) {
 	rec := httptest.NewRecorder()
 	flusher := &stubFlusher{}
-	sw := newSSEWriter(rec, flusher)
+	sw := NewSSEWriter(rec, flusher)
 
 	sw.WriteHeaders()
 
@@ -41,7 +41,7 @@ func TestSSEWriter_WriteHeaders(t *testing.T) {
 func TestSSEWriter_Send_FormatsAndCounts(t *testing.T) {
 	rec := httptest.NewRecorder()
 	flusher := &stubFlusher{}
-	sw := newSSEWriter(rec, flusher)
+	sw := NewSSEWriter(rec, flusher)
 
 	sw.Send([]byte(`{"a":1}`))
 	sw.Send([]byte(`{"b":2}`))
@@ -61,7 +61,7 @@ func TestSSEWriter_Send_FormatsAndCounts(t *testing.T) {
 func TestSSEWriter_SendDone(t *testing.T) {
 	rec := httptest.NewRecorder()
 	flusher := &stubFlusher{}
-	sw := newSSEWriter(rec, flusher)
+	sw := NewSSEWriter(rec, flusher)
 
 	sw.SendDone()
 
@@ -77,7 +77,7 @@ func TestSSEWriter_SendDone(t *testing.T) {
 func TestSSEWriter_SendError_EmbedsErrorPayload(t *testing.T) {
 	rec := httptest.NewRecorder()
 	flusher := &stubFlusher{}
-	sw := newSSEWriter(rec, flusher)
+	sw := NewSSEWriter(rec, flusher)
 
 	sw.SendError(&llmtypes.Error{Kind: llmtypes.KindUpstream, Message: "boom"})
 
@@ -98,7 +98,7 @@ func TestSSEWriter_SendError_EmbedsErrorPayload(t *testing.T) {
 
 func TestSSEWriter_BytesAccumulatesAcrossOps(t *testing.T) {
 	rec := httptest.NewRecorder()
-	sw := newSSEWriter(rec, &stubFlusher{})
+	sw := NewSSEWriter(rec, &stubFlusher{})
 
 	sw.Send([]byte("x"))
 	mid := sw.Bytes()
@@ -137,7 +137,7 @@ func (e *errResponseWriter) WriteHeader(statusCode int) {}
 
 func TestSSEWriter_Send_PropagatesWriteError(t *testing.T) {
 	target := errors.New("broken pipe")
-	sw := newSSEWriter(newErrResponseWriter(target), &stubFlusher{})
+	sw := NewSSEWriter(newErrResponseWriter(target), &stubFlusher{})
 
 	if err := sw.Send([]byte("x")); !errors.Is(err, target) {
 		t.Fatalf("Send err = %v, want %v", err, target)
@@ -149,7 +149,7 @@ func TestSSEWriter_Send_PropagatesWriteError(t *testing.T) {
 
 func TestSSEWriter_SendError_PropagatesWriteError(t *testing.T) {
 	target := errors.New("broken pipe")
-	sw := newSSEWriter(newErrResponseWriter(target), &stubFlusher{})
+	sw := NewSSEWriter(newErrResponseWriter(target), &stubFlusher{})
 
 	if err := sw.SendError(io.ErrUnexpectedEOF); !errors.Is(err, target) {
 		t.Fatalf("SendError err = %v, want underlying %v", err, target)
@@ -158,7 +158,7 @@ func TestSSEWriter_SendError_PropagatesWriteError(t *testing.T) {
 
 func TestSSEWriter_SendDone_PropagatesWriteError(t *testing.T) {
 	target := errors.New("broken pipe")
-	sw := newSSEWriter(newErrResponseWriter(target), &stubFlusher{})
+	sw := NewSSEWriter(newErrResponseWriter(target), &stubFlusher{})
 
 	if err := sw.SendDone(); !errors.Is(err, target) {
 		t.Fatalf("SendDone err = %v, want %v", err, target)

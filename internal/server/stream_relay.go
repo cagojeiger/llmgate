@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"llmgate/internal/llmtypes"
+	"llmgate/internal/server/response"
 	"llmgate/internal/streaming"
 	"llmgate/internal/telemetry"
 )
@@ -48,11 +49,11 @@ func (s *streamRelay) Run(
 		perr := &llmtypes.Error{Kind: llmtypes.KindUnknown, Message: "streaming unsupported"}
 		adoptError(rec, perr)
 		call.Kind = rec.Kind
-		writeError(w, perr)
+		response.WriteError(w, perr)
 		return
 	}
 
-	sink := newSSEWriter(w, flusher)
+	sink := response.NewSSEWriter(w, flusher)
 	defer func() { call.ResponseBytes = sink.Bytes() }()
 	sink.WriteHeaders()
 	rec.StatusCode = http.StatusOK

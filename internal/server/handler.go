@@ -12,6 +12,7 @@ import (
 
 	"llmgate/internal/llmrouter"
 	"llmgate/internal/llmtypes"
+	"llmgate/internal/server/response"
 	"llmgate/internal/telemetry"
 )
 
@@ -126,7 +127,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		telemetry.MarkAuthFailure(rec, consumer.AuthError)
 		perr := &llmtypes.Error{Kind: llmtypes.KindAuth, Message: "unauthorized"}
 		adoptError(rec, perr)
-		writeError(w, perr)
+		response.WriteError(w, perr)
 		return
 	}
 
@@ -134,7 +135,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		perr := &llmtypes.Error{Kind: llmtypes.KindBadRequest, Message: "read request body: " + err.Error()}
 		adoptError(rec, perr)
-		writeError(w, perr)
+		response.WriteError(w, perr)
 		return
 	}
 	requestBytes := int64(len(body))
@@ -143,7 +144,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err := json.Unmarshal(body, req); err != nil {
 		perr := &llmtypes.Error{Kind: llmtypes.KindBadRequest, Message: "decode request: " + err.Error()}
 		adoptError(rec, perr)
-		writeError(w, perr)
+		response.WriteError(w, perr)
 		return
 	}
 	telemetry.SetResource(rec, "llm_model", req.Model)
@@ -151,7 +152,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		telemetry.MarkPolicyDenied(rec, telemetry.DenyReasonModelNotAllowed)
 		perr := &llmtypes.Error{Kind: llmtypes.KindForbidden, Message: "model not allowed"}
 		adoptError(rec, perr)
-		writeError(w, perr)
+		response.WriteError(w, perr)
 		return
 	}
 	telemetry.MarkPolicyAllowed(rec)
@@ -196,16 +197,16 @@ func (h *Handler) recoverPanic(ctx context.Context, w http.ResponseWriter, rec *
 	)
 	// A second WriteHeader is ignored, but body bytes would still corrupt
 	// an in-flight SSE stream.
-	if cw, ok := w.(*countingWriter); ok && cw.wroteHeader {
+	if started, ok := w.(interface{ WroteHeader() bool }); ok && started.WroteHeader() {
 		return
 	}
-	writeError(w, &llmtypes.Error{Kind: llmtypes.KindUnknown, Message: "internal server error"})
+	response.WriteError(w, &llmtypes.Error{Kind: llmtypes.KindUnknown, Message: "internal server error"})
 }
 
 // adoptError populates rec.Kind and rec.StatusCode from err.
 func adoptError(rec *telemetry.AuditEvent, err error) {
 	rec.Kind = llmtypes.ErrorKindOf(err)
-	rec.StatusCode = errStatus(err)
+	rec.StatusCode = response.Status(err)
 }
 
 func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *llmtypes.Request, rec *telemetry.AuditEvent, call *telemetry.CallEvent) {
@@ -213,7 +214,7 @@ func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *llm
 	telemetry.AdoptRouteResult(call, result)
 	if err != nil {
 		adoptError(rec, err)
-		writeError(w, err)
+		response.WriteError(w, err)
 		return
 	}
 
@@ -221,7 +222,7 @@ func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *llm
 	if err != nil {
 		perr := &llmtypes.Error{Kind: llmtypes.KindUnknown, Message: "encode response: " + err.Error(), Cause: err}
 		adoptError(rec, perr)
-		writeError(w, perr)
+		response.WriteError(w, perr)
 		return
 	}
 
@@ -245,7 +246,7 @@ func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *llmty
 	telemetry.AdoptRouteResult(call, result)
 	if err != nil {
 		adoptError(rec, err)
-		writeError(w, err)
+		response.WriteError(w, err)
 		return
 	}
 	stream := result.Stream

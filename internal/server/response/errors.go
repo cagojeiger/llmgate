@@ -1,4 +1,4 @@
-package server
+package response
 
 import (
 	"encoding/json"
@@ -10,7 +10,7 @@ import (
 	"llmgate/internal/llmtypes"
 )
 
-func writeError(w http.ResponseWriter, err error) {
+func WriteError(w http.ResponseWriter, err error) {
 	status, retryAfter, payload := errorPayload(err)
 	w.Header().Set("Content-Type", "application/json")
 	if retryAfter > 0 {
@@ -20,7 +20,7 @@ func writeError(w http.ResponseWriter, err error) {
 	_, _ = w.Write(append(payload, '\n'))
 }
 
-func errStatus(err error) int {
+func Status(err error) int {
 	status, _, _ := errorPayload(err)
 	return status
 }

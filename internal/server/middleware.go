@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"llmgate/internal/server/response"
 )
 
 type requestIDCtxKey struct{}
@@ -62,7 +64,7 @@ func accessLogMiddleware(log *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
-			cw := &countingWriter{ResponseWriter: w, status: http.StatusOK}
+			cw := response.NewCountingWriter(w)
 
 			next.ServeHTTP(cw, r)
 
@@ -75,9 +77,9 @@ func accessLogMiddleware(log *slog.Logger) func(http.Handler) http.Handler {
 			attrs := []slog.Attr{
 				slog.String("method", r.Method),
 				slog.String("path", r.URL.Path),
-				slog.Int("status", cw.status),
+				slog.Int("status", cw.Status()),
 				slog.Int64("duration_ms", time.Since(start).Milliseconds()),
-				slog.Int64("bytes_out", cw.bytes),
+				slog.Int64("bytes_out", cw.Bytes()),
 				slog.String("request_id", RequestIDFromContext(r.Context())),
 				slog.String("consumer_name", consumer.Name),
 			}
@@ -92,42 +94,4 @@ func accessLogMiddleware(log *slog.Logger) func(http.Handler) http.Handler {
 			log.LogAttrs(r.Context(), slog.LevelInfo, "request", attrs...)
 		})
 	}
-}
-
-type countingWriter struct {
-	http.ResponseWriter
-	status      int
-	bytes       int64
-	wroteHeader bool
-}
-
-func (w *countingWriter) WriteHeader(status int) {
-	if w.wroteHeader {
-		return
-	}
-	w.status = status
-	w.wroteHeader = true
-	w.ResponseWriter.WriteHeader(status)
-}
-
-func (w *countingWriter) Write(b []byte) (int, error) {
-	if !w.wroteHeader {
-		w.WriteHeader(http.StatusOK)
-	}
-	n, err := w.ResponseWriter.Write(b)
-	w.bytes += int64(n)
-	return n, err
-}
-
-func (w *countingWriter) Flush() {
-	if !w.wroteHeader {
-		w.WriteHeader(http.StatusOK)
-	}
-	if f, ok := w.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
-}
-
-func (w *countingWriter) Unwrap() http.ResponseWriter {
-	return w.ResponseWriter
 }

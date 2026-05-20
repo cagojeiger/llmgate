@@ -36,6 +36,7 @@ graph LR
         Server["HTTP Server<br/>chi + middleware + auth"]
         Handler[Handler]
         StreamRelay[streamRelay]
+        Response["response<br/>errors + SSE frames"]
         Probe[ProbeState]
         Lifecycle[LifecycleObserver]
         Telemetry[Telemetry EventSink]
@@ -64,6 +65,8 @@ graph LR
     Server --> Handler
     Handler -->|Complete / CompleteStream| Service
     Handler -->|stream 경로| StreamRelay
+    Handler --> Response
+    StreamRelay --> Response
     Service -->|Provider.Complete| OAI
     Service -->|Provider.Complete| Anth
     OAI --> UpOAI
@@ -82,7 +85,7 @@ graph LR
 
 ### 레이어와 의존 방향
 
-- **Delivery** (`internal/server/`) — HTTP 전송 책임. chi + middleware + auth + Handler + streamRelay + probes + metrics. SSE / `[DONE]` / idle timeout / 401 / readiness 같은 *와이어 시맨틱* 을 책임.
+- **Delivery** (`internal/server/`) — HTTP 전송 책임. chi + middleware + auth + Handler + streamRelay + response wire helpers + probes + metrics. SSE / `[DONE]` / idle timeout / 401 / readiness 같은 *와이어 시맨틱* 을 책임.
 - **Routing** (`internal/llmrouter/`) — *standalone* 서비스. alias → chain 해석, fallback 적격 판정, 회로 차단. stdlib + `llmtypes` 만 import. HTTP 외 frontend (CLI / queue / gRPC) 가 `llmrouter.NewService(models, aliases, ...)` 만 호출하면 그대로 구동.
 - **Providers** (`internal/providers/openai|anthropic/`) — `llmtypes.Provider` 구현. vendor 와이어 차이 (status 분류 / 첫 이벤트 검증 / 와이어 정규화) 를 자기 안에 가둠.
 - **Contracts** (`internal/llmtypes/`) — Provider / Stream / Request / Response / Error / Attempt — 모든 런타임 레이어가 import 하는 *도메인 계약 모듈*. 런타임 호출 노드가 아니므로 시스템 지도에서 점선 import 로만 표시.
@@ -93,6 +96,7 @@ graph LR
 | Delivery | HTTP Server | chi 라우터 + request_id / clientContext / access log / recoverer / read+request timeout. `/v1/chat/completions` (auth 보호), `/healthz/live` · `/healthz/ready` · `/healthz` (공개), 선택적 `/metrics` (middleware 밖) |
 | Delivery | auth middleware | `Authorization: Bearer` 추출 → sha256 → consumers Store lookup → ctx 에 ConsumerInfo 기록. 실패해도 short-circuit 안 함 — Handler 가 audit-always emit ([ADR 003](adr/003-consumers.md)) |
 | Delivery | Handler | 요청 디코드, stream / non-stream 분기. ConsumerInfo 로 `AuditEvent` / `CallEvent` 공통 키를 채움 + auth 실패 시 401. 요청 총 wall-clock 한도의 권위자 ([ADR 005](adr/005-timeout-authority.md)) |
+| Delivery | response | OpenAI-style error envelope, Retry-After, SSE frame writer, response status/bytes accounting |
 | Delivery | streamRelay | 스트림 열린 뒤 SSE wire transcript. 이벤트 전송, idle timeout, client_closed, mid-stream error, `[DONE]` ([ADR 004](adr/004-fallback-policy.md)). 스트림 idle 한도의 권위자 ([ADR 005](adr/005-timeout-authority.md)) |
 | Delivery | ProbeState | SIGTERM 시 `MarkShuttingDown()` → readiness 만 503. liveness · in-flight 영향 없음 |
 | Delivery | LifecycleObserver | request / stream 시작·종료 hook. live gauge 같은 관측값용이며 완료된 사실은 telemetry event 로 남김 |
@@ -123,6 +127,7 @@ internal/providers/          벤더 어댑터
 internal/llmrouter/          별명 → chain, 폴백, 회로 (service.go + breaker.go)
 internal/streaming/          스트림 시작 검증 + close grace helper
 internal/server/             chi + middleware + auth + handler + streamRelay + probes + metrics route
+  └─ response/               OpenAI-style errors + SSE frames + response accounting
 internal/telemetry/          AuditEvent / CallEvent + EventSink + slog / Prometheus sinks + lifecycle hooks
 cmd/llmgate/                 wiring + shutdown
 scripts/gen-consumer.sh      호출자 발급 헬퍼

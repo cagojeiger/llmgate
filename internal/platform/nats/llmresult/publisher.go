@@ -1,4 +1,4 @@
-package nats
+package llmresult
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 
 	natsgo "github.com/nats-io/nats.go"
 
-	"llmgate/internal/events/llmresult"
+	result "llmgate/internal/events/llmresult"
 )
 
 const (
@@ -84,7 +84,7 @@ func newPublisher(js jetStream, stream, subject string) *Publisher {
 	return &Publisher{js: js, stream: cfg.Stream, subject: cfg.Subject, log: slog.Default()}
 }
 
-func (p *Publisher) Emit(ctx context.Context, event *llmresult.Event) {
+func (p *Publisher) Emit(ctx context.Context, event *result.Event) {
 	if p == nil || event == nil {
 		return
 	}
@@ -100,7 +100,7 @@ func (p *Publisher) Emit(ctx context.Context, event *llmresult.Event) {
 	}
 }
 
-func (p *Publisher) Publish(ctx context.Context, event *llmresult.Event) error {
+func (p *Publisher) Publish(ctx context.Context, event *result.Event) error {
 	if p == nil || p.js == nil {
 		return errors.New("nats publisher is not initialized")
 	}
@@ -169,7 +169,7 @@ func (p *Publisher) ensureStream(ctx context.Context) error {
 	return nil
 }
 
-func eventTypeOf(event *llmresult.Event) string {
+func eventTypeOf(event *result.Event) string {
 	if event == nil {
 		return ""
 	}

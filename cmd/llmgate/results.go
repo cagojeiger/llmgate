@@ -7,14 +7,14 @@ import (
 
 	"llmgate/internal/config"
 	llmresultsink "llmgate/internal/events/llmresult/sink"
-	natssink "llmgate/internal/events/llmresult/sink/nats"
+	natsllmresult "llmgate/internal/platform/nats/llmresult"
 )
 
 func buildResultSink(ctx context.Context, cfg *config.Server, log *slog.Logger) (llmresultsink.Sink, error) {
 	if cfg == nil || cfg.LLMResultNATSURL == "" {
 		return llmresultsink.NopSink{}, nil
 	}
-	publisher, err := natssink.NewPublisher(ctx, natssink.Config{
+	publisher, err := natsllmresult.NewPublisher(ctx, natsllmresult.Config{
 		URL:     cfg.LLMResultNATSURL,
 		Stream:  cfg.LLMResultNATSStream,
 		Subject: cfg.LLMResultNATSSubject,

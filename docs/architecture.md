@@ -107,7 +107,7 @@ graph LR
 | Delivery | SlogSink | 기본 sink. audit / call event 를 Loki-friendly stdout JSON 라인으로 라우팅 |
 | Events | llmresult | 학습/분석용 finalized LLM result schema. 원본 OpenAI-shaped request 와 최종 response 를 포함할 수 있는 durable payload 경계 |
 | Events | llmresult/sink | result event delivery pipeline. no-op / panic recovery / bounded async queue 를 제공해 Handler 에 remote backpressure 가 역류하지 않게 함 |
-| Events | llmresult/sink/nats | finalized event 를 JSON 으로 인코딩해 NATS JetStream 에 publish 하는 원격 sink |
+| Platform | nats/llmresult | finalized event 를 JSON 으로 인코딩해 NATS JetStream 에 publish 하는 원격 sink |
 | Routing | llmrouter.Service | 별명 → chain 해석, 폴백 적격 판정, 회로 차단 ([ADR 004](adr/004-fallback-policy.md)). non-stream 시도당 한도의 권위자 ([ADR 005](adr/005-timeout-authority.md)). stdlib + llmtypes 만 import |
 | Providers | OpenAI Adapter | OpenAI 와이어 호출. status 분류 + 첫 이벤트 검증 ([ADR 004](adr/004-fallback-policy.md)) |
 | Providers | Anthropic Adapter | Anthropic ↔ OpenAI 와이어 양방향 변환 (tools / tool_choice / tool_calls / tool_use). status 분류 + 첫 이벤트 검증 ([ADR 004](adr/004-fallback-policy.md)) |

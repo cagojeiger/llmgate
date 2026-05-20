@@ -1,4 +1,4 @@
-package nats
+package llmresult
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 
 	natsgo "github.com/nats-io/nats.go"
 
-	"llmgate/internal/events/llmresult"
+	result "llmgate/internal/events/llmresult"
 )
 
 func TestPublisher_IntegrationJetStream(t *testing.T) {
@@ -45,9 +45,9 @@ func TestPublisher_IntegrationJetStream(t *testing.T) {
 	}
 	defer js.DeleteStream(stream)
 
-	if err := publisher.Publish(ctx, &llmresult.Event{
-		SchemaVersion: llmresult.SchemaVersion,
-		EventType:     llmresult.EventType,
+	if err := publisher.Publish(ctx, &result.Event{
+		SchemaVersion: result.SchemaVersion,
+		EventType:     result.EventType,
 		RequestID:     "req-it",
 	}); err != nil {
 		t.Fatalf("Publish() error = %v", err)
@@ -57,11 +57,11 @@ func TestPublisher_IntegrationJetStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetLastMsg() error = %v", err)
 	}
-	var decoded llmresult.Event
+	var decoded result.Event
 	if err := json.Unmarshal(got.Data, &decoded); err != nil {
 		t.Fatalf("stored payload is not event JSON: %v", err)
 	}
-	if decoded.RequestID != "req-it" || decoded.EventType != llmresult.EventType {
+	if decoded.RequestID != "req-it" || decoded.EventType != result.EventType {
 		t.Fatalf("stored event = %+v", decoded)
 	}
 }

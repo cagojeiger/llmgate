@@ -79,3 +79,7 @@ policy 를 가진 sink 로 붙인다 — 네트워크 backpressure 를 Handler d
 upstream 이 돌려준 최종 `Response` 를 그대로 쓸 수 있지만, stream 은 SSE chunk 의 `delta` 를
 이어 붙여 같은 OpenAI-shaped `Response` 로 복원해야 한다. NATS 같은 transport 는 이 완성된
 payload 뒤에 붙는다.
+
+Handler 는 요청 종료 시점에 finalized `AuditEvent` / `CallEvent` 와 원본 request / 최종 response 를
+묶어 `llmresult.Event` 를 만든다. 기본 `ResultSink` 는 no-op 이므로 transport 를 설정하지 않으면
+기존 HTTP 응답과 운영 telemetry 동작은 그대로 유지된다.

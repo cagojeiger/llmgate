@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"llmgate/internal/events/llmresult"
 	"llmgate/internal/llmrouter"
 	"llmgate/internal/llmtypes"
 	"llmgate/internal/server/response"
@@ -28,6 +29,7 @@ type Handler struct {
 	service        ChatService
 	log            *slog.Logger
 	events         telemetry.EventSink
+	results        llmresult.Sink
 	lifecycle      telemetry.LifecycleObserver
 	serviceVersion string
 	environment    string
@@ -41,6 +43,7 @@ type HandlerConfig struct {
 	ServiceVersion    string
 	Environment       string
 	LifecycleObserver telemetry.LifecycleObserver
+	ResultSink        llmresult.Sink
 }
 
 func NewHandler(service ChatService, log *slog.Logger, events telemetry.EventSink, cfg HandlerConfig) *Handler {
@@ -51,6 +54,7 @@ func NewHandler(service ChatService, log *slog.Logger, events telemetry.EventSin
 		events = telemetry.NopSink{}
 	}
 	events = telemetry.NewRecoveringSink(events, log)
+	results := llmresult.NewRecoveringSink(cfg.ResultSink, log)
 	lifecycle := cfg.LifecycleObserver
 	if lifecycle == nil {
 		lifecycle = telemetry.NopLifecycleObserver{}
@@ -68,6 +72,7 @@ func NewHandler(service ChatService, log *slog.Logger, events telemetry.EventSin
 		service:        service,
 		log:            log,
 		events:         events,
+		results:        results,
 		lifecycle:      lifecycle,
 		serviceVersion: serviceVersion,
 		environment:    environment,
@@ -101,12 +106,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rec := telemetry.NewAuditEvent(common)
 	telemetry.MarkAuthSuccess(rec)
 	var call *telemetry.CallEvent
+	var req *llmtypes.Request
+	var resultResponse *llmtypes.Response
 	defer func() {
 		telemetry.FinishAuditEvent(rec, rec.StatusCode, rec.Kind, time.Since(start).Milliseconds())
 		h.events.Emit(ctx, rec)
 		if telemetry.CallAttempted(call) {
 			telemetry.FinishCallFromAudit(call, rec)
 			h.events.Emit(ctx, call)
+		}
+		if ev, ok := llmresult.FromTelemetry(llmresult.BuildInput{
+			Audit:    rec,
+			Call:     call,
+			Request:  req,
+			Response: resultResponse,
+		}); ok {
+			h.results.Emit(ctx, ev)
 		}
 	}()
 	// Registered after the audit defer so it runs first and stamps the
@@ -140,7 +155,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	requestBytes := int64(len(body))
 
-	req := &llmtypes.Request{}
+	req = &llmtypes.Request{}
 	if err := json.Unmarshal(body, req); err != nil {
 		perr := &llmtypes.Error{Kind: llmtypes.KindBadRequest, Message: "decode request: " + err.Error()}
 		adoptError(rec, perr)
@@ -161,10 +176,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if req.Stream != nil && *req.Stream {
 		rec.Operation = "chat.completions.stream"
 		call.Operation = "chat.completions.stream"
-		h.serveStream(w, r, req, rec, call)
+		resultResponse = h.serveStream(w, r, req, rec, call)
 		return
 	}
-	h.serveComplete(w, r, req, rec, call)
+	resultResponse = h.serveComplete(w, r, req, rec, call)
 }
 
 func isModelAllowed(model string, allowed []string) bool {
@@ -209,13 +224,13 @@ func adoptError(rec *telemetry.AuditEvent, err error) {
 	rec.StatusCode = response.Status(err)
 }
 
-func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *llmtypes.Request, rec *telemetry.AuditEvent, call *telemetry.CallEvent) {
+func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *llmtypes.Request, rec *telemetry.AuditEvent, call *telemetry.CallEvent) *llmtypes.Response {
 	result, err := h.service.Complete(r.Context(), req)
 	telemetry.AdoptRouteResult(call, result)
 	if err != nil {
 		adoptError(rec, err)
 		response.WriteError(w, err)
-		return
+		return nil
 	}
 
 	out, err := json.Marshal(result.Response)
@@ -223,7 +238,7 @@ func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *llm
 		perr := &llmtypes.Error{Kind: llmtypes.KindUnknown, Message: "encode response: " + err.Error(), Cause: err}
 		adoptError(rec, perr)
 		response.WriteError(w, perr)
-		return
+		return nil
 	}
 
 	rec.StatusCode = http.StatusOK
@@ -238,16 +253,18 @@ func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *llm
 			slog.String("vendor", call.Vendor),
 			slog.String("err", werr.Error()),
 		)
+		return nil
 	}
+	return result.Response
 }
 
-func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *llmtypes.Request, rec *telemetry.AuditEvent, call *telemetry.CallEvent) {
+func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *llmtypes.Request, rec *telemetry.AuditEvent, call *telemetry.CallEvent) *llmtypes.Response {
 	result, err := h.service.CompleteStream(r.Context(), req)
 	telemetry.AdoptRouteResult(call, result)
 	if err != nil {
 		adoptError(rec, err)
 		response.WriteError(w, err)
-		return
+		return nil
 	}
 	stream := result.Stream
 	defer stream.Close()
@@ -255,5 +272,10 @@ func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *llmty
 	defer h.lifecycle.StreamFinished(r.Context(), rec, call)
 	defer func() { telemetry.AdoptStreamSummary(call, stream.Summary(), time.Now()) }()
 
-	h.stream.Run(r.Context(), w, stream, rec, call)
+	builder := llmresult.NewStreamResponseBuilder()
+	h.stream.Run(r.Context(), w, stream, rec, call, builder.Add)
+	if rec.Kind != "" {
+		return nil
+	}
+	return builder.Response()
 }

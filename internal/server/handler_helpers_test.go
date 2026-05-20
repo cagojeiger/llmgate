@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"llmgate/internal/events/llmresult"
 	"llmgate/internal/llmrouter"
 	"llmgate/internal/llmtypes"
 	"llmgate/internal/telemetry"
@@ -216,6 +217,40 @@ func (c *captureCallSink) len() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return len(c.calls)
+}
+
+type captureResultSink struct {
+	mu      sync.Mutex
+	records []*llmresult.Event
+}
+
+func newCaptureResultSink() (*captureResultSink, llmresult.Sink) {
+	c := &captureResultSink{}
+	return c, c
+}
+
+func (c *captureResultSink) Emit(_ context.Context, event *llmresult.Event) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.records = append(c.records, event)
+}
+
+func (c *captureResultSink) Close() error { return nil }
+
+func (c *captureResultSink) last(t *testing.T) *llmresult.Event {
+	t.Helper()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.records) == 0 {
+		t.Fatalf("no llm result records captured")
+	}
+	return c.records[len(c.records)-1]
+}
+
+func (c *captureResultSink) len() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.records)
 }
 
 func newLogContractSink() (*bytes.Buffer, *bytes.Buffer, telemetry.EventSink) {

@@ -92,7 +92,7 @@ graph LR
 ### 레이어와 의존 방향
 
 - **Delivery** (`internal/platform/http/server`, `internal/platform/http/*`) — HTTP 전송 책임. chi + middleware + auth + Handler + streamRelay + response wire helpers + probes + metrics. SSE / `[DONE]` / idle timeout / 401 / readiness 같은 *와이어 시맨틱* 을 책임.
-- **Domain** (`internal/domain/*`) — 호출 계약과 분석/학습용 durable event 모델. `llmtypes` 는 OpenAI-shaped DTO / Provider 계약이고, `consumers` 는 호출자 identity / allowed_aliases 등록 계약이며, `llmresult` 는 finalized request/response payload 경계이고, `telemetry` 는 audit / call event fact 와 sink/lifecycle 계약이다. `llmresult/sink` 는 요청 경로와 remote publish 를 분리하는 bounded delivery 경계다.
+- **Domain** (`internal/domain/*`) — 호출 계약과 분석/학습용 durable event 모델. `llmtypes` 는 OpenAI-shaped DTO / Provider 계약이고, `catalog` 는 model / alias 등록 계약이며, `consumers` 는 호출자 identity / allowed_aliases 등록 계약이다. `llmresult` 는 finalized request/response payload 경계이고, `telemetry` 는 audit / call event fact 와 sink/lifecycle 계약이다. `llmresult/sink` 는 요청 경로와 remote publish 를 분리하는 bounded delivery 경계다.
 - **App** (`internal/app/gateway`) — catalog / consumers 로딩, provider / router / telemetry / sink / HTTP server 조립, listen / graceful shutdown 실행 책임. `cmd/llmgate` 는 CLI entrypoint 와 process input 준비에 집중한다.
 - **Routing** (`internal/domain/routing/`) — *standalone* 서비스. alias → chain 해석, fallback 적격 판정, 회로 차단. stdlib + `llmtypes` 만 import. HTTP 외 frontend (CLI / queue / gRPC) 가 `routing.NewService(models, aliases, ...)` 만 호출하면 그대로 구동.
 - **Providers** (`internal/providers/openai|anthropic/`) — `llmtypes.Provider` 구현. vendor 와이어 차이 (status 분류 / 첫 이벤트 검증 / 와이어 정규화) 를 자기 안에 가둠.
@@ -113,6 +113,7 @@ graph LR
 | Platform | telemetry/prometheus | RED / USE metric recorder. `EventSink` 와 `LifecycleObserver` 를 구현 |
 | Domain | llmresult | 학습/분석용 finalized LLM result schema. 원본 OpenAI-shaped request 와 최종 response 를 포함할 수 있는 durable payload 경계 |
 | Domain | llmresult/sink | result event delivery pipeline. no-op / panic recovery / bounded async queue 를 제공해 Handler 에 remote backpressure 가 역류하지 않게 함 |
+| Domain | catalog | model / alias yaml 을 routing input 으로 검증·로드하는 등록 계약 |
 | Platform | nats/llmresult | finalized event 를 JSON 으로 인코딩해 NATS JetStream 에 publish 하는 원격 sink |
 | App | gateway | catalog / consumers 를 로드하고 provider, router input, telemetry, result sink, HTTP server 를 조립한 뒤 listen / graceful shutdown 을 실행 |
 | Routing | routing.Service | 별명 → chain 해석, 폴백 적격 판정, 회로 차단 ([ADR 004](adr/004-fallback-policy.md)). non-stream 시도당 한도의 권위자 ([ADR 005](adr/005-timeout-authority.md)). stdlib + llmtypes 만 import |
@@ -143,6 +144,7 @@ internal/app/        부팅 조립, provider 생성, shutdown
 
 ```text
 internal/domain/
+  catalog/                   model + alias registry schema
   consumers/                 caller identity + allowed_aliases registry
   llmtypes/                  공통 계약 + OpenAI-shaped DTO + ErrorKind
   streaming/                 Stream contract helpers + first-event validation

@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"llmgate/internal/server/response"
+	"llmgate/internal/platform/http/response"
 )
 
 type requestIDCtxKey struct{}

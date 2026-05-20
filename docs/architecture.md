@@ -87,7 +87,7 @@ graph LR
 
 ### 레이어와 의존 방향
 
-- **Delivery** (`internal/server/`) — HTTP 전송 책임. chi + middleware + auth + Handler + streamRelay + response wire helpers + probes + metrics. SSE / `[DONE]` / idle timeout / 401 / readiness 같은 *와이어 시맨틱* 을 책임.
+- **Delivery** (`internal/server`, `internal/platform/http/*`) — HTTP 전송 책임. chi + middleware + auth + Handler + streamRelay + response wire helpers + probes + metrics. SSE / `[DONE]` / idle timeout / 401 / readiness 같은 *와이어 시맨틱* 을 책임.
 - **Events** (`internal/events/`) — 운영 telemetry 와 분리된 분석/학습용 durable event 모델. `llmresult` 는 finalized request/response payload 경계이고, `llmresult/sink` 는 요청 경로와 remote publish 를 분리하는 bounded delivery 경계이며, NATS publisher 는 이 경계 뒤에서 event 를 durable broker 로 보낸다.
 - **Routing** (`internal/llmrouter/`) — *standalone* 서비스. alias → chain 해석, fallback 적격 판정, 회로 차단. stdlib + `llmtypes` 만 import. HTTP 외 frontend (CLI / queue / gRPC) 가 `llmrouter.NewService(models, aliases, ...)` 만 호출하면 그대로 구동.
 - **Providers** (`internal/providers/openai|anthropic/`) — `llmtypes.Provider` 구현. vendor 와이어 차이 (status 분류 / 첫 이벤트 검증 / 와이어 정규화) 를 자기 안에 가둠.

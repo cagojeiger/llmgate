@@ -27,6 +27,10 @@ func resetEnv(t *testing.T) {
 		"LLMGATE_REQUEST_TIMEOUT",
 		"LLMGATE_COMPLETE_TIMEOUT",
 		"LLMGATE_STREAM_IDLE_TIMEOUT",
+		"LLMGATE_LLMRESULT_NATS_URL",
+		"LLMGATE_LLMRESULT_NATS_STREAM",
+		"LLMGATE_LLMRESULT_NATS_SUBJECT",
+		"LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE",
 	} {
 		t.Setenv(k, "")
 	}
@@ -74,6 +78,18 @@ func TestLoadServer_Defaults(t *testing.T) {
 	}
 	if cfg.StreamIdleTimeout != time.Minute {
 		t.Errorf("StreamIdleTimeout = %v, want 1m", cfg.StreamIdleTimeout)
+	}
+	if cfg.LLMResultNATSURL != "" {
+		t.Errorf("LLMResultNATSURL = %q, want disabled empty default", cfg.LLMResultNATSURL)
+	}
+	if cfg.LLMResultNATSStream != "LLMRESULT" {
+		t.Errorf("LLMResultNATSStream = %q, want LLMRESULT", cfg.LLMResultNATSStream)
+	}
+	if cfg.LLMResultNATSSubject != "llmgate.llmresult.finalized" {
+		t.Errorf("LLMResultNATSSubject = %q, want llmgate.llmresult.finalized", cfg.LLMResultNATSSubject)
+	}
+	if cfg.LLMResultAsyncQueueSize != 1000 {
+		t.Errorf("LLMResultAsyncQueueSize = %d, want 1000", cfg.LLMResultAsyncQueueSize)
 	}
 }
 
@@ -170,6 +186,44 @@ func TestLoadServer_StreamIdleTimeoutOverride(t *testing.T) {
 	}
 	if cfg.StreamIdleTimeout != 20*time.Second {
 		t.Errorf("StreamIdleTimeout = %v, want 20s", cfg.StreamIdleTimeout)
+	}
+}
+
+func TestLoadServer_LLMResultNATSOverrides(t *testing.T) {
+	resetEnv(t)
+	t.Setenv("LLMGATE_LLMRESULT_NATS_URL", "nats://localhost:4222")
+	t.Setenv("LLMGATE_LLMRESULT_NATS_STREAM", "RESULTS")
+	t.Setenv("LLMGATE_LLMRESULT_NATS_SUBJECT", "results.finalized")
+	t.Setenv("LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE", "25")
+
+	cfg, err := LoadServer()
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if cfg.LLMResultNATSURL != "nats://localhost:4222" {
+		t.Errorf("LLMResultNATSURL = %q", cfg.LLMResultNATSURL)
+	}
+	if cfg.LLMResultNATSStream != "RESULTS" {
+		t.Errorf("LLMResultNATSStream = %q", cfg.LLMResultNATSStream)
+	}
+	if cfg.LLMResultNATSSubject != "results.finalized" {
+		t.Errorf("LLMResultNATSSubject = %q", cfg.LLMResultNATSSubject)
+	}
+	if cfg.LLMResultAsyncQueueSize != 25 {
+		t.Errorf("LLMResultAsyncQueueSize = %d, want 25", cfg.LLMResultAsyncQueueSize)
+	}
+}
+
+func TestLoadServer_RejectsNegativeLLMResultQueueSize(t *testing.T) {
+	resetEnv(t)
+	t.Setenv("LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE", "-1")
+
+	_, err := LoadServer()
+	if err == nil {
+		t.Fatal("LoadServer: want error for negative LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE")
+	}
+	if !strings.Contains(err.Error(), "LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE") {
+		t.Errorf("err = %v, want mention of failing key", err)
 	}
 }
 

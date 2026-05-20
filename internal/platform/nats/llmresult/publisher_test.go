@@ -1,4 +1,4 @@
-package nats
+package llmresult
 
 import (
 	"context"
@@ -8,16 +8,16 @@ import (
 
 	natsgo "github.com/nats-io/nats.go"
 
-	"llmgate/internal/events/llmresult"
+	result "llmgate/internal/events/llmresult"
 )
 
 func TestPublisher_PublishWritesSubjectHeadersAndPayload(t *testing.T) {
 	js := &fakeJetStream{}
 	p := newPublisher(js, "RESULTS", "results.finalized")
 
-	err := p.Publish(context.Background(), &llmresult.Event{
-		SchemaVersion:  llmresult.SchemaVersion,
-		EventType:      llmresult.EventType,
+	err := p.Publish(context.Background(), &result.Event{
+		SchemaVersion:  result.SchemaVersion,
+		EventType:      result.EventType,
 		RequestID:      "req-1",
 		ModelRequested: "smart",
 	})
@@ -31,7 +31,7 @@ func TestPublisher_PublishWritesSubjectHeadersAndPayload(t *testing.T) {
 	if got.Subject != "results.finalized" {
 		t.Fatalf("Subject = %q, want results.finalized", got.Subject)
 	}
-	var decoded llmresult.Event
+	var decoded result.Event
 	if err := json.Unmarshal(got.Data, &decoded); err != nil {
 		t.Fatalf("Data is not event JSON: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestPublisher_PublishWritesSubjectHeadersAndPayload(t *testing.T) {
 	if got.Header.Get(headerContentType) != contentTypeJSON {
 		t.Fatalf("Content-Type = %q", got.Header.Get(headerContentType))
 	}
-	if got.Header.Get(headerEventType) != llmresult.EventType {
+	if got.Header.Get(headerEventType) != result.EventType {
 		t.Fatalf("event header = %q", got.Header.Get(headerEventType))
 	}
 	if got.Header.Get(headerRequestID) != "req-1" {

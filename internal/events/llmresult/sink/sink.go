@@ -1,22 +1,24 @@
-package llmresult
+package sink
 
 import (
 	"context"
 	"log/slog"
+
+	"llmgate/internal/events/llmresult"
 )
 
 // Sink receives finalized LLM result events. Implementations must keep
 // transport backpressure out of the request path.
 type Sink interface {
-	Emit(ctx context.Context, event *Event)
+	Emit(ctx context.Context, event *llmresult.Event)
 	Close() error
 }
 
 // NopSink drops finalized result events.
 type NopSink struct{}
 
-func (NopSink) Emit(context.Context, *Event) {}
-func (NopSink) Close() error                 { return nil }
+func (NopSink) Emit(context.Context, *llmresult.Event) {}
+func (NopSink) Close() error                           { return nil }
 
 // RecoveringSink isolates sink panics from the HTTP request path.
 type RecoveringSink struct {
@@ -34,7 +36,7 @@ func NewRecoveringSink(next Sink, log *slog.Logger) Sink {
 	return &RecoveringSink{next: next, log: log}
 }
 
-func (s *RecoveringSink) Emit(ctx context.Context, event *Event) {
+func (s *RecoveringSink) Emit(ctx context.Context, event *llmresult.Event) {
 	defer func() {
 		if p := recover(); p != nil {
 			s.log.LogAttrs(ctx, slog.LevelError, "llm result sink panic",
@@ -50,7 +52,7 @@ func (s *RecoveringSink) Close() error {
 	return s.next.Close()
 }
 
-func eventTypeOf(event *Event) string {
+func eventTypeOf(event *llmresult.Event) string {
 	if event == nil {
 		return ""
 	}

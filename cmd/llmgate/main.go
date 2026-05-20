@@ -121,6 +121,12 @@ func run() error {
 			logger.Warn("telemetry sink close failed", slog.String("err", err.Error()))
 		}
 	}()
+	results := buildResultSink(logger)
+	defer func() {
+		if err := results.Close(); err != nil {
+			logger.Warn("llm result sink close failed", slog.String("err", err.Error()))
+		}
+	}()
 
 	handler := server.NewHandler(svc, logger, events, server.HandlerConfig{
 		RequestTimeout:    cfg.RequestTimeout,
@@ -128,6 +134,7 @@ func run() error {
 		ServiceVersion:    version,
 		Environment:       cfg.Environment,
 		LifecycleObserver: metricsRecorder,
+		ResultSink:        results,
 	})
 	probe := server.NewProbeState()
 	srv := server.NewWithOptions(server.ServerOptions{

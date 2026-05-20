@@ -1,10 +1,12 @@
-package llmresult
+package sink
 
 import (
 	"context"
 	"log/slog"
 	"sync"
 	"sync/atomic"
+
+	"llmgate/internal/events/llmresult"
 )
 
 const DefaultAsyncQueueSize = 1000
@@ -17,7 +19,7 @@ type AsyncSink struct {
 
 	mu     sync.RWMutex
 	closed bool
-	queue  chan *Event
+	queue  chan *llmresult.Event
 	done   chan struct{}
 
 	closeOnce sync.Once
@@ -38,14 +40,14 @@ func NewAsyncSink(next Sink, log *slog.Logger, queueSize int) *AsyncSink {
 	s := &AsyncSink{
 		next:  next,
 		log:   log,
-		queue: make(chan *Event, queueSize),
+		queue: make(chan *llmresult.Event, queueSize),
 		done:  make(chan struct{}),
 	}
 	go s.run()
 	return s
 }
 
-func (s *AsyncSink) Emit(ctx context.Context, event *Event) {
+func (s *AsyncSink) Emit(ctx context.Context, event *llmresult.Event) {
 	if s == nil || event == nil {
 		return
 	}
@@ -94,7 +96,7 @@ func (s *AsyncSink) run() {
 	}
 }
 
-func (s *AsyncSink) emitOne(event *Event) {
+func (s *AsyncSink) emitOne(event *llmresult.Event) {
 	defer func() {
 		if p := recover(); p != nil {
 			s.log.LogAttrs(context.Background(), slog.LevelError, "llm result async sink panic",
@@ -106,7 +108,7 @@ func (s *AsyncSink) emitOne(event *Event) {
 	s.next.Emit(context.Background(), event)
 }
 
-func (s *AsyncSink) recordDrop(ctx context.Context, event *Event, reason string) {
+func (s *AsyncSink) recordDrop(ctx context.Context, event *llmresult.Event, reason string) {
 	dropped := s.dropped.Add(1)
 	s.log.LogAttrs(ctx, slog.LevelWarn, "llm result event dropped",
 		slog.String("event_type", eventTypeOf(event)),
@@ -116,7 +118,7 @@ func (s *AsyncSink) recordDrop(ctx context.Context, event *Event, reason string)
 	)
 }
 
-func eventRequestID(event *Event) string {
+func eventRequestID(event *llmresult.Event) string {
 	if event == nil {
 		return ""
 	}

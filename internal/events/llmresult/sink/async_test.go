@@ -1,4 +1,4 @@
-package llmresult
+package sink
 
 import (
 	"context"
@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"llmgate/internal/events/llmresult"
 )
 
 func TestAsyncSink_EmitDoesNotWaitForTransport(t *testing.T) {
@@ -16,11 +18,11 @@ func TestAsyncSink_EmitDoesNotWaitForTransport(t *testing.T) {
 	defer sink.Close()
 	defer next.release()
 
-	sink.Emit(context.Background(), &Event{RequestID: "req-1"})
+	sink.Emit(context.Background(), &llmresult.Event{RequestID: "req-1"})
 	next.waitStarted(t)
 
 	start := time.Now()
-	sink.Emit(context.Background(), &Event{RequestID: "req-2"})
+	sink.Emit(context.Background(), &llmresult.Event{RequestID: "req-2"})
 	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
 		t.Fatalf("Emit blocked for %v, want non-blocking enqueue", elapsed)
 	}
@@ -32,10 +34,10 @@ func TestAsyncSink_DropsWhenQueueFull(t *testing.T) {
 	defer sink.Close()
 	defer next.release()
 
-	sink.Emit(context.Background(), &Event{RequestID: "req-1"})
+	sink.Emit(context.Background(), &llmresult.Event{RequestID: "req-1"})
 	next.waitStarted(t)
-	sink.Emit(context.Background(), &Event{RequestID: "req-2"})
-	sink.Emit(context.Background(), &Event{RequestID: "req-3"})
+	sink.Emit(context.Background(), &llmresult.Event{RequestID: "req-2"})
+	sink.Emit(context.Background(), &llmresult.Event{RequestID: "req-3"})
 
 	if got := sink.Dropped(); got != 1 {
 		t.Fatalf("Dropped = %d, want 1", got)
@@ -46,8 +48,8 @@ func TestAsyncSink_CloseDrainsQueueThenClosesNext(t *testing.T) {
 	next := &captureResultSink{}
 	sink := NewAsyncSink(next, discardLogger(), 10)
 
-	sink.Emit(context.Background(), &Event{RequestID: "req-1"})
-	sink.Emit(context.Background(), &Event{RequestID: "req-2"})
+	sink.Emit(context.Background(), &llmresult.Event{RequestID: "req-1"})
+	sink.Emit(context.Background(), &llmresult.Event{RequestID: "req-2"})
 
 	if err := sink.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -88,8 +90,8 @@ func TestAsyncSink_RecoversWorkerPanic(t *testing.T) {
 	next := &panicOnceResultSink{}
 	sink := NewAsyncSink(next, discardLogger(), 2)
 
-	sink.Emit(context.Background(), &Event{RequestID: "req-1"})
-	sink.Emit(context.Background(), &Event{RequestID: "req-2"})
+	sink.Emit(context.Background(), &llmresult.Event{RequestID: "req-1"})
+	sink.Emit(context.Background(), &llmresult.Event{RequestID: "req-2"})
 
 	if err := sink.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -112,7 +114,7 @@ func newBlockingResultSink() *blockingResultSink {
 	}
 }
 
-func (s *blockingResultSink) Emit(context.Context, *Event) {
+func (s *blockingResultSink) Emit(context.Context, *llmresult.Event) {
 	s.once.Do(func() { close(s.started) })
 	<-s.releasec
 }
@@ -134,12 +136,12 @@ func (s *blockingResultSink) waitStarted(t *testing.T) {
 
 type captureResultSink struct {
 	mu     sync.Mutex
-	events []*Event
+	events []*llmresult.Event
 	closed bool
 	closes int
 }
 
-func (s *captureResultSink) Emit(_ context.Context, event *Event) {
+func (s *captureResultSink) Emit(_ context.Context, event *llmresult.Event) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.events = append(s.events, event)
@@ -169,16 +171,16 @@ type closeErrorSink struct {
 	err error
 }
 
-func (s *closeErrorSink) Emit(context.Context, *Event) {}
-func (s *closeErrorSink) Close() error                 { return s.err }
+func (s *closeErrorSink) Emit(context.Context, *llmresult.Event) {}
+func (s *closeErrorSink) Close() error                           { return s.err }
 
 type panicOnceResultSink struct {
 	mu      sync.Mutex
-	events  []*Event
+	events  []*llmresult.Event
 	paniced bool
 }
 
-func (s *panicOnceResultSink) Emit(_ context.Context, event *Event) {
+func (s *panicOnceResultSink) Emit(_ context.Context, event *llmresult.Event) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.paniced {

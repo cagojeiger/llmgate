@@ -23,8 +23,8 @@ graph TD
 ```
 
 순서 (`cmd/llmgate/main.go`): env 로드 → catalog 파싱 → adapter factory →
-llmrouter.Service 조립 → consumers 파싱 (0 개면 fail) → telemetry recorders + Handler +
-middleware wire → ProbeState + Listen.
+llmrouter.Service 조립 → consumers 파싱 (0 개면 fail) → telemetry recorders + llmresult sink +
+Handler + middleware wire → ProbeState + Listen.
 
 ## 프로브 & 셧다운
 

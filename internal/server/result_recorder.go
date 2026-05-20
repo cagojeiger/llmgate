@@ -4,17 +4,18 @@ import (
 	"context"
 
 	"llmgate/internal/events/llmresult"
+	llmresultsink "llmgate/internal/events/llmresult/sink"
 	"llmgate/internal/llmtypes"
 	"llmgate/internal/telemetry"
 )
 
 type resultRecorder struct {
-	sink     llmresult.Sink
+	sink     llmresultsink.Sink
 	request  *llmtypes.Request
 	response *llmtypes.Response
 }
 
-func newResultRecorder(sink llmresult.Sink) *resultRecorder {
+func newResultRecorder(sink llmresultsink.Sink) *resultRecorder {
 	return &resultRecorder{sink: sink}
 }
 

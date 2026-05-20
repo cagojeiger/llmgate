@@ -10,7 +10,7 @@ import (
 
 	natsgo "github.com/nats-io/nats.go"
 
-	result "llmgate/internal/events/llmresult"
+	result "llmgate/internal/domain/llmresult"
 )
 
 const (

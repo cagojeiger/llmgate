@@ -4,7 +4,7 @@ import (
 	"context"
 	"log/slog"
 
-	"llmgate/internal/events/llmresult"
+	"llmgate/internal/domain/llmresult"
 )
 
 // Sink receives finalized LLM result events. Implementations must keep

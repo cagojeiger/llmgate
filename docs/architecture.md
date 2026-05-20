@@ -18,7 +18,7 @@ OpenAI SDK 와이어 호환 게이트웨이. 모델은 *기본 등록 단위*, *
 | [logs.md](logs.md) | access / audit / call 로그 갈래와 키 스키마 |
 | [metrics.md](metrics.md) | Prometheus RED / USE 지표와 라벨 경계 |
 | [identity.md](identity.md) | 상태 위치 + 의도적 미지원 (V1 거절 목록) |
-| [adr/](adr/) | Accepted 결정 기록 (6개) |
+| [adr/](adr/) | Accepted 결정 기록 |
 
 ## 시스템 지도
 
@@ -107,7 +107,7 @@ graph LR
 | Delivery | SlogSink | 기본 sink. audit / call event 를 Loki-friendly stdout JSON 라인으로 라우팅 |
 | Events | llmresult | 학습/분석용 finalized LLM result schema. 원본 OpenAI-shaped request 와 최종 response 를 포함할 수 있는 durable payload 경계 |
 | Events | llmresult/sink | result event delivery pipeline. no-op / panic recovery / bounded async queue 를 제공해 Handler 에 remote backpressure 가 역류하지 않게 함 |
-| Events | llmresult/sink/nats | finalized event 를 JSON 으로 인코딩해 NATS JetStream 에 publish 하는 remote sink |
+| Events | llmresult/sink/nats | finalized event 를 JSON 으로 인코딩해 NATS JetStream 에 publish 하는 원격 sink |
 | Routing | llmrouter.Service | 별명 → chain 해석, 폴백 적격 판정, 회로 차단 ([ADR 004](adr/004-fallback-policy.md)). non-stream 시도당 한도의 권위자 ([ADR 005](adr/005-timeout-authority.md)). stdlib + llmtypes 만 import |
 | Providers | OpenAI Adapter | OpenAI 와이어 호출. status 분류 + 첫 이벤트 검증 ([ADR 004](adr/004-fallback-policy.md)) |
 | Providers | Anthropic Adapter | Anthropic ↔ OpenAI 와이어 양방향 변환 (tools / tool_choice / tool_calls / tool_use). status 분류 + 첫 이벤트 검증 ([ADR 004](adr/004-fallback-policy.md)) |
@@ -115,31 +115,54 @@ graph LR
 
 각 컴포넌트의 단일 책임 (*권위자가 한 명*) 결정 근거는 [ADR 001](adr/001-component-boundaries.md).
 
-## 코드 구조
+### 패키지 구조 컨벤션
 
+llmgate 는 Go 의 얕고 평평한 패키지 스타일을 프로젝트 컨벤션으로 삼지 않는다. 패키지 경로는
+컴파일 단위보다 먼저 **소유권과 시스템 경계**를 드러내야 한다. 목표 구조는
+[ADR 007](adr/007-structured-packages.md)의 세 밴드다.
+
+```text
+internal/domain/     라우팅 규칙, 공통 계약, durable event schema
+internal/platform/   HTTP, NATS, Prometheus, upstream network adapter
+internal/app/        부팅 조립, provider 생성, shutdown
 ```
-catalog/                     vendor 등록 (운영자, 코드 0줄)
-  models/<id>.yaml           id + vendor + protocol + base_url + auth_env + auth_scheme
-  aliases/<name>.yaml        호출 단위 = chain
-consumers/                   호출자 등록 (운영자, 코드 0줄)
-  <name>.yaml                name + key_hashes (sha256 only)
-internal/catalog/            yaml → Catalog 로더
-internal/consumers/          yaml → Store (sha256 → consumer lookup)
-internal/config/             env → Server 설정
-internal/llmtypes/           공통 계약 + OpenAI-shaped DTO + ErrorKind
-internal/providers/          벤더 어댑터
-  ├─ openai/                 OpenAI 와이어 어댑터
-  └─ anthropic/              Anthropic ↔ OpenAI 와이어 변환
-internal/llmrouter/          별명 → chain, 폴백, 회로 (service.go + breaker.go)
-internal/streaming/          스트림 시작 검증 + close grace helper
-internal/server/             chi + middleware + auth + handler + streamRelay + probes + metrics route
-  └─ response/               OpenAI-style errors + SSE frames + response accounting
-internal/events/             분석/학습용 durable event 모델
-  └─ llmresult/              finalized LLM request/response event schema + stream response assembly
-     ├─ sink/                no-op / recovering / bounded async delivery pipeline
-     └─ transport/           broker publish contract + JSON message encoding
-internal/telemetry/          AuditEvent / CallEvent + EventSink + slog / Prometheus sinks + lifecycle hooks
-cmd/llmgate/                 wiring + shutdown
-scripts/gen-consumer.sh      호출자 발급 헬퍼
-docs/adr/                    Accepted 결정 기록
+
+현재 코드는 아직 이 목표 구조로 완전히 이동하지 않았다. 리팩토링은 한 번에 전체 트리를
+옮기지 않고, 동작을 보존하는 작은 PR 로 component 를 하나씩 이동한다. 디렉토리 이동만으로는
+코드 다이어트가 아니다. 이동 후 읽는 사람이 봐야 할 파일 범위가 줄거나, 잘못된 책임 이름이
+사라질 때만 다이어트로 간주한다.
+
+## 목표 코드 구조
+
+```text
+internal/domain/
+  llmtypes/                  공통 계약 + OpenAI-shaped DTO + ErrorKind
+  routing/                   별명 → chain, 폴백, 회로
+  llmresult/
+    schema/                  finalized LLM request/response event schema
+    assembly/                stream delta → final response assembly
+    sink/                    no-op / recovering / bounded async delivery pipeline
+
+internal/platform/
+  http/
+    server/                  chi route + lifecycle + probe wiring
+    auth/                    bearer token extraction + consumer context
+    chat/                    chat completions handler + result recorder
+    stream/                  SSE relay + stream receiver
+    response/                OpenAI-style error + SSE frame + response accounting
+  nats/
+    llmresult/               finalized result publisher
+  telemetry/
+    slog/                    audit/call stdout sink
+    prometheus/              metrics recorder + collectors
+  upstream/
+    http/                    shared upstream HTTP request boilerplate
+    sse/                     upstream SSE reader
+
+internal/app/
+  gateway/                   config/catalog/consumer/provider/server 조립
 ```
+
+이 표는 현재 파일 위치 목록이 아니라 목표 소유권 지도다. 현재 트리는 마이그레이션 중이므로
+아키텍처 문서에 세부 파일 목록을 중복해서 두지 않는다. 실제 위치는 코드가 권위자이고,
+구조 이동 규칙은 [ADR 007](adr/007-structured-packages.md)을 따른다.

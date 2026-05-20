@@ -5,8 +5,8 @@ import (
 	"sync/atomic"
 )
 
-// ProbeState backs the k8s liveness / readiness probes. The cmd/llmgate
-// process owns one instance and flips it via MarkShuttingDown when
+// ProbeState backs the k8s liveness / readiness probes. The gateway runtime
+// owns one instance and flips it via MarkShuttingDown when
 // SIGTERM arrives so /healthz/ready starts returning 503 *before* the
 // drain phase begins. The endpoint controller can then remove this pod
 // from the service while in-flight requests still get to finish.

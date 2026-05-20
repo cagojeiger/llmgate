@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"llmgate/internal/catalog"
 	"llmgate/internal/config"
@@ -64,6 +65,47 @@ func TestBuildRuntime_WiresServerAndPublicEndpoints(t *testing.T) {
 			t.Fatalf("GET %s status = %d, want 200", path, resp.StatusCode)
 		}
 		_ = resp.Body.Close()
+	}
+}
+
+func TestRuntimeRun_CancelMarksProbeAndShutsDown(t *testing.T) {
+	t.Setenv("TEST_GATEWAY_OPENAI_KEY", "present")
+
+	rt, err := BuildRuntime(context.Background(), RuntimeInput{
+		Config: &config.Server{
+			Addr:                 "127.0.0.1:0",
+			Environment:          "test",
+			ShutdownDrainTimeout: time.Second,
+		},
+		Catalog: &catalog.Catalog{
+			Models: map[string]*catalog.Model{
+				"openai-test": {
+					ID:         "openai-test",
+					Vendor:     "openai",
+					Protocol:   llmtypes.ProtocolOpenAI,
+					BaseURL:    "https://example.test/v1",
+					AuthEnv:    "TEST_GATEWAY_OPENAI_KEY",
+					AuthScheme: "bearer",
+				},
+			},
+			Aliases: map[string]*catalog.Alias{},
+		},
+		Consumers: testConsumerStore(t),
+		Logger:    discardLogger(),
+		Version:   "test",
+	})
+	if err != nil {
+		t.Fatalf("BuildRuntime() error = %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := rt.Run(ctx); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if !rt.Probe.IsShuttingDown() {
+		t.Fatal("Run() after cancellation must mark readiness as shutting down")
 	}
 }
 

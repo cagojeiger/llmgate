@@ -1,0 +1,140 @@
+package nats
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strconv"
+
+	natsgo "github.com/nats-io/nats.go"
+
+	"llmgate/internal/events/llmresult/transport"
+)
+
+const (
+	DefaultStream  = "LLMRESULT"
+	DefaultSubject = "llmgate.llmresult.finalized"
+
+	headerContentType   = "Content-Type"
+	headerEventType     = "X-LLMGate-Event-Type"
+	headerRequestID     = "X-LLMGate-Request-ID"
+	headerSchemaVersion = "X-LLMGate-Schema-Version"
+)
+
+type Config struct {
+	URL     string
+	Stream  string
+	Subject string
+}
+
+type Publisher struct {
+	nc      *natsgo.Conn
+	js      jetStream
+	stream  string
+	subject string
+}
+
+type jetStream interface {
+	PublishMsg(m *natsgo.Msg, opts ...natsgo.PubOpt) (*natsgo.PubAck, error)
+	StreamInfo(stream string, opts ...natsgo.JSOpt) (*natsgo.StreamInfo, error)
+	AddStream(cfg *natsgo.StreamConfig, opts ...natsgo.JSOpt) (*natsgo.StreamInfo, error)
+}
+
+func NewPublisher(ctx context.Context, cfg Config) (*Publisher, error) {
+	cfg = cfg.withDefaults()
+	if cfg.URL == "" {
+		return nil, errors.New("nats url is required")
+	}
+	nc, err := natsgo.Connect(cfg.URL, natsgo.Name("llmgate llmresult publisher"))
+	if err != nil {
+		return nil, fmt.Errorf("connect nats: %w", err)
+	}
+	js, err := nc.JetStream()
+	if err != nil {
+		nc.Close()
+		return nil, fmt.Errorf("create jetstream context: %w", err)
+	}
+	p := &Publisher{nc: nc, js: js, stream: cfg.Stream, subject: cfg.Subject}
+	if err := p.ensureStream(ctx); err != nil {
+		nc.Close()
+		return nil, err
+	}
+	return p, nil
+}
+
+func (c Config) withDefaults() Config {
+	if c.Stream == "" {
+		c.Stream = DefaultStream
+	}
+	if c.Subject == "" {
+		c.Subject = DefaultSubject
+	}
+	return c
+}
+
+func newPublisher(js jetStream, stream, subject string) *Publisher {
+	cfg := Config{Stream: stream, Subject: subject}.withDefaults()
+	return &Publisher{js: js, stream: cfg.Stream, subject: cfg.Subject}
+}
+
+func (p *Publisher) Publish(ctx context.Context, msg transport.Message) error {
+	if p == nil || p.js == nil {
+		return errors.New("nats publisher is not initialized")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	nmsg := &natsgo.Msg{
+		Subject: p.subject,
+		Header:  natsgo.Header{},
+		Data:    msg.Payload,
+	}
+	nmsg.Header.Set(headerContentType, msg.ContentType)
+	nmsg.Header.Set(headerEventType, msg.EventType)
+	nmsg.Header.Set(headerRequestID, msg.RequestID)
+	nmsg.Header.Set(headerSchemaVersion, strconv.Itoa(msg.SchemaVersion))
+
+	opts := []natsgo.PubOpt{natsgo.Context(ctx)}
+	if msg.RequestID != "" {
+		opts = append(opts, natsgo.MsgId(msg.RequestID))
+	}
+	if _, err := p.js.PublishMsg(nmsg, opts...); err != nil {
+		return fmt.Errorf("publish jetstream message: %w", err)
+	}
+	return nil
+}
+
+func (p *Publisher) Close() error {
+	if p == nil || p.nc == nil {
+		return nil
+	}
+	p.nc.Close()
+	return nil
+}
+
+func (p *Publisher) ensureStream(ctx context.Context) error {
+	if p == nil || p.js == nil {
+		return errors.New("nats publisher is not initialized")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	_, err := p.js.StreamInfo(p.stream, natsgo.Context(ctx))
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, natsgo.ErrStreamNotFound) {
+		return fmt.Errorf("inspect jetstream stream %q: %w", p.stream, err)
+	}
+	_, err = p.js.AddStream(&natsgo.StreamConfig{
+		Name:      p.stream,
+		Subjects:  []string{p.subject},
+		Retention: natsgo.LimitsPolicy,
+		Storage:   natsgo.FileStorage,
+		Discard:   natsgo.DiscardOld,
+	}, natsgo.Context(ctx))
+	if err != nil {
+		return fmt.Errorf("create jetstream stream %q: %w", p.stream, err)
+	}
+	return nil
+}

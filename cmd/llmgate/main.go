@@ -121,7 +121,10 @@ func run() error {
 			logger.Warn("telemetry sink close failed", slog.String("err", err.Error()))
 		}
 	}()
-	results := buildResultSink(logger)
+	results, err := buildResultSink(context.Background(), cfg, logger)
+	if err != nil {
+		return err
+	}
 	defer func() {
 		if err := results.Close(); err != nil {
 			logger.Warn("llm result sink close failed", slog.String("err", err.Error()))

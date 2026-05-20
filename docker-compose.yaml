@@ -8,6 +8,8 @@ services:
   llmgate:
     build: .
     image: llmgate:dev
+    depends_on:
+      - nats
     ports:
       - "8080:8080"
     environment:
@@ -16,9 +18,24 @@ services:
       LLMGATE_CATALOG: /etc/llmgate/catalog
       LLMGATE_CONSUMERS: /etc/llmgate/consumers
       LLMGATE_LOG_LEVEL: info
+      LLMGATE_LLMRESULT_NATS_URL: ${LLMGATE_LLMRESULT_NATS_URL:-nats://nats:4222}
+      LLMGATE_LLMRESULT_NATS_STREAM: ${LLMGATE_LLMRESULT_NATS_STREAM:-LLMRESULT}
+      LLMGATE_LLMRESULT_NATS_SUBJECT: ${LLMGATE_LLMRESULT_NATS_SUBJECT:-llmgate.llmresult.finalized}
+      LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE: ${LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE:-1000}
     volumes:
       - ./catalog:/etc/llmgate/catalog:ro
       - ./consumers:/etc/llmgate/consumers:ro
+    restart: "no"
+
+  nats:
+    image: nats:2-alpine
+    command:
+      - "-js"
+      - "-m"
+      - "8222"
+    ports:
+      - "${LLMGATE_NATS_PORT:-4222}:4222"
+      - "${LLMGATE_NATS_MONITOR_PORT:-8222}:8222"
     restart: "no"
 
   prometheus:

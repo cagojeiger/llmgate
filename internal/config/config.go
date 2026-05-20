@@ -32,6 +32,14 @@ type Server struct {
 	RequestTimeout    time.Duration
 	CompleteTimeout   time.Duration
 	StreamIdleTimeout time.Duration
+
+	// Finalized LLM result event publishing. Empty NATS URL disables remote
+	// publishing; the server still builds result events and drops them through
+	// the no-op sink.
+	LLMResultNATSURL        string
+	LLMResultNATSStream     string
+	LLMResultNATSSubject    string
+	LLMResultAsyncQueueSize int
 }
 
 func LoadServer() (*Server, error) {
@@ -71,20 +79,28 @@ func LoadServer() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	llmResultQueueSize, err := nonNegativeInt("LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE", "1000")
+	if err != nil {
+		return nil, err
+	}
 
 	return &Server{
-		Addr:                 orDefault("LLMGATE_ADDR", ":8080"),
-		Environment:          orDefault("LLMGATE_ENVIRONMENT", "local"),
-		ShutdownDrainTimeout: drainTimeout,
-		LogLevel:             logLevel,
-		FallbackOn:           parseCSV("LLMGATE_FALLBACK_ON", "rate_limit,upstream,timeout,network"),
-		CircuitFailures:      circuitFailures,
-		CircuitOpen:          circuitOpen,
-		CircuitMaxOpen:       circuitMaxOpen,
-		CircuitJitter:        circuitJitter,
-		RequestTimeout:       requestTimeout,
-		CompleteTimeout:      completeTimeout,
-		StreamIdleTimeout:    streamIdleTimeout,
+		Addr:                    orDefault("LLMGATE_ADDR", ":8080"),
+		Environment:             orDefault("LLMGATE_ENVIRONMENT", "local"),
+		ShutdownDrainTimeout:    drainTimeout,
+		LogLevel:                logLevel,
+		FallbackOn:              parseCSV("LLMGATE_FALLBACK_ON", "rate_limit,upstream,timeout,network"),
+		CircuitFailures:         circuitFailures,
+		CircuitOpen:             circuitOpen,
+		CircuitMaxOpen:          circuitMaxOpen,
+		CircuitJitter:           circuitJitter,
+		RequestTimeout:          requestTimeout,
+		CompleteTimeout:         completeTimeout,
+		StreamIdleTimeout:       streamIdleTimeout,
+		LLMResultNATSURL:        orDefault("LLMGATE_LLMRESULT_NATS_URL", ""),
+		LLMResultNATSStream:     orDefault("LLMGATE_LLMRESULT_NATS_STREAM", "LLMRESULT"),
+		LLMResultNATSSubject:    orDefault("LLMGATE_LLMRESULT_NATS_SUBJECT", "llmgate.llmresult.finalized"),
+		LLMResultAsyncQueueSize: llmResultQueueSize,
 	}, nil
 }
 

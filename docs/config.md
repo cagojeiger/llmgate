@@ -17,6 +17,10 @@
 | `LLMGATE_REQUEST_TIMEOUT` | `5m` | 요청 1 회 총 wall-clock |
 | `LLMGATE_COMPLETE_TIMEOUT` | `1m` | non-stream 시도당 |
 | `LLMGATE_STREAM_IDLE_TIMEOUT` | `1m` | 스트림 이벤트 사이 idle |
+| `LLMGATE_LLMRESULT_NATS_URL` | — | 비어 있으면 llmresult 원격 publish 비활성. 설정하면 NATS JetStream URL (`nats://host:4222`) |
+| `LLMGATE_LLMRESULT_NATS_STREAM` | `LLMRESULT` | llmresult 이벤트를 저장할 JetStream stream 이름 |
+| `LLMGATE_LLMRESULT_NATS_SUBJECT` | `llmgate.llmresult.finalized` | llmresult 이벤트 publish subject |
+| `LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE` | `1000` | 요청 경로와 NATS publish 사이 bounded queue 크기 |
 | `LLMGATE_CATALOG` | `./catalog` | catalog 디렉토리 (부재 → fail) |
 | `LLMGATE_CONSUMERS` | `./consumers` | consumers 디렉토리 (부재 → fail) |
 | `LLMGATE_SHUTDOWN_DRAIN_TIMEOUT` | `5m` | drain 최대 wall-clock, 이후 force close |

@@ -181,6 +181,47 @@ type captureCallSink struct {
 	calls []*telemetry.CallEvent
 }
 
+type captureFinalizedSink struct {
+	mu     sync.Mutex
+	events []*telemetry.LLMCallFinalizedEvent
+}
+
+func newCaptureFinalizedSink() (*captureFinalizedSink, telemetry.EventSink) {
+	c := &captureFinalizedSink{}
+	return c, c
+}
+
+func (c *captureFinalizedSink) Close() error { return nil }
+
+func (c *captureFinalizedSink) Emit(_ context.Context, event telemetry.Event) {
+	rec, ok := event.(*telemetry.LLMCallFinalizedEvent)
+	if !ok {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.events = append(c.events, rec)
+}
+
+func (c *captureFinalizedSink) last(t *testing.T) *telemetry.LLMCallFinalizedEvent {
+	t.Helper()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.events) == 0 {
+		t.Fatalf("no finalized events captured")
+	}
+	return c.events[len(c.events)-1]
+}
+
+func newTestHandlerWithEventSink(service ChatService, sink telemetry.EventSink, cfg HandlerConfig) *Handler {
+	return NewHandler(
+		service,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		sink,
+		cfg,
+	)
+}
+
 func newCaptureCallSink() (*captureCallSink, telemetry.EventSink) {
 	c := &captureCallSink{}
 	return c, c

@@ -27,6 +27,38 @@ type NopSink struct{}
 func (NopSink) Emit(context.Context, Event) {}
 func (NopSink) Close() error                { return nil }
 
+type EventTypeFilterSink struct {
+	next  EventSink
+	allow map[string]struct{}
+}
+
+func NewEventTypeFilterSink(next EventSink, eventTypes ...string) EventSink {
+	if next == nil {
+		next = NopSink{}
+	}
+	allow := make(map[string]struct{}, len(eventTypes))
+	for _, eventType := range eventTypes {
+		if eventType != "" {
+			allow[eventType] = struct{}{}
+		}
+	}
+	return &EventTypeFilterSink{next: next, allow: allow}
+}
+
+func (s *EventTypeFilterSink) Emit(ctx context.Context, event Event) {
+	if len(s.allow) == 0 {
+		return
+	}
+	if _, ok := s.allow[eventTypeOf(event)]; !ok {
+		return
+	}
+	s.next.Emit(ctx, event)
+}
+
+func (s *EventTypeFilterSink) Close() error {
+	return s.next.Close()
+}
+
 // FanoutSink fans each event out to every contained sink. A panic in one sink
 // is logged and isolated so later sinks still receive the event.
 type FanoutSink struct {

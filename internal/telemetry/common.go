@@ -9,9 +9,10 @@ import (
 const (
 	ServiceName = "llmgate"
 
-	SchemaVersion  = 1
-	EventTypeAudit = "audit"
-	EventTypeCall  = "call"
+	SchemaVersion             = 1
+	EventTypeAudit            = "audit"
+	EventTypeCall             = "call"
+	EventTypeLLMCallFinalized = "llm.call.finalized"
 )
 
 // EventCommon holds fields shared by operational audit records and LLM

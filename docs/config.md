@@ -17,6 +17,16 @@
 | `LLMGATE_REQUEST_TIMEOUT` | `5m` | 요청 1 회 총 wall-clock |
 | `LLMGATE_COMPLETE_TIMEOUT` | `1m` | non-stream 시도당 |
 | `LLMGATE_STREAM_IDLE_TIMEOUT` | `1m` | 스트림 이벤트 사이 idle |
+| `LLMGATE_NATS_URL` | unset | 설정하면 `llm.call.finalized` 이벤트를 NATS JetStream 으로 publish |
+| `LLMGATE_NATS_STREAM` | `LLMGATE_LLM_RESULTS` | finalized event stream 이름. URL 이 설정되면 시작 시 create/update |
+| `LLMGATE_NATS_SUBJECT` | `llmgate.llm.results.v1` | finalized event subject |
+| `LLMGATE_NATS_QUEUE_SIZE` | `10000` | 요청 경로와 NATS publish 를 분리하는 async queue 크기 |
+| `LLMGATE_NATS_WORKERS` | `1` | NATS publish worker 수. 분석용 적재 기본값은 프로세스당 single batching worker |
+| `LLMGATE_NATS_BATCH_SIZE` | `100` | worker 가 모았다가 publish 하는 최대 이벤트 수. NATS message 는 여전히 이벤트 1건 단위 |
+| `LLMGATE_NATS_BATCH_MAX_WAIT` | `1s` | batch 가 가득 차지 않았을 때 최대 대기 시간 |
+| `LLMGATE_NATS_ENQUEUE_TIMEOUT` | `100ms` | queue 포화 시 요청 경로가 기다리는 최대 시간 |
+| `LLMGATE_NATS_SEND_TIMEOUT` | `3s` | batch publish ack 대기 timeout |
+| `LLMGATE_NATS_FLUSH_TIMEOUT` | `15s` | shutdown 시 async queue flush timeout |
 | `LLMGATE_CATALOG` | `./catalog` | catalog 디렉토리 (부재 → fail) |
 | `LLMGATE_CONSUMERS` | `./consumers` | consumers 디렉토리 (부재 → fail) |
 | `LLMGATE_SHUTDOWN_DRAIN_TIMEOUT` | `5m` | drain 최대 wall-clock, 이후 force close |

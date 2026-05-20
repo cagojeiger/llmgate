@@ -100,12 +100,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rec := telemetry.NewAuditEvent(common)
 	telemetry.MarkAuthSuccess(rec)
 	var call *telemetry.CallEvent
+	var finalized *telemetry.LLMCallFinalizedEvent
 	defer func() {
 		telemetry.FinishAuditEvent(rec, rec.StatusCode, rec.Kind, time.Since(start).Milliseconds())
 		h.events.Emit(ctx, rec)
 		if telemetry.CallAttempted(call) {
 			telemetry.FinishCallFromAudit(call, rec)
 			h.events.Emit(ctx, call)
+			if finalized != nil {
+				finishFinalizedEvent(finalized, rec, call)
+				h.events.Emit(ctx, finalized)
+			}
 		}
 	}()
 	// Registered after the audit defer so it runs first and stamps the
@@ -160,10 +165,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if req.Stream != nil && *req.Stream {
 		rec.Operation = "chat.completions.stream"
 		call.Operation = "chat.completions.stream"
-		h.serveStream(w, r, req, rec, call)
+		finalized = newFinalizedEvent(rec.EventCommon, req.Model, body, true)
+		h.serveStream(w, r, req, rec, call, finalized)
 		return
 	}
-	h.serveComplete(w, r, req, rec, call)
+	finalized = newFinalizedEvent(rec.EventCommon, req.Model, body, false)
+	h.serveComplete(w, r, req, rec, call, finalized)
 }
 
 func isModelAllowed(model string, allowed []string) bool {
@@ -208,11 +215,13 @@ func adoptError(rec *telemetry.AuditEvent, err error) {
 	rec.StatusCode = errStatus(err)
 }
 
-func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *llmtypes.Request, rec *telemetry.AuditEvent, call *telemetry.CallEvent) {
+func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *llmtypes.Request, rec *telemetry.AuditEvent, call *telemetry.CallEvent, finalized *telemetry.LLMCallFinalizedEvent) {
 	result, err := h.service.Complete(r.Context(), req)
 	telemetry.AdoptRouteResult(call, result)
+	adoptFinalizedRoute(finalized, call)
 	if err != nil {
 		adoptError(rec, err)
+		markFinalizedResponseUnavailable(finalized, "upstream_failed_before_response", err)
 		writeError(w, err)
 		return
 	}
@@ -221,18 +230,21 @@ func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *llm
 	if err != nil {
 		perr := &llmtypes.Error{Kind: llmtypes.KindUnknown, Message: "encode response: " + err.Error(), Cause: err}
 		adoptError(rec, perr)
+		markFinalizedResponseUnavailable(finalized, "encode_response_failed", perr)
 		writeError(w, perr)
 		return
 	}
 
 	rec.StatusCode = http.StatusOK
 	telemetry.AdoptResponse(call, result.Response, int64(len(out)))
+	setFinalizedResponse(finalized, out)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if _, werr := w.Write(out); werr != nil {
 		rec.Kind = llmtypes.KindClientClosed
 		telemetry.SetCallKind(call, rec.Kind)
+		markFinalizedResponseUnavailable(finalized, "client_closed_while_writing_response", werr)
 		h.log.LogAttrs(r.Context(), slog.LevelInfo, "client write failed",
 			slog.String("vendor", call.Vendor),
 			slog.String("err", werr.Error()),
@@ -240,11 +252,13 @@ func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *llm
 	}
 }
 
-func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *llmtypes.Request, rec *telemetry.AuditEvent, call *telemetry.CallEvent) {
+func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *llmtypes.Request, rec *telemetry.AuditEvent, call *telemetry.CallEvent, finalized *telemetry.LLMCallFinalizedEvent) {
 	result, err := h.service.CompleteStream(r.Context(), req)
 	telemetry.AdoptRouteResult(call, result)
+	adoptFinalizedRoute(finalized, call)
 	if err != nil {
 		adoptError(rec, err)
+		markFinalizedResponseUnavailable(finalized, "stream_failed_before_response", err)
 		writeError(w, err)
 		return
 	}
@@ -252,7 +266,12 @@ func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *llmty
 	defer stream.Close()
 	h.lifecycle.StreamStarted(r.Context(), call.EventCommon)
 	defer h.lifecycle.StreamFinished(r.Context(), rec, call)
-	defer func() { telemetry.AdoptStreamSummary(call, stream.Summary(), time.Now()) }()
+	capture := newStreamCapture()
+	defer func() {
+		sum := stream.Summary()
+		telemetry.AdoptStreamSummary(call, sum, time.Now())
+		finalizeStreamPayload(finalized, capture, sum, rec.Kind)
+	}()
 
-	h.stream.Run(r.Context(), w, stream, rec, call)
+	h.stream.Run(r.Context(), w, stream, rec, call, capture)
 }

@@ -42,6 +42,7 @@ func (s *streamRelay) Run(
 	stream llmtypes.Stream,
 	rec *telemetry.AuditEvent,
 	call *telemetry.CallEvent,
+	capture *streamCapture,
 ) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -86,15 +87,18 @@ func (s *streamRelay) Run(
 		}
 
 		payload, err := json.Marshal(event)
-		if err != nil {
-			perr := &llmtypes.Error{Kind: llmtypes.KindUnknown, Message: "encode stream event: " + err.Error(), Cause: err}
+			if err != nil {
+				perr := &llmtypes.Error{Kind: llmtypes.KindUnknown, Message: "encode stream event: " + err.Error(), Cause: err}
 			rec.Kind = perr.Kind
 			call.Kind = perr.Kind
 			_ = sink.SendError(perr)
 			_ = sink.SendDone()
-			return
-		}
-		if werr := sink.Send(payload); werr != nil {
+				return
+			}
+			if capture != nil {
+				capture.Add(payload, event)
+			}
+			if werr := sink.Send(payload); werr != nil {
 			s.recordClientClosed(ctx, rec, call, werr)
 			return
 		}

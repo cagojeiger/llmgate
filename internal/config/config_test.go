@@ -27,6 +27,16 @@ func resetEnv(t *testing.T) {
 		"LLMGATE_REQUEST_TIMEOUT",
 		"LLMGATE_COMPLETE_TIMEOUT",
 		"LLMGATE_STREAM_IDLE_TIMEOUT",
+		"LLMGATE_NATS_URL",
+		"LLMGATE_NATS_STREAM",
+		"LLMGATE_NATS_SUBJECT",
+		"LLMGATE_NATS_QUEUE_SIZE",
+		"LLMGATE_NATS_WORKERS",
+		"LLMGATE_NATS_BATCH_SIZE",
+		"LLMGATE_NATS_BATCH_MAX_WAIT",
+		"LLMGATE_NATS_ENQUEUE_TIMEOUT",
+		"LLMGATE_NATS_SEND_TIMEOUT",
+		"LLMGATE_NATS_FLUSH_TIMEOUT",
 	} {
 		t.Setenv(k, "")
 	}
@@ -74,6 +84,15 @@ func TestLoadServer_Defaults(t *testing.T) {
 	}
 	if cfg.StreamIdleTimeout != time.Minute {
 		t.Errorf("StreamIdleTimeout = %v, want 1m", cfg.StreamIdleTimeout)
+	}
+	if cfg.NATSURL != "" || cfg.NATSStream != "LLMGATE_LLM_RESULTS" || cfg.NATSSubject != "llmgate.llm.results.v1" {
+		t.Errorf("NATS identity = url:%q stream:%q subject:%q", cfg.NATSURL, cfg.NATSStream, cfg.NATSSubject)
+	}
+	if cfg.NATSQueueSize != 10000 || cfg.NATSWorkers != 1 || cfg.NATSBatchSize != 100 {
+		t.Errorf("NATS queue/workers/batch = %d/%d/%d, want 10000/1/100", cfg.NATSQueueSize, cfg.NATSWorkers, cfg.NATSBatchSize)
+	}
+	if cfg.NATSBatchMaxWait != time.Second || cfg.NATSEnqueueTimeout != 100*time.Millisecond || cfg.NATSSendTimeout != 3*time.Second || cfg.NATSFlushTimeout != 15*time.Second {
+		t.Errorf("NATS timeouts = batch:%v enqueue:%v send:%v flush:%v", cfg.NATSBatchMaxWait, cfg.NATSEnqueueTimeout, cfg.NATSSendTimeout, cfg.NATSFlushTimeout)
 	}
 }
 

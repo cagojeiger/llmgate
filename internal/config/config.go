@@ -32,6 +32,18 @@ type Server struct {
 	RequestTimeout    time.Duration
 	CompleteTimeout   time.Duration
 	StreamIdleTimeout time.Duration
+
+	// Optional finalized LLM event delivery to NATS JetStream.
+	NATSURL            string
+	NATSStream         string
+	NATSSubject        string
+	NATSQueueSize      int
+	NATSWorkers        int
+	NATSBatchSize      int
+	NATSBatchMaxWait   time.Duration
+	NATSEnqueueTimeout time.Duration
+	NATSSendTimeout    time.Duration
+	NATSFlushTimeout   time.Duration
 }
 
 func LoadServer() (*Server, error) {
@@ -71,6 +83,34 @@ func LoadServer() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	natsQueueSize, err := nonNegativeInt("LLMGATE_NATS_QUEUE_SIZE", "10000")
+	if err != nil {
+		return nil, err
+	}
+	natsWorkers, err := nonNegativeInt("LLMGATE_NATS_WORKERS", "1")
+	if err != nil {
+		return nil, err
+	}
+	natsBatchSize, err := nonNegativeInt("LLMGATE_NATS_BATCH_SIZE", "100")
+	if err != nil {
+		return nil, err
+	}
+	natsBatchMaxWait, err := nonNegativeDuration("LLMGATE_NATS_BATCH_MAX_WAIT", "1s")
+	if err != nil {
+		return nil, err
+	}
+	natsEnqueueTimeout, err := nonNegativeDuration("LLMGATE_NATS_ENQUEUE_TIMEOUT", "100ms")
+	if err != nil {
+		return nil, err
+	}
+	natsSendTimeout, err := nonNegativeDuration("LLMGATE_NATS_SEND_TIMEOUT", "3s")
+	if err != nil {
+		return nil, err
+	}
+	natsFlushTimeout, err := nonNegativeDuration("LLMGATE_NATS_FLUSH_TIMEOUT", "15s")
+	if err != nil {
+		return nil, err
+	}
 
 	return &Server{
 		Addr:                 orDefault("LLMGATE_ADDR", ":8080"),
@@ -85,6 +125,16 @@ func LoadServer() (*Server, error) {
 		RequestTimeout:       requestTimeout,
 		CompleteTimeout:      completeTimeout,
 		StreamIdleTimeout:    streamIdleTimeout,
+		NATSURL:              os.Getenv("LLMGATE_NATS_URL"),
+		NATSStream:           orDefault("LLMGATE_NATS_STREAM", "LLMGATE_LLM_RESULTS"),
+		NATSSubject:          orDefault("LLMGATE_NATS_SUBJECT", "llmgate.llm.results.v1"),
+		NATSQueueSize:        natsQueueSize,
+		NATSWorkers:          natsWorkers,
+		NATSBatchSize:        natsBatchSize,
+		NATSBatchMaxWait:     natsBatchMaxWait,
+		NATSEnqueueTimeout:   natsEnqueueTimeout,
+		NATSSendTimeout:      natsSendTimeout,
+		NATSFlushTimeout:     natsFlushTimeout,
 	}, nil
 }
 

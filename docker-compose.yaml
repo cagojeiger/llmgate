@@ -8,6 +8,8 @@ services:
   llmgate:
     build: .
     image: llmgate:dev
+    depends_on:
+      - nats
     ports:
       - "8080:8080"
     environment:
@@ -16,9 +18,38 @@ services:
       LLMGATE_CATALOG: /etc/llmgate/catalog
       LLMGATE_CONSUMERS: /etc/llmgate/consumers
       LLMGATE_LOG_LEVEL: info
+      LLMGATE_NATS_URL: nats://nats:4222
+      LLMGATE_NATS_STREAM: LLMGATE_LLM_RESULTS
+      LLMGATE_NATS_SUBJECT: llmgate.llm.results.v1
+      LLMGATE_NATS_WORKERS: 1
+      LLMGATE_NATS_BATCH_SIZE: 100
+      LLMGATE_NATS_BATCH_MAX_WAIT: 1s
     volumes:
       - ./catalog:/etc/llmgate/catalog:ro
       - ./consumers:/etc/llmgate/consumers:ro
+    restart: "no"
+
+  nats:
+    image: nats:2.14.0-alpine
+    command:
+      - --jetstream
+      - --store_dir=/data
+      - --http_port=8222
+    ports:
+      - "${LLMGATE_NATS_PORT:-4222}:4222"
+      - "${LLMGATE_NATS_MONITOR_PORT:-8222}:8222"
+    volumes:
+      - nats-data:/data
+    restart: "no"
+
+  nats-box:
+    image: natsio/nats-box:latest
+    profiles:
+      - tools
+    depends_on:
+      - nats
+    environment:
+      NATS_URL: nats://nats:4222
     restart: "no"
 
   prometheus:
@@ -49,3 +80,6 @@ services:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
     restart: "no"
+
+volumes:
+  nats-data:

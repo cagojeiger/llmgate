@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -65,6 +66,73 @@ func TestHandler_SingleAttempt_RecordPopulated(t *testing.T) {
 	}
 	if got.Attempts[0].Vendor != "opencode" || got.Attempts[0].Model != "deepseek-v4-flash" {
 		t.Errorf("attempt = %+v, want opencode/deepseek-v4-flash", got.Attempts[0])
+	}
+}
+
+func TestHandler_FinalizedEvent_NonStreamIncludesOpenAIWirePayload(t *testing.T) {
+	finalized, sink := newCaptureFinalizedSink()
+	r := &fakeService{
+		buildResult: func(req *llmtypes.Request) *llmrouter.RouteResult {
+			return &llmrouter.RouteResult{
+				Response: &llmtypes.Response{
+					ID:     "chatcmpl-test",
+					Object: "chat.completion",
+					Model:  req.Model,
+					Choices: []llmtypes.Choice{{
+						Index:        0,
+						Message:      llmtypes.Message{Role: "assistant", Content: "pong"},
+						FinishReason: "stop",
+					}},
+					Usage: &llmtypes.Usage{PromptTokens: 3, CompletionTokens: 1, TotalTokens: 4},
+					Extra: map[string]json.RawMessage{"cost": json.RawMessage(`"0.0001"`)},
+				},
+				Vendor:    "opencode",
+				ModelUsed: req.Model,
+				Attempts:  []llmtypes.Attempt{{Vendor: "opencode", Model: req.Model, StatusCode: http.StatusOK, StartedAt: time.Now()}},
+			}
+		},
+	}
+	h := newTestHandlerWithEventSink(r, sink, HandlerConfig{})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, chatCompletionsPath, strings.NewReader(chatBody))
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", w.Code, w.Body.String())
+	}
+	got := finalized.last(t)
+	if got.EventType != telemetry.EventTypeLLMCallFinalized || got.WireFormat != telemetry.LLMCallFinalizedWireFormat {
+		t.Fatalf("event identity = %q/%q", got.EventType, got.WireFormat)
+	}
+	if got.Status != telemetry.LLMCallStatusSuccess {
+		t.Fatalf("status = %q, want success", got.Status)
+	}
+	if got.CompletedAt == "" || got.DurationMS < 0 {
+		t.Fatalf("completion timing = completed_at:%q duration_ms:%d", got.CompletedAt, got.DurationMS)
+	}
+	if !got.Request.Available || !got.Response.Available {
+		t.Fatalf("raw availability request=%v response=%v", got.Request.Available, got.Response.Available)
+	}
+	var rawReq map[string]any
+	if err := json.Unmarshal(got.Request.RawJSON, &rawReq); err != nil {
+		t.Fatalf("request raw json: %v", err)
+	}
+	if rawReq["model"] != "deepseek-v4-flash" {
+		t.Fatalf("request model = %v", rawReq["model"])
+	}
+	var rawResp map[string]any
+	if err := json.Unmarshal(got.Response.RawJSON, &rawResp); err != nil {
+		t.Fatalf("response raw json: %v", err)
+	}
+	if rawResp["cost"] != "0.0001" {
+		t.Fatalf("response cost extra = %v, want preserved", rawResp["cost"])
+	}
+	if got.Routing.Vendor != "opencode" || got.Routing.ModelUsed != "deepseek-v4-flash" {
+		t.Fatalf("routing = %+v", got.Routing)
+	}
+	if got.Usage == nil || got.Usage.TotalTokens != 4 {
+		t.Fatalf("usage = %+v, want total=4", got.Usage)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -44,6 +45,11 @@ type PrometheusRecorder struct {
 	llmStreamChunksTotal     *prometheus.CounterVec
 	inflightRequests         prometheus.Gauge
 	inflightStreams          prometheus.Gauge
+	telemetryEnqueuedTotal   *prometheus.CounterVec
+	telemetryDroppedTotal    *prometheus.CounterVec
+	telemetryQueueDepth      *prometheus.GaugeVec
+	telemetrySendErrorsTotal *prometheus.CounterVec
+	telemetryFlushDuration   *prometheus.HistogramVec
 }
 
 func NewPrometheusRecorder(reg prometheus.Registerer) (*PrometheusRecorder, error) {
@@ -168,6 +174,42 @@ func NewPrometheusRecorder(reg prometheus.Registerer) (*PrometheusRecorder, erro
 				Help: "Current in-flight streaming responses.",
 			},
 		),
+		telemetryEnqueuedTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "llmgate_telemetry_events_enqueued_total",
+				Help: "Total telemetry events enqueued for asynchronous delivery.",
+			},
+			[]string{"sink", "event_type"},
+		),
+		telemetryDroppedTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "llmgate_telemetry_events_dropped_total",
+				Help: "Total telemetry events dropped before asynchronous delivery.",
+			},
+			[]string{"sink", "event_type", "reason"},
+		),
+		telemetryQueueDepth: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "llmgate_telemetry_queue_depth",
+				Help: "Current queued telemetry events awaiting asynchronous delivery.",
+			},
+			[]string{"sink"},
+		),
+		telemetrySendErrorsTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "llmgate_telemetry_send_errors_total",
+				Help: "Total asynchronous telemetry export errors.",
+			},
+			[]string{"sink", "event_type"},
+		),
+		telemetryFlushDuration: prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Name:    "llmgate_telemetry_flush_duration_seconds",
+				Help:    "Asynchronous telemetry sink close and flush duration in seconds.",
+				Buckets: requestDurationBuckets,
+			},
+			[]string{"sink"},
+		),
 	}
 	metrics := []prometheus.Collector{
 		r.requestsTotal,
@@ -186,6 +228,11 @@ func NewPrometheusRecorder(reg prometheus.Registerer) (*PrometheusRecorder, erro
 		r.llmStreamChunksTotal,
 		r.inflightRequests,
 		r.inflightStreams,
+		r.telemetryEnqueuedTotal,
+		r.telemetryDroppedTotal,
+		r.telemetryQueueDepth,
+		r.telemetrySendErrorsTotal,
+		r.telemetryFlushDuration,
 	}
 	for _, c := range metrics {
 		if err := reg.Register(c); err != nil {
@@ -321,6 +368,36 @@ func (r *PrometheusRecorder) StreamFinished(context.Context, *AuditEvent, *CallE
 }
 
 func (r *PrometheusRecorder) Close() error { return nil }
+
+func (r *PrometheusRecorder) AsyncEventEnqueued(sinkName, eventType string) {
+	if r != nil {
+		r.telemetryEnqueuedTotal.WithLabelValues(labelValue(sinkName, "unknown"), labelValue(eventType, "unknown")).Inc()
+	}
+}
+
+func (r *PrometheusRecorder) AsyncEventDropped(sinkName, eventType, reason string) {
+	if r != nil {
+		r.telemetryDroppedTotal.WithLabelValues(labelValue(sinkName, "unknown"), labelValue(eventType, "unknown"), labelValue(reason, "unknown")).Inc()
+	}
+}
+
+func (r *PrometheusRecorder) AsyncQueueDepth(sinkName string, depth int) {
+	if r != nil {
+		r.telemetryQueueDepth.WithLabelValues(labelValue(sinkName, "unknown")).Set(float64(depth))
+	}
+}
+
+func (r *PrometheusRecorder) AsyncSendError(sinkName, eventType string) {
+	if r != nil {
+		r.telemetrySendErrorsTotal.WithLabelValues(labelValue(sinkName, "unknown"), labelValue(eventType, "unknown")).Inc()
+	}
+}
+
+func (r *PrometheusRecorder) AsyncFlushFinished(sinkName string, duration time.Duration) {
+	if r != nil {
+		r.telemetryFlushDuration.WithLabelValues(labelValue(sinkName, "unknown")).Observe(duration.Seconds())
+	}
+}
 
 func labelValue(v, fallback string) string {
 	if v == "" {

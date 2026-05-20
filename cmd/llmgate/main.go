@@ -112,10 +112,43 @@ func run() error {
 		return fmt.Errorf("build prometheus recorder: %w", err)
 	}
 
-	events := telemetry.NewFanoutSink(logger,
+	eventSinks := []telemetry.EventSink{
 		telemetry.NewSlogSink(auditLog, callLog),
 		metricsRecorder,
-	)
+	}
+	if cfg.NATSURL != "" {
+		exporter, err := telemetry.NewNATSJetStreamExporter(telemetry.NATSExporterConfig{
+			URL:     cfg.NATSURL,
+			Stream:  cfg.NATSStream,
+			Subject: cfg.NATSSubject,
+			Name:    "llmgate",
+		})
+		if err != nil {
+			return fmt.Errorf("build nats exporter: %w", err)
+		}
+		natsSink, err := telemetry.NewAsyncSink(exporter, telemetry.AsyncSinkConfig{
+			Name:           "nats",
+			QueueSize:      cfg.NATSQueueSize,
+			Workers:        cfg.NATSWorkers,
+			BatchSize:      cfg.NATSBatchSize,
+			BatchMaxWait:   cfg.NATSBatchMaxWait,
+			EnqueuePolicy:  telemetry.AsyncBlockForTimeout,
+			EnqueueTimeout: cfg.NATSEnqueueTimeout,
+			SendTimeout:    cfg.NATSSendTimeout,
+			FlushTimeout:   cfg.NATSFlushTimeout,
+			Observer:       metricsRecorder,
+			Log:            logger,
+		})
+		if err != nil {
+			return fmt.Errorf("build nats async sink: %w", err)
+		}
+		eventSinks = append(eventSinks, telemetry.NewEventTypeFilterSink(natsSink, telemetry.EventTypeLLMCallFinalized))
+		logger.Info("nats finalized event sink enabled",
+			slog.String("stream", cfg.NATSStream),
+			slog.String("subject", cfg.NATSSubject),
+		)
+	}
+	events := telemetry.NewFanoutSink(logger, eventSinks...)
 	lifecycle := telemetry.LifecycleObservers{metricsRecorder}
 	defer func() {
 		if err := events.Close(); err != nil {

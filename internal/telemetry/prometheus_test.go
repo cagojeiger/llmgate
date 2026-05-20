@@ -332,6 +332,52 @@ func TestPrometheusRecorder_RecordNil(t *testing.T) {
 	}
 }
 
+func TestPrometheusRecorder_AsyncDeliveryHealth(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	r, err := NewPrometheusRecorder(reg)
+	if err != nil {
+		t.Fatalf("NewPrometheusRecorder: %v", err)
+	}
+
+	r.AsyncEventEnqueued("broker", EventTypeAudit)
+	r.AsyncEventDropped("broker", EventTypeCall, "queue_full")
+	r.AsyncQueueDepth("broker", 3)
+	r.AsyncSendError("broker", EventTypeAudit)
+	r.AsyncFlushFinished("broker", 1500*time.Millisecond)
+
+	if got := findCounterValue(t, reg, "llmgate_telemetry_events_enqueued_total", map[string]string{
+		"sink":       "broker",
+		"event_type": "audit",
+	}); got != 1 {
+		t.Fatalf("enqueued total = %v, want 1", got)
+	}
+	if got := findCounterValue(t, reg, "llmgate_telemetry_events_dropped_total", map[string]string{
+		"sink":       "broker",
+		"event_type": "call",
+		"reason":     "queue_full",
+	}); got != 1 {
+		t.Fatalf("dropped total = %v, want 1", got)
+	}
+	if got := findGaugeValue(t, reg, "llmgate_telemetry_queue_depth"); got != 3 {
+		t.Fatalf("queue depth = %v, want 3", got)
+	}
+	if got := findCounterValue(t, reg, "llmgate_telemetry_send_errors_total", map[string]string{
+		"sink":       "broker",
+		"event_type": "audit",
+	}); got != 1 {
+		t.Fatalf("send errors = %v, want 1", got)
+	}
+	count, sum := findHistogramCountAndSum(t, reg, "llmgate_telemetry_flush_duration_seconds", map[string]string{
+		"sink": "broker",
+	})
+	if count != 1 {
+		t.Fatalf("flush duration count = %d, want 1", count)
+	}
+	if sum != 1.5 {
+		t.Fatalf("flush duration sum = %v, want 1.5", sum)
+	}
+}
+
 func BenchmarkPrometheusRecorder_EmitCall(b *testing.B) {
 	reg := prometheus.NewRegistry()
 	r, err := NewPrometheusRecorder(reg)

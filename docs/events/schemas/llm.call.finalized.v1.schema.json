@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llmgate.local/schemas/llm.call.finalized.v1.schema.json",
+  "title": "llm.call.finalized v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_type",
+    "event_id",
+    "request_id",
+    "timestamp",
+    "status",
+    "operation",
+    "wire_format",
+    "service",
+    "request",
+    "response",
+    "stream"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "event_type": { "const": "llm.call.finalized" },
+    "event_id": { "type": "string" },
+    "request_id": { "type": "string" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "completed_at": { "type": "string", "format": "date-time" },
+    "duration_ms": { "type": "integer" },
+    "status": {
+      "type": "string",
+      "enum": ["success", "error", "partial", "client_closed"]
+    },
+    "operation": {
+      "type": "string",
+      "enum": ["chat.completions", "chat.completions.stream"]
+    },
+    "wire_format": { "const": "openai.chat.completions" },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": "string" },
+        "environment": { "type": "string" }
+      }
+    },
+    "consumer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "key_id": { "type": "string" }
+      }
+    },
+    "routing": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "model_requested": { "type": "string" },
+        "model_used": { "type": "string" },
+        "vendor": { "type": "string" },
+        "attempts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "vendor": { "type": "string" },
+              "model": { "type": "string" },
+              "started_at": { "type": "string", "format": "date-time" },
+              "duration_ms": { "type": "integer" },
+              "status_code": { "type": "integer" },
+              "error_kind": { "type": "string" },
+              "usage": { "type": "object" },
+              "vendor_cost": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "request": { "$ref": "#/$defs/raw_envelope" },
+    "response": { "$ref": "#/$defs/raw_envelope" },
+    "stream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "events_available": { "type": "boolean" },
+        "events": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "raw_events_truncated": { "type": "boolean" }
+      }
+    },
+    "usage": { "type": "object" },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    }
+  },
+  "$defs": {
+    "raw_envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["available"],
+      "properties": {
+        "available": { "type": "boolean" },
+        "raw_json": { "type": "object" },
+        "reason": { "type": "string" }
+      }
+    }
+  }
+}

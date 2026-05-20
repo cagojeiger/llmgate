@@ -157,6 +157,23 @@ llmgate 자체 saturation gauge:
 | `llmgate_inflight_requests` | gauge | 없음 | 현재 처리 중인 gateway 요청 |
 | `llmgate_inflight_streams` | gauge | 없음 | 현재 열린 SSE stream |
 
+## Telemetry delivery
+
+원격 messaging sink 는 요청 경로를 막지 않도록 bounded async queue 뒤에 붙인다. stdout
+`audit` / `call` 로그와 Prometheus request / LLM metric 은 sync 경로에 남고, 아래 metric 은
+async delivery 자체가 건강한지 확인하는 용도다.
+
+| metric | type | labels | 의미 |
+|---|---|---|---|
+| `llmgate_telemetry_events_enqueued_total` | counter | `sink`, `event_type` | async delivery queue 에 들어간 event 수 |
+| `llmgate_telemetry_events_dropped_total` | counter | `sink`, `event_type`, `reason` | async delivery 전에 drop 된 event 수 |
+| `llmgate_telemetry_queue_depth` | gauge | `sink` | 현재 async delivery queue depth |
+| `llmgate_telemetry_send_errors_total` | counter | `sink`, `event_type` | exporter 전송 실패 수 |
+| `llmgate_telemetry_flush_duration_seconds` | histogram | `sink` | shutdown flush duration |
+
+이 지표의 drop 은 stdout 증적 유실을 뜻하지 않는다. llmgate 는 stateless 이므로 durable retry
+queue 를 내장하지 않고, 원격 stream 전송 실패 / 포화는 metric 과 로그로 노출한다.
+
 ## 라벨 경계
 
 Prometheus 라벨은 낮은 cardinality 값만 허용한다.
@@ -170,6 +187,8 @@ Prometheus 라벨은 낮은 cardinality 값만 허용한다.
   model
   direction
   mode
+  sink
+  reason
 
 사용하지 않음:
   request_id

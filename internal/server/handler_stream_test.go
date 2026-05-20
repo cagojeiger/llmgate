@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"llmgate/internal/llmrouter"
 	"llmgate/internal/llmtypes"
 	"llmgate/internal/providers/fake"
+	"llmgate/internal/telemetry"
 )
 
 func TestHandler_Stream_NormalEOF(t *testing.T) {
@@ -88,6 +90,100 @@ func TestHandler_Stream_NormalEOF(t *testing.T) {
 	}
 	if lifecycle.streamCall == nil || lifecycle.streamCall.Usage == nil || lifecycle.streamCall.Usage.TotalTokens != 5 {
 		t.Fatalf("stream lifecycle call usage = %+v, want summary tokens before finish notification", lifecycle.streamCall)
+	}
+}
+
+func TestHandler_FinalizedEvent_StreamReassemblesFinalOpenAIResponse(t *testing.T) {
+	finalized, sink := newCaptureFinalizedSink()
+	streamObj := fake.NewStream(
+		fake.WithEvents([]*llmtypes.Event{
+			{
+				ID:      "chatcmpl-stream",
+				Object:  "chat.completion.chunk",
+				Model:   "deepseek-v4-flash",
+				Created: 123,
+				Choices: []llmtypes.ChoiceDelta{{
+					Index: 0,
+					Delta: llmtypes.Delta{
+						Role:             "assistant",
+						Content:          "hello ",
+						ReasoningContent: "think ",
+					},
+				}},
+			},
+			{
+				ID:     "chatcmpl-stream",
+				Object: "chat.completion.chunk",
+				Model:  "deepseek-v4-flash",
+				Choices: []llmtypes.ChoiceDelta{{
+					Index:        0,
+					Delta:        llmtypes.Delta{Content: "world", ReasoningContent: "done"},
+					FinishReason: "stop",
+				}},
+			},
+		}),
+		fake.WithSummary(&llmtypes.Summary{
+			Model: "deepseek-v4-flash",
+			Usage: &llmtypes.Usage{
+				PromptTokens:     2,
+				CompletionTokens: 2,
+				TotalTokens:      4,
+			},
+		}),
+	)
+	r := &fakeService{
+		buildStreamResult: func(req *llmtypes.Request) (*llmrouter.RouteResult, error) {
+			return streamRouteResult(req, streamObj), nil
+		},
+	}
+	h := newTestHandlerWithEventSink(r, sink, HandlerConfig{})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, chatCompletionsPath, strings.NewReader(streamChatBody))
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", w.Code, w.Body.String())
+	}
+	got := finalized.last(t)
+	if got.Status != telemetry.LLMCallStatusSuccess {
+		t.Fatalf("status = %q, want success", got.Status)
+	}
+	if !got.Stream.Enabled || !got.Stream.EventsAvailable || len(got.Stream.Events) != 2 {
+		t.Fatalf("stream envelope = %+v", got.Stream)
+	}
+	if !got.Response.Available {
+		t.Fatalf("response unavailable: %+v", got.Response)
+	}
+	var rawResp struct {
+		Object  string `json:"object"`
+		Model   string `json:"model"`
+		Choices []struct {
+			Message map[string]any `json:"message"`
+			Finish  string         `json:"finish_reason"`
+		} `json:"choices"`
+		Usage map[string]any `json:"usage"`
+	}
+	if err := json.Unmarshal(got.Response.RawJSON, &rawResp); err != nil {
+		t.Fatalf("response raw json: %v; raw=%s", err, got.Response.RawJSON)
+	}
+	if rawResp.Object != "chat.completion" || rawResp.Model != "deepseek-v4-flash" {
+		t.Fatalf("response object/model = %q/%q", rawResp.Object, rawResp.Model)
+	}
+	if len(rawResp.Choices) != 1 {
+		t.Fatalf("choices = %d, want 1", len(rawResp.Choices))
+	}
+	if rawResp.Choices[0].Message["content"] != "hello world" {
+		t.Fatalf("content = %v", rawResp.Choices[0].Message["content"])
+	}
+	if rawResp.Choices[0].Message["reasoning_content"] != "think done" {
+		t.Fatalf("reasoning_content = %v", rawResp.Choices[0].Message["reasoning_content"])
+	}
+	if rawResp.Choices[0].Finish != "stop" {
+		t.Fatalf("finish_reason = %q", rawResp.Choices[0].Finish)
+	}
+	if got.Usage == nil || got.Usage.TotalTokens != 4 {
+		t.Fatalf("usage = %+v, want total=4", got.Usage)
 	}
 }
 

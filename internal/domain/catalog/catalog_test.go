@@ -10,9 +10,9 @@ import (
 	"testing/fstest"
 )
 
-// repoCatalogDir points at the repo's actual catalog/ directory from the
-// internal/catalog package's working directory at test time.
-const repoCatalogDir = "../../catalog"
+// repoCatalogDir points at the repo's actual catalog/ directory from this
+// package's working directory at test time.
+const repoCatalogDir = "../../../catalog"
 
 func TestLoadDir_RepoCatalog(t *testing.T) {
 	cat, err := LoadDir(repoCatalogDir)

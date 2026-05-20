@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"llmgate/internal/catalog"
 	"llmgate/internal/config"
+	"llmgate/internal/domain/catalog"
 	"llmgate/internal/domain/consumers"
 	"llmgate/internal/domain/llmtypes"
 )

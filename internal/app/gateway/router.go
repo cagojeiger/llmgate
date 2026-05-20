@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"llmgate/internal/catalog"
+	"llmgate/internal/domain/catalog"
 	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/routing"
 	"llmgate/internal/providers/anthropic"

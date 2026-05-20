@@ -12,8 +12,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"llmgate/internal/catalog"
 	"llmgate/internal/config"
+	"llmgate/internal/domain/catalog"
 	"llmgate/internal/domain/consumers"
 	llmresultsink "llmgate/internal/domain/llmresult/sink"
 	"llmgate/internal/domain/routing"

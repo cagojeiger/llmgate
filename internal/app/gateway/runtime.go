@@ -29,6 +29,12 @@ type RuntimeInput struct {
 	Version   string
 }
 
+type LoadInput struct {
+	Config  *config.Server
+	Logger  *slog.Logger
+	Version string
+}
+
 type Runtime struct {
 	Server *http.Server
 	Probe  *server.ProbeState
@@ -37,6 +43,35 @@ type Runtime struct {
 	log     *slog.Logger
 	events  telemetry.EventSink
 	results llmresultsink.Sink
+}
+
+func LoadRuntime(ctx context.Context, in LoadInput) (*Runtime, error) {
+	log := in.Logger
+	if log == nil {
+		log = slog.Default()
+	}
+	cat, err := catalog.Load()
+	if err != nil {
+		return nil, fmt.Errorf("load catalog: %w", err)
+	}
+	log.Info("catalog loaded",
+		slog.Int("models", len(cat.Models)),
+		slog.Int("aliases", len(cat.Aliases)),
+	)
+
+	consumerStore, err := consumers.Load()
+	if err != nil {
+		return nil, fmt.Errorf("load consumers: %w", err)
+	}
+	log.Info("consumers loaded", slog.Int("consumers", consumerStore.Len()))
+
+	return BuildRuntime(ctx, RuntimeInput{
+		Config:    in.Config,
+		Catalog:   cat,
+		Consumers: consumerStore,
+		Logger:    log,
+		Version:   in.Version,
+	})
 }
 
 func BuildRuntime(ctx context.Context, in RuntimeInput) (*Runtime, error) {

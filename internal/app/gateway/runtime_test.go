@@ -109,16 +109,72 @@ func TestRuntimeRun_CancelMarksProbeAndShutsDown(t *testing.T) {
 	}
 }
 
+func TestLoadRuntime_LoadsCatalogAndConsumers(t *testing.T) {
+	t.Setenv("TEST_GATEWAY_OPENAI_KEY", "present")
+	t.Setenv("LLMGATE_CATALOG", testCatalogDir(t))
+	t.Setenv("LLMGATE_CONSUMERS", testConsumerDir(t))
+
+	rt, err := LoadRuntime(context.Background(), LoadInput{
+		Config: &config.Server{
+			Addr:                 ":0",
+			Environment:          "test",
+			ShutdownDrainTimeout: time.Second,
+		},
+		Logger:  discardLogger(),
+		Version: "test",
+	})
+	if err != nil {
+		t.Fatalf("LoadRuntime() error = %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	if rt.Server == nil || rt.Probe == nil {
+		t.Fatalf("runtime server/probe = %v/%v, want both set", rt.Server, rt.Probe)
+	}
+}
+
+func testCatalogDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "models"), 0o700); err != nil {
+		t.Fatalf("mkdir models: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "aliases"), 0o700); err != nil {
+		t.Fatalf("mkdir aliases: %v", err)
+	}
+	model := []byte(`id: openai-test
+vendor: openai
+protocol: openai
+base_url: https://example.test/v1
+auth_env: TEST_GATEWAY_OPENAI_KEY
+auth_scheme: bearer
+`)
+	if err := os.WriteFile(filepath.Join(dir, "models", "openai-test.yaml"), model, 0o600); err != nil {
+		t.Fatalf("write model fixture: %v", err)
+	}
+	alias := []byte("alias: smart\nchain:\n  - openai-test\n")
+	if err := os.WriteFile(filepath.Join(dir, "aliases", "smart.yaml"), alias, 0o600); err != nil {
+		t.Fatalf("write alias fixture: %v", err)
+	}
+	return dir
+}
+
 func testConsumerStore(t *testing.T) *consumers.Store {
+	t.Helper()
+	dir := testConsumerDir(t)
+	store, err := consumers.LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir() error = %v", err)
+	}
+	return store
+}
+
+func testConsumerDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	data := []byte("name: test\nkey_hashes:\n  - sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n")
 	if err := os.WriteFile(filepath.Join(dir, "test.yaml"), data, 0o600); err != nil {
 		t.Fatalf("write consumer fixture: %v", err)
 	}
-	store, err := consumers.LoadDir(dir)
-	if err != nil {
-		t.Fatalf("LoadDir() error = %v", err)
-	}
-	return store
+	return dir
 }

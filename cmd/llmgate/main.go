@@ -11,9 +11,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"llmgate/internal/app/gateway"
-	"llmgate/internal/catalog"
 	"llmgate/internal/config"
-	"llmgate/internal/consumers"
 )
 
 // version is set by the linker at build time via
@@ -49,27 +47,10 @@ func run() error {
 		slog.String("phase", "v1-bypass"),
 	)
 	slog.SetDefault(logger)
-	cat, err := catalog.Load()
-	if err != nil {
-		return fmt.Errorf("load catalog: %w", err)
-	}
-	logger.Info("catalog loaded",
-		slog.Int("models", len(cat.Models)),
-		slog.Int("aliases", len(cat.Aliases)),
-	)
-
-	consumerStore, err := consumers.Load()
-	if err != nil {
-		return fmt.Errorf("load consumers: %w", err)
-	}
-	logger.Info("consumers loaded", slog.Int("consumers", consumerStore.Len()))
-
-	runtime, err := gateway.BuildRuntime(context.Background(), gateway.RuntimeInput{
-		Config:    cfg,
-		Catalog:   cat,
-		Consumers: consumerStore,
-		Logger:    logger,
-		Version:   version,
+	runtime, err := gateway.LoadRuntime(context.Background(), gateway.LoadInput{
+		Config:  cfg,
+		Logger:  logger,
+		Version: version,
 	})
 	if err != nil {
 		return err

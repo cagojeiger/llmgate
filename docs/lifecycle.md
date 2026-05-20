@@ -23,9 +23,9 @@ graph TD
 ```
 
 순서: `cmd/llmgate/main.go` 가 env / config / logger 를 준비하고 catalog 와 consumers 를 로드한다.
-`internal/app/gateway` 가 catalog 모델을 provider 로 바꿔 `llmrouter.Service` 입력을 만들고,
-llmresult sink 를 조립한다. 이후 main 은 telemetry recorders + Handler + middleware wire →
-ProbeState + Listen 을 실행한다.
+`internal/app/gateway` 가 catalog 모델을 provider 로 바꿔 `llmrouter.Service` 를 만들고, telemetry
+recorders / llmresult sink / Handler / middleware / ProbeState / HTTP server 를 조립한다.
+이후 main 은 signal 을 기다리고 Listen / graceful shutdown 을 실행한다.
 
 ## 프로브 & 셧다운
 

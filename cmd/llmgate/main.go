@@ -12,17 +12,11 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/collectors"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"llmgate/internal/app/gateway"
 	"llmgate/internal/catalog"
 	"llmgate/internal/config"
 	"llmgate/internal/consumers"
-	"llmgate/internal/llmrouter"
-	"llmgate/internal/server"
-	"llmgate/internal/telemetry"
 )
 
 // version is set by the linker at build time via
@@ -58,10 +52,6 @@ func run() error {
 		slog.String("phase", "v1-bypass"),
 	)
 	slog.SetDefault(logger)
-	accessLog := logger.With(slog.String("log", "access"))
-	auditLog := logger.With(slog.String("log", "audit"))
-	callLog := logger.With(slog.String("log", "call"))
-
 	cat, err := catalog.Load()
 	if err != nil {
 		return fmt.Errorf("load catalog: %w", err)
@@ -77,73 +67,17 @@ func run() error {
 	}
 	logger.Info("consumers loaded", slog.Int("consumers", consumerStore.Len()))
 
-	models, aliases, err := gateway.BuildRouterInputs(cat)
-	if err != nil {
-		return err
-	}
-
-	policy := llmrouter.FallbackPolicy{
-		OnKinds:         cfg.FallbackOn,
-		CircuitFailures: cfg.CircuitFailures,
-		CircuitOpen:     cfg.CircuitOpen,
-		CircuitMaxOpen:  cfg.CircuitMaxOpen,
-		CircuitJitter:   cfg.CircuitJitter,
-		CompleteTimeout: cfg.CompleteTimeout,
-	}
-	svc, err := llmrouter.NewService(models, aliases, policy, logger)
-	if err != nil {
-		return err
-	}
-
-	metricsRegistry := prometheus.NewRegistry()
-	metricsRegistry.MustRegister(
-		collectors.NewGoCollector(),
-		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
-	)
-	metricsRecorder, err := telemetry.NewPrometheusRecorder(metricsRegistry)
-	if err != nil {
-		return fmt.Errorf("build prometheus recorder: %w", err)
-	}
-
-	events := telemetry.NewFanoutSink(logger,
-		telemetry.NewSlogSink(auditLog, callLog),
-		metricsRecorder,
-	)
-	defer func() {
-		if err := events.Close(); err != nil {
-			logger.Warn("telemetry sink close failed", slog.String("err", err.Error()))
-		}
-	}()
-	results, err := gateway.BuildResultSink(context.Background(), cfg, logger)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := results.Close(); err != nil {
-			logger.Warn("llm result sink close failed", slog.String("err", err.Error()))
-		}
-	}()
-
-	handler := server.NewHandler(svc, logger, events, server.HandlerConfig{
-		RequestTimeout:    cfg.RequestTimeout,
-		StreamIdleTimeout: cfg.StreamIdleTimeout,
-		ServiceVersion:    version,
-		Environment:       cfg.Environment,
-		LifecycleObserver: metricsRecorder,
-		ResultSink:        results,
-	})
-	probe := server.NewProbeState()
-	srv := server.NewWithOptions(server.ServerOptions{
+	runtime, err := gateway.BuildRuntime(context.Background(), gateway.RuntimeInput{
 		Config:    cfg,
-		Log:       accessLog,
-		Handler:   handler,
+		Catalog:   cat,
 		Consumers: consumerStore,
-		Probe:     probe,
-		MetricsHandler: promhttp.HandlerFor(metricsRegistry, promhttp.HandlerOpts{
-			MaxRequestsInFlight: 5,
-			Timeout:             5 * time.Second,
-		}),
+		Logger:    logger,
+		Version:   version,
 	})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = runtime.Close() }()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -151,7 +85,7 @@ func run() error {
 	errCh := make(chan error, 1)
 	go func() {
 		logger.Info("server listening", slog.String("addr", cfg.Addr))
-		err := srv.ListenAndServe()
+		err := runtime.Server.ListenAndServe()
 		if errors.Is(err, http.ErrServerClosed) {
 			err = nil
 		}
@@ -169,8 +103,8 @@ func run() error {
 	// controller (and any HTTP load balancer) drop this pod from the
 	// service first. Idempotent — safe even if shutdown was triggered
 	// by a server-side error rather than SIGTERM.
-	probe.MarkShuttingDown()
-	shutdown(srv, cfg, logger)
+	runtime.Probe.MarkShuttingDown()
+	shutdown(runtime.Server, cfg, logger)
 	if serveErr != nil {
 		return serveErr
 	}

@@ -53,3 +53,4 @@ internal/app/        부팅 조립, provider 생성, shutdown
 7. OpenAI-shaped DTO / provider contract 를 `internal/domain/llmtypes` 쪽으로 이동한다.
 8. telemetry event 계약은 `internal/domain/telemetry`, stdout / Prometheus 구현은
    `internal/platform/telemetry/*` 로 분리한다.
+9. 실제 vendor adapter 는 `internal/platform/providers/*` 로 이동한다.

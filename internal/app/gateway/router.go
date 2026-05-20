@@ -10,8 +10,8 @@ import (
 	"llmgate/internal/domain/catalog"
 	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/routing"
-	"llmgate/internal/providers/anthropic"
-	"llmgate/internal/providers/openai"
+	"llmgate/internal/platform/providers/anthropic"
+	"llmgate/internal/platform/providers/openai"
 )
 
 // BuildRouterInputs walks the catalog and turns it into the runtime shape the

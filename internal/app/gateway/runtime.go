@@ -17,8 +17,10 @@ import (
 	"llmgate/internal/consumers"
 	llmresultsink "llmgate/internal/domain/llmresult/sink"
 	"llmgate/internal/domain/routing"
+	"llmgate/internal/domain/telemetry"
+	promtelemetry "llmgate/internal/platform/telemetry/prometheus"
+	slogtelemetry "llmgate/internal/platform/telemetry/slog"
 	"llmgate/internal/server"
-	"llmgate/internal/telemetry"
 )
 
 type RuntimeInput struct {
@@ -111,7 +113,7 @@ func BuildRuntime(ctx context.Context, in RuntimeInput) (*Runtime, error) {
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
-	metricsRecorder, err := telemetry.NewPrometheusRecorder(metricsRegistry)
+	metricsRecorder, err := promtelemetry.NewRecorder(metricsRegistry)
 	if err != nil {
 		return nil, fmt.Errorf("build prometheus recorder: %w", err)
 	}
@@ -119,7 +121,7 @@ func BuildRuntime(ctx context.Context, in RuntimeInput) (*Runtime, error) {
 	auditLog := in.Logger.With(slog.String("log", "audit"))
 	callLog := in.Logger.With(slog.String("log", "call"))
 	events := telemetry.NewFanoutSink(in.Logger,
-		telemetry.NewSlogSink(auditLog, callLog),
+		slogtelemetry.NewSink(auditLog, callLog),
 		metricsRecorder,
 	)
 

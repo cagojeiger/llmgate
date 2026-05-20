@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"llmgate/internal/domain/llmtypes"
-	"llmgate/internal/telemetry"
+	"llmgate/internal/domain/telemetry"
 )
 
 func TestFromTelemetry_BuildsFinalizedResultEvent(t *testing.T) {

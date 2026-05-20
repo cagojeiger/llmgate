@@ -18,7 +18,7 @@ import (
 	"llmgate/internal/consumers"
 	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/routing"
-	"llmgate/internal/telemetry"
+	"llmgate/internal/domain/telemetry"
 )
 
 // recordingRecorder captures every emitted audit event so tests can

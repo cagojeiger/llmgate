@@ -16,8 +16,8 @@
 | 회로 차단 상태 | `routing.Service` breakerStore (per-process) | 프로세스 수명 |
 | 호출자 lookup | consumers Store (per-process) | 프로세스 수명 |
 | 요청별 시도 이력 | `routing.RouteResult.Attempts` → `telemetry.CallEvent` | 요청 1 회 |
-| 운영 / 보안 감사 event | `telemetry.EventSink` → `SlogSink` → stdout JSON | 로그 보존 정책 |
-| LLM 호출 결과 event | `telemetry.EventSink` → `SlogSink` → stdout JSON | 로그 보존 정책 |
+| 운영 / 보안 감사 event | `telemetry.EventSink` → `platform/telemetry/slog` → stdout JSON | 로그 보존 정책 |
+| LLM 호출 결과 event | `telemetry.EventSink` → `platform/telemetry/slog` → stdout JSON | 로그 보존 정책 |
 | live 요청 / 스트림 상태 | `telemetry.LifecycleObserver` hook | 프로세스 수명 |
 | 비용 / 한도 / 단가 | **gateway 보관 안 함** | 후처리 시스템 |
 

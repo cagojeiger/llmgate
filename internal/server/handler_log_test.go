@@ -12,7 +12,7 @@ import (
 	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/routing"
 	"llmgate/internal/providers/fake"
-	"llmgate/internal/telemetry"
+	"llmgate/internal/domain/telemetry"
 )
 
 func TestHandler_LogContract_AuthFailure(t *testing.T) {

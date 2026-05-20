@@ -1,21 +1,30 @@
-package telemetry
+package slogtelemetry
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
 
 	"llmgate/internal/domain/llmtypes"
+	"llmgate/internal/domain/telemetry"
 )
+
+func newCapturingLogger() (*slog.Logger, *bytes.Buffer) {
+	buf := &bytes.Buffer{}
+	h := slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})
+	return slog.New(h), buf
+}
 
 func TestSlogSink_RecordAudit(t *testing.T) {
 	log, buf := newCapturingLogger()
-	sink := NewSlogSink(log, log)
+	sink := NewSink(log, log)
 
-	sink.Emit(context.Background(), &AuditEvent{
-		EventCommon: EventCommon{
+	sink.Emit(context.Background(), &telemetry.AuditEvent{
+		EventCommon: telemetry.EventCommon{
 			Timestamp:      time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
 			RequestID:      "req-1",
 			ServiceName:    "llmgate",
@@ -27,8 +36,8 @@ func TestSlogSink_RecordAudit(t *testing.T) {
 			StatusCode:     200,
 			DurationMS:     234,
 		},
-		AuthResult:   AuthResultSuccess,
-		PolicyResult: PolicyResultAllowed,
+		AuthResult:   telemetry.AuthResultSuccess,
+		PolicyResult: telemetry.PolicyResultAllowed,
 		ResourceType: "llm_model",
 		ResourceID:   "coder",
 	})
@@ -62,20 +71,20 @@ func TestSlogSink_RecordAudit(t *testing.T) {
 
 func TestSlogSink_RecordAuthFailure(t *testing.T) {
 	log, buf := newCapturingLogger()
-	sink := NewSlogSink(log, log)
+	sink := NewSink(log, log)
 
-	sink.Emit(context.Background(), &AuditEvent{
-		EventCommon: EventCommon{
+	sink.Emit(context.Background(), &telemetry.AuditEvent{
+		EventCommon: telemetry.EventCommon{
 			Timestamp:  time.Now(),
 			RequestID:  "req-auth-bad",
 			Operation:  "chat.completions",
 			Kind:       llmtypes.KindAuth,
 			StatusCode: 401,
 		},
-		AuthResult:   AuthResultFailure,
-		AuthError:    AuthErrorUnknown,
-		PolicyResult: PolicyResultDenied,
-		DenyReason:   DenyReasonAuth,
+		AuthResult:   telemetry.AuthResultFailure,
+		AuthError:    telemetry.AuthErrorUnknown,
+		PolicyResult: telemetry.PolicyResultDenied,
+		DenyReason:   telemetry.DenyReasonAuth,
 	})
 
 	var out map[string]any
@@ -95,10 +104,10 @@ func TestSlogSink_RecordAuthFailure(t *testing.T) {
 
 func TestSlogSink_RecordCall(t *testing.T) {
 	log, buf := newCapturingLogger()
-	sink := NewSlogSink(log, log)
+	sink := NewSink(log, log)
 
-	sink.Emit(context.Background(), &CallEvent{
-		EventCommon: EventCommon{
+	sink.Emit(context.Background(), &telemetry.CallEvent{
+		EventCommon: telemetry.EventCommon{
 			Timestamp:      time.Now(),
 			RequestID:      "req-call",
 			ServiceName:    "llmgate",
@@ -150,10 +159,10 @@ func TestSlogSink_RecordCall(t *testing.T) {
 
 func TestSlogSink_DoNotLeakSensitiveMaterial(t *testing.T) {
 	log, buf := newCapturingLogger()
-	sink := NewSlogSink(log, log)
+	sink := NewSink(log, log)
 
-	sink.Emit(context.Background(), &AuditEvent{
-		EventCommon: EventCommon{
+	sink.Emit(context.Background(), &telemetry.AuditEvent{
+		EventCommon: telemetry.EventCommon{
 			Timestamp:     time.Now(),
 			RequestID:     "req-redaction",
 			Operation:     "chat.completions",
@@ -161,10 +170,10 @@ func TestSlogSink_DoNotLeakSensitiveMaterial(t *testing.T) {
 			ConsumerKeyID: "01234567",
 			StatusCode:    200,
 		},
-		AuthResult: AuthResultSuccess,
+		AuthResult: telemetry.AuthResultSuccess,
 	})
-	sink.Emit(context.Background(), &CallEvent{
-		EventCommon: EventCommon{
+	sink.Emit(context.Background(), &telemetry.CallEvent{
+		EventCommon: telemetry.EventCommon{
 			Timestamp:     time.Now(),
 			RequestID:     "req-redaction",
 			Operation:     "chat.completions",
@@ -194,10 +203,10 @@ func TestSlogSink_DoNotLeakSensitiveMaterial(t *testing.T) {
 
 func TestSlogSink_OmitsAttemptsWhenSingle(t *testing.T) {
 	log, buf := newCapturingLogger()
-	sink := NewSlogSink(log, log)
+	sink := NewSink(log, log)
 
-	sink.Emit(context.Background(), &CallEvent{
-		EventCommon: EventCommon{
+	sink.Emit(context.Background(), &telemetry.CallEvent{
+		EventCommon: telemetry.EventCommon{
 			Timestamp:  time.Now(),
 			RequestID:  "req-4",
 			Operation:  "chat.completions",
@@ -223,9 +232,9 @@ func TestSlogSink_OmitsAttemptsWhenSingle(t *testing.T) {
 
 func TestSlogSink_RecordNil(t *testing.T) {
 	log, buf := newCapturingLogger()
-	sink := NewSlogSink(log, log)
-	sink.Emit(context.Background(), (*AuditEvent)(nil))
-	sink.Emit(context.Background(), (*CallEvent)(nil))
+	sink := NewSink(log, log)
+	sink.Emit(context.Background(), (*telemetry.AuditEvent)(nil))
+	sink.Emit(context.Background(), (*telemetry.CallEvent)(nil))
 	if buf.Len() != 0 {
 		t.Errorf("nil record should emit nothing, got %s", buf.String())
 	}

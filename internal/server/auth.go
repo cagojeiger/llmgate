@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"llmgate/internal/consumers"
-	"llmgate/internal/telemetry"
+	"llmgate/internal/domain/telemetry"
 )
 
 // ConsumerInfo describes the registered caller behind a request, populated

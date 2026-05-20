@@ -1,44 +1,46 @@
-package telemetry
+package slogtelemetry
 
 import (
 	"context"
 	"log/slog"
+
+	"llmgate/internal/domain/telemetry"
 )
 
-// SlogSink routes audit and call events to their log-specific sloggers while
+// Sink routes audit and call events to their log-specific sloggers while
 // preserving the existing Loki-friendly line shape.
-type SlogSink struct {
+type Sink struct {
 	auditLog *slog.Logger
 	callLog  *slog.Logger
 }
 
-func NewSlogSink(auditLog, callLog *slog.Logger) *SlogSink {
+func NewSink(auditLog, callLog *slog.Logger) *Sink {
 	if auditLog == nil {
 		auditLog = slog.Default()
 	}
 	if callLog == nil {
 		callLog = slog.Default()
 	}
-	return &SlogSink{auditLog: auditLog, callLog: callLog}
+	return &Sink{auditLog: auditLog, callLog: callLog}
 }
 
-func (s *SlogSink) Emit(ctx context.Context, event Event) {
+func (s *Sink) Emit(ctx context.Context, event telemetry.Event) {
 	switch rec := event.(type) {
-	case *AuditEvent:
+	case *telemetry.AuditEvent:
 		s.recordAudit(ctx, rec)
-	case *CallEvent:
+	case *telemetry.CallEvent:
 		s.recordCall(ctx, rec)
 	}
 }
 
-func (s *SlogSink) Close() error { return nil }
+func (s *Sink) Close() error { return nil }
 
-func (s *SlogSink) recordAudit(ctx context.Context, rec *AuditEvent) {
+func (s *Sink) recordAudit(ctx context.Context, rec *telemetry.AuditEvent) {
 	if rec == nil {
 		return
 	}
 
-	attrs := commonAttrs(EventTypeAudit, rec.EventCommon)
+	attrs := commonAttrs(telemetry.EventTypeAudit, rec.EventCommon)
 	if rec.ConsumerName != "" {
 		attrs = append(attrs, slog.String("consumer_name", rec.ConsumerName))
 	}
@@ -70,12 +72,12 @@ func (s *SlogSink) recordAudit(ctx context.Context, rec *AuditEvent) {
 	s.auditLog.LogAttrs(ctx, slog.LevelInfo, "audit", attrs...)
 }
 
-func (s *SlogSink) recordCall(ctx context.Context, rec *CallEvent) {
+func (s *Sink) recordCall(ctx context.Context, rec *telemetry.CallEvent) {
 	if rec == nil {
 		return
 	}
 
-	attrs := append(commonAttrs(EventTypeCall, rec.EventCommon),
+	attrs := append(commonAttrs(telemetry.EventTypeCall, rec.EventCommon),
 		slog.String("model_requested", rec.ModelRequested),
 		slog.Int64("request_bytes", rec.RequestBytes),
 		slog.Int64("response_bytes", rec.ResponseBytes),
@@ -89,8 +91,8 @@ func (s *SlogSink) recordCall(ctx context.Context, rec *CallEvent) {
 	if rec.Vendor != "" {
 		attrs = append(attrs, slog.String("vendor", rec.Vendor))
 	}
-	attrs = append(attrs, slog.Int("attempts_count", AttemptsCount(rec)))
-	if final, ok := FinalAttempt(rec); ok {
+	attrs = append(attrs, slog.Int("attempts_count", telemetry.AttemptsCount(rec)))
+	if final, ok := telemetry.FinalAttempt(rec); ok {
 		if final.Vendor != "" {
 			attrs = append(attrs, slog.String("final_attempt_vendor", final.Vendor))
 		}
@@ -127,9 +129,9 @@ func (s *SlogSink) recordCall(ctx context.Context, rec *CallEvent) {
 	s.callLog.LogAttrs(ctx, slog.LevelInfo, "call", attrs...)
 }
 
-func commonAttrs(eventType string, common EventCommon) []slog.Attr {
+func commonAttrs(eventType string, common telemetry.EventCommon) []slog.Attr {
 	attrs := []slog.Attr{
-		slog.Int("schema_version", SchemaVersion),
+		slog.Int("schema_version", telemetry.SchemaVersion),
 		slog.String("event_type", eventType),
 		slog.Time("timestamp", common.Timestamp),
 		slog.String("request_id", common.RequestID),

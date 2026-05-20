@@ -1,4 +1,4 @@
-package telemetry
+package promtelemetry
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"llmgate/internal/domain/llmtypes"
+	"llmgate/internal/domain/telemetry"
 )
 
 var requestDurationBuckets = []float64{
@@ -24,10 +25,10 @@ var tokensPerSecondBuckets = []float64{
 	0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500,
 }
 
-// PrometheusRecorder updates RED/USE metrics on request and stream boundaries.
+// Recorder updates RED/USE metrics on request and stream boundaries.
 // Methods must stay CPU-only and non-blocking because they run inline on the
 // request path.
-type PrometheusRecorder struct {
+type Recorder struct {
 	requestsTotal            *prometheus.CounterVec
 	requestDuration          *prometheus.HistogramVec
 	llmRequestsTotal         *prometheus.CounterVec
@@ -46,11 +47,11 @@ type PrometheusRecorder struct {
 	inflightStreams          prometheus.Gauge
 }
 
-func NewPrometheusRecorder(reg prometheus.Registerer) (*PrometheusRecorder, error) {
+func NewRecorder(reg prometheus.Registerer) (*Recorder, error) {
 	if reg == nil {
 		reg = prometheus.DefaultRegisterer
 	}
-	r := &PrometheusRecorder{
+	r := &Recorder{
 		requestsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "llmgate_requests_total",
@@ -195,19 +196,19 @@ func NewPrometheusRecorder(reg prometheus.Registerer) (*PrometheusRecorder, erro
 	return r, nil
 }
 
-func (r *PrometheusRecorder) Emit(_ context.Context, event Event) {
+func (r *Recorder) Emit(_ context.Context, event telemetry.Event) {
 	if r == nil || event == nil {
 		return
 	}
 	switch rec := event.(type) {
-	case *AuditEvent:
+	case *telemetry.AuditEvent:
 		r.emitAudit(rec)
-	case *CallEvent:
+	case *telemetry.CallEvent:
 		r.emitCall(rec)
 	}
 }
 
-func (r *PrometheusRecorder) emitAudit(rec *AuditEvent) {
+func (r *Recorder) emitAudit(rec *telemetry.AuditEvent) {
 	if rec == nil {
 		return
 	}
@@ -218,7 +219,7 @@ func (r *PrometheusRecorder) emitAudit(rec *AuditEvent) {
 	r.requestDuration.WithLabelValues(operation, status, errorKind).Observe(float64(rec.DurationMS) / 1000)
 }
 
-func (r *PrometheusRecorder) emitCall(rec *CallEvent) {
+func (r *Recorder) emitCall(rec *telemetry.CallEvent) {
 	if rec == nil {
 		return
 	}
@@ -263,7 +264,7 @@ func (r *PrometheusRecorder) emitCall(rec *CallEvent) {
 	}
 }
 
-func (r *PrometheusRecorder) emitTokens(operation, vendor, model string, usage *llmtypes.Usage) {
+func (r *Recorder) emitTokens(operation, vendor, model string, usage *llmtypes.Usage) {
 	if usage == nil {
 		return
 	}
@@ -277,7 +278,7 @@ func (r *PrometheusRecorder) emitTokens(operation, vendor, model string, usage *
 	}
 }
 
-func (r *PrometheusRecorder) emitGenerationRate(operation, vendor, model, rawOperation string, firstByteMS int64, attempt llmtypes.Attempt) {
+func (r *Recorder) emitGenerationRate(operation, vendor, model, rawOperation string, firstByteMS int64, attempt llmtypes.Attempt) {
 	if attempt.Usage == nil || attempt.Usage.CompletionTokens <= 0 || attempt.DurationMS <= 0 {
 		return
 	}
@@ -296,31 +297,31 @@ func (r *PrometheusRecorder) emitGenerationRate(operation, vendor, model, rawOpe
 	r.llmOutputTokensPerSecond.WithLabelValues(operation, vendor, model, mode).Observe(tokensPerSecond)
 }
 
-func (r *PrometheusRecorder) RequestStarted(context.Context) {
+func (r *Recorder) RequestStarted(context.Context) {
 	if r != nil {
 		r.inflightRequests.Inc()
 	}
 }
 
-func (r *PrometheusRecorder) RequestFinished(context.Context) {
+func (r *Recorder) RequestFinished(context.Context) {
 	if r != nil {
 		r.inflightRequests.Dec()
 	}
 }
 
-func (r *PrometheusRecorder) StreamStarted(context.Context, EventCommon) {
+func (r *Recorder) StreamStarted(context.Context, telemetry.EventCommon) {
 	if r != nil {
 		r.inflightStreams.Inc()
 	}
 }
 
-func (r *PrometheusRecorder) StreamFinished(context.Context, *AuditEvent, *CallEvent) {
+func (r *Recorder) StreamFinished(context.Context, *telemetry.AuditEvent, *telemetry.CallEvent) {
 	if r != nil {
 		r.inflightStreams.Dec()
 	}
 }
 
-func (r *PrometheusRecorder) Close() error { return nil }
+func (r *Recorder) Close() error { return nil }
 
 func labelValue(v, fallback string) string {
 	if v == "" {

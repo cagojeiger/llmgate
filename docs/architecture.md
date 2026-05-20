@@ -91,7 +91,7 @@ graph LR
 
 ### 레이어와 의존 방향
 
-- **Delivery** (`internal/server`, `internal/platform/http/*`) — HTTP 전송 책임. chi + middleware + auth + Handler + streamRelay + response wire helpers + probes + metrics. SSE / `[DONE]` / idle timeout / 401 / readiness 같은 *와이어 시맨틱* 을 책임.
+- **Delivery** (`internal/platform/http/server`, `internal/platform/http/*`) — HTTP 전송 책임. chi + middleware + auth + Handler + streamRelay + response wire helpers + probes + metrics. SSE / `[DONE]` / idle timeout / 401 / readiness 같은 *와이어 시맨틱* 을 책임.
 - **Domain** (`internal/domain/*`) — 호출 계약과 분석/학습용 durable event 모델. `llmtypes` 는 OpenAI-shaped DTO / Provider 계약이고, `llmresult` 는 finalized request/response payload 경계이며, `telemetry` 는 audit / call event fact 와 sink/lifecycle 계약이다. `llmresult/sink` 는 요청 경로와 remote publish 를 분리하는 bounded delivery 경계다.
 - **App** (`internal/app/gateway`) — catalog / consumers 로딩, provider / router / telemetry / sink / HTTP server 조립, listen / graceful shutdown 실행 책임. `cmd/llmgate` 는 CLI entrypoint 와 process input 준비에 집중한다.
 - **Routing** (`internal/domain/routing/`) — *standalone* 서비스. alias → chain 해석, fallback 적격 판정, 회로 차단. stdlib + `llmtypes` 만 import. HTTP 외 frontend (CLI / queue / gRPC) 가 `routing.NewService(models, aliases, ...)` 만 호출하면 그대로 구동.

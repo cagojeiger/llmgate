@@ -18,9 +18,9 @@ import (
 	llmresultsink "llmgate/internal/domain/llmresult/sink"
 	"llmgate/internal/domain/routing"
 	"llmgate/internal/domain/telemetry"
+	"llmgate/internal/platform/http/server"
 	promtelemetry "llmgate/internal/platform/telemetry/prometheus"
 	slogtelemetry "llmgate/internal/platform/telemetry/slog"
-	"llmgate/internal/server"
 )
 
 type RuntimeInput struct {

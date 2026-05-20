@@ -11,8 +11,8 @@ import (
 // stream code only owns the per-event state machine — Body lifecycle,
 // idempotent Close, and FirstByteAt/ChunkCount tracking are uniform.
 //
-// The SSE reader is *not* held here because streaming/ should not depend on
-// upstream/. Each adapter constructs its own reader
+// The SSE reader is *not* held here because domain streaming should not depend
+// on platform/upstream. Each adapter constructs its own reader
 // from the same Body it hands to StreamBase.
 type StreamBase struct {
 	Body         io.Closer

@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 
 	"llmgate/internal/domain/llmtypes"
+	"llmgate/internal/domain/streaming"
 	"llmgate/internal/platform/upstream"
-	"llmgate/internal/streaming"
 )
 
 func (c *Client) CompleteStream(ctx context.Context, req *llmtypes.Request) (llmtypes.Stream, error) {

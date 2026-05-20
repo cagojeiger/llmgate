@@ -144,6 +144,7 @@ internal/app/        부팅 조립, provider 생성, shutdown
 ```text
 internal/domain/
   llmtypes/                  공통 계약 + OpenAI-shaped DTO + ErrorKind
+  streaming/                 Stream contract helpers + first-event validation
   telemetry/                 audit/call event facts + sink/lifecycle contracts
   routing/                   별명 → chain, 폴백, 회로
   llmresult/

@@ -7,7 +7,6 @@ import (
 
 	"llmgate/internal/config"
 	llmresultsink "llmgate/internal/events/llmresult/sink"
-	"llmgate/internal/events/llmresult/transport"
 	natstransport "llmgate/internal/events/llmresult/transport/nats"
 )
 
@@ -19,10 +18,9 @@ func buildResultSink(ctx context.Context, cfg *config.Server, log *slog.Logger) 
 		URL:     cfg.LLMResultNATSURL,
 		Stream:  cfg.LLMResultNATSStream,
 		Subject: cfg.LLMResultNATSSubject,
-	})
+	}, log)
 	if err != nil {
 		return nil, fmt.Errorf("build llm result nats publisher: %w", err)
 	}
-	transportSink := transport.NewSink(publisher, transport.JSONEncoder{}, log)
-	return llmresultsink.NewAsyncSink(transportSink, log, cfg.LLMResultAsyncQueueSize), nil
+	return llmresultsink.NewAsyncSink(publisher, log, cfg.LLMResultAsyncQueueSize), nil
 }

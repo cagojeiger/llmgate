@@ -43,6 +43,7 @@ func (s *streamRelay) Run(
 	stream llmtypes.Stream,
 	rec *telemetry.AuditEvent,
 	call *telemetry.CallEvent,
+	onEvent func(*llmtypes.Event),
 ) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -98,6 +99,9 @@ func (s *streamRelay) Run(
 		if werr := sink.Send(payload); werr != nil {
 			s.recordClientClosed(ctx, rec, call, werr)
 			return
+		}
+		if onEvent != nil {
+			onEvent(event)
 		}
 	}
 }

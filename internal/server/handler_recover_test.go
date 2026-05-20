@@ -11,6 +11,7 @@ import (
 
 	"llmgate/internal/llmrouter"
 	"llmgate/internal/llmtypes"
+	"llmgate/internal/server/response"
 	"llmgate/internal/telemetry"
 )
 
@@ -93,7 +94,8 @@ func TestHandler_PanicAfterResponseStarted_DoesNotCorruptWireBody(t *testing.T) 
 
 	inner := httptest.NewRecorder()
 	// Simulate streamRelay having already flushed 200/SSE headers.
-	cw := &countingWriter{ResponseWriter: inner, status: http.StatusOK, wroteHeader: true}
+	cw := response.NewCountingWriter(inner)
+	cw.WriteHeader(http.StatusOK)
 
 	h.ServeHTTP(cw, req)
 
@@ -159,7 +161,8 @@ func TestHandler_RecoverPanic_OverridesPreStampedStatus(t *testing.T) {
 		},
 	}
 	inner := httptest.NewRecorder()
-	cw := &countingWriter{ResponseWriter: inner, status: http.StatusOK, wroteHeader: true}
+	cw := response.NewCountingWriter(inner)
+	cw.WriteHeader(http.StatusOK)
 
 	h.recoverPanic(context.Background(), cw, rec, "mid-stream boom")
 

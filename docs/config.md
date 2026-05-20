@@ -21,6 +21,8 @@
 | `LLMGATE_LLMRESULT_NATS_STREAM` | `LLMRESULT` | llmresult 이벤트를 저장할 JetStream stream 이름 |
 | `LLMGATE_LLMRESULT_NATS_SUBJECT` | `llmgate.llmresult.finalized` | llmresult 이벤트 publish subject |
 | `LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE` | `1000` | 요청 경로와 NATS publish 사이 bounded queue 크기 |
+| `LLMGATE_LLMRESULT_ASYNC_BATCH_SIZE` | `100` | worker 가 즉시 flush 하는 이벤트 개수 |
+| `LLMGATE_LLMRESULT_ASYNC_FLUSH_INTERVAL` | `1s` | batch 가 가득 차지 않아도 flush 하는 최대 대기 시간 |
 | `LLMGATE_CATALOG` | `./catalog` | catalog 디렉토리 (부재 → fail) |
 | `LLMGATE_CONSUMERS` | `./consumers` | consumers 디렉토리 (부재 → fail) |
 | `LLMGATE_SHUTDOWN_DRAIN_TIMEOUT` | `5m` | drain 최대 wall-clock, 이후 force close |

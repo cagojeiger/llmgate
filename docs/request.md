@@ -86,6 +86,9 @@ Handler 는 요청 종료 시점에 finalized `AuditEvent` / `CallEvent` 와 원
 
 원격 publish 는 `internal/events/llmresult/sink.AsyncSink` 뒤에 붙인다. Handler 의 `Emit` 은
 bounded queue 에 넣는 데서 끝나고, queue 가 가득 차면 요청을 막지 않고 drop 한다.
+worker 는 이벤트를 메모리 batch 로 모아 `LLMGATE_LLMRESULT_ASYNC_BATCH_SIZE` 개가 되거나
+`LLMGATE_LLMRESULT_ASYNC_FLUSH_INTERVAL` 이 지나면 flush 한다. `Close()` 때는 남은 batch 를
+drain 한 뒤 remote sink 를 닫는다.
 NATS publisher 는 queue worker 뒤에서 finalized event 를 JSON 으로 인코딩한다.
 `LLMGATE_LLMRESULT_NATS_URL` 이 비어 있으면 기본 sink 는 no-op 이고, 설정되면 JetStream stream 을
 확인 / 생성한 뒤 publish 한다.

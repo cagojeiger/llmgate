@@ -22,11 +22,11 @@ graph TD
     Server --> Listen([HTTP Listen])
 ```
 
-순서: `cmd/llmgate/main.go` 가 env / config / logger 를 준비하고 catalog 와 consumers 를 로드한다.
-`internal/app/gateway` 가 catalog 모델을 provider 로 바꿔 `llmrouter.Service` 를 만들고, telemetry
-recorders / llmresult sink / Handler / middleware / ProbeState / HTTP server 를 조립한다.
-이후 main 은 signal context 를 만들고 `gateway.Runtime.Run` 이 Listen / graceful shutdown 을
-실행한다.
+순서: `cmd/llmgate/main.go` 가 env / config / logger 를 준비한다. `internal/app/gateway` 가
+catalog 와 consumers 를 로드하고, catalog 모델을 provider 로 바꿔 `llmrouter.Service` 를 만든다.
+이어서 telemetry recorders / llmresult sink / Handler / middleware / ProbeState / HTTP server 를
+조립한다. 이후 main 은 signal context 를 만들고 `gateway.Runtime.Run` 이 Listen / graceful
+shutdown 을 실행한다.
 
 ## 프로브 & 셧다운
 

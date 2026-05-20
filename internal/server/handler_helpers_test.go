@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"llmgate/internal/events/llmresult"
+	llmresultsink "llmgate/internal/events/llmresult/sink"
 	"llmgate/internal/llmrouter"
 	"llmgate/internal/llmtypes"
 	"llmgate/internal/telemetry"
@@ -224,7 +225,7 @@ type captureResultSink struct {
 	records []*llmresult.Event
 }
 
-func newCaptureResultSink() (*captureResultSink, llmresult.Sink) {
+func newCaptureResultSink() (*captureResultSink, llmresultsink.Sink) {
 	c := &captureResultSink{}
 	return c, c
 }

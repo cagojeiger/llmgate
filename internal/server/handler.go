@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"llmgate/internal/events/llmresult"
+	llmresultsink "llmgate/internal/events/llmresult/sink"
 	"llmgate/internal/llmrouter"
 	"llmgate/internal/llmtypes"
 	"llmgate/internal/server/response"
@@ -29,7 +30,7 @@ type Handler struct {
 	service        ChatService
 	log            *slog.Logger
 	events         telemetry.EventSink
-	results        llmresult.Sink
+	results        llmresultsink.Sink
 	lifecycle      telemetry.LifecycleObserver
 	serviceVersion string
 	environment    string
@@ -43,7 +44,7 @@ type HandlerConfig struct {
 	ServiceVersion    string
 	Environment       string
 	LifecycleObserver telemetry.LifecycleObserver
-	ResultSink        llmresult.Sink
+	ResultSink        llmresultsink.Sink
 }
 
 func NewHandler(service ChatService, log *slog.Logger, events telemetry.EventSink, cfg HandlerConfig) *Handler {
@@ -54,7 +55,7 @@ func NewHandler(service ChatService, log *slog.Logger, events telemetry.EventSin
 		events = telemetry.NopSink{}
 	}
 	events = telemetry.NewRecoveringSink(events, log)
-	results := llmresult.NewRecoveringSink(cfg.ResultSink, log)
+	results := llmresultsink.NewRecoveringSink(cfg.ResultSink, log)
 	lifecycle := cfg.LifecycleObserver
 	if lifecycle == nil {
 		lifecycle = telemetry.NopLifecycleObserver{}

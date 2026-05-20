@@ -75,15 +75,16 @@ policy 를 가진 sink 로 붙인다 — 네트워크 backpressure 를 Handler d
 
 ## llmresult boundary
 
-학습 / 분석용 이벤트는 `telemetry` 가 아니라 `internal/events/llmresult` 에 둔다. non-stream 은
-upstream 이 돌려준 최종 `Response` 를 그대로 쓸 수 있지만, stream 은 SSE chunk 의 `delta` 를
-이어 붙여 같은 OpenAI-shaped `Response` 로 복원해야 한다. NATS 같은 transport 는 이 완성된
-payload 뒤에 붙는다.
+학습 / 분석용 이벤트의 payload 는 `telemetry` 가 아니라 `internal/events/llmresult` 에 둔다.
+non-stream 은 upstream 이 돌려준 최종 `Response` 를 그대로 쓸 수 있지만, stream 은 SSE chunk 의
+`delta` 를 이어 붙여 같은 OpenAI-shaped `Response` 로 복원해야 한다. NATS 같은 transport 는 이
+완성된 payload 뒤에 붙는다.
 
 Handler 는 요청 종료 시점에 finalized `AuditEvent` / `CallEvent` 와 원본 request / 최종 response 를
 묶어 `llmresult.Event` 를 만든다. 기본 `ResultSink` 는 no-op 이므로 transport 를 설정하지 않으면
 기존 HTTP 응답과 운영 telemetry 동작은 그대로 유지된다.
 
-원격 transport 는 `llmresult.AsyncSink` 로 감싸서 붙인다. Handler 의 `Emit` 은 bounded queue 에
-넣는 데서 끝나고, queue 가 가득 차면 요청을 막지 않고 drop 한다. 실제 NATS publish 는 queue 뒤
-worker 에서 수행한다.
+원격 publish 는 `internal/events/llmresult/sink.AsyncSink` 뒤에 붙인다. Handler 의 `Emit` 은
+bounded queue 에 넣는 데서 끝나고, queue 가 가득 차면 요청을 막지 않고 drop 한다.
+`internal/events/llmresult/transport` 는 finalized event 를 JSON message 로 인코딩한 뒤
+Publisher 에 넘기는 경계이며, 실제 NATS 구현은 이 Publisher 를 구현한다.

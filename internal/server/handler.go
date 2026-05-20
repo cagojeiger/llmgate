@@ -54,7 +54,7 @@ func NewHandler(service ChatService, log *slog.Logger, events telemetry.EventSin
 	if lifecycle == nil {
 		lifecycle = telemetry.NopLifecycleObserver{}
 	}
-	lifecycle = telemetry.NewRecoveringLifecycleObserver(lifecycle, log)
+	lifecycle = telemetry.NewLifecycleObservers(log, lifecycle)
 	serviceVersion := cfg.ServiceVersion
 	if serviceVersion == "" {
 		serviceVersion = "dev"

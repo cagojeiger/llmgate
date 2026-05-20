@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"llmgate/internal/llmtypes"
-	"llmgate/internal/server/response"
+	"llmgate/internal/platform/http/response"
 	"llmgate/internal/streaming"
 	"llmgate/internal/telemetry"
 )

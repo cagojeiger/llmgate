@@ -14,7 +14,7 @@ import (
 	llmresultsink "llmgate/internal/events/llmresult/sink"
 	"llmgate/internal/llmrouter"
 	"llmgate/internal/llmtypes"
-	"llmgate/internal/server/response"
+	"llmgate/internal/platform/http/response"
 	"llmgate/internal/telemetry"
 )
 

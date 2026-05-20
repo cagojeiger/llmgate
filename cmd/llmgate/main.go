@@ -116,7 +116,6 @@ func run() error {
 		telemetry.NewSlogSink(auditLog, callLog),
 		metricsRecorder,
 	)
-	lifecycle := telemetry.LifecycleObservers{metricsRecorder}
 	defer func() {
 		if err := events.Close(); err != nil {
 			logger.Warn("telemetry sink close failed", slog.String("err", err.Error()))
@@ -128,7 +127,7 @@ func run() error {
 		StreamIdleTimeout: cfg.StreamIdleTimeout,
 		ServiceVersion:    version,
 		Environment:       cfg.Environment,
-		LifecycleObserver: lifecycle,
+		LifecycleObserver: metricsRecorder,
 	})
 	probe := server.NewProbeState()
 	srv := server.NewWithOptions(server.ServerOptions{

@@ -6,7 +6,7 @@ import (
 	"io"
 
 	"llmgate/internal/llmtypes"
-	"llmgate/internal/upstream"
+	"llmgate/internal/platform/upstream"
 )
 
 func (c *Client) Complete(ctx context.Context, req *llmtypes.Request) (*llmtypes.Response, error) {

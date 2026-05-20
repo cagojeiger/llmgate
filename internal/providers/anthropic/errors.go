@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"llmgate/internal/llmtypes"
-	"llmgate/internal/upstream"
+	"llmgate/internal/platform/upstream"
 )
 
 func (c *Client) classify(status int, body []byte, retryAfterHeader string) *llmtypes.Error {

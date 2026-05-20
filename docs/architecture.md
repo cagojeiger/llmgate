@@ -155,9 +155,7 @@ internal/platform/
   telemetry/
     slog/                    audit/call stdout sink
     prometheus/              metrics recorder + collectors
-  upstream/
-    http/                    shared upstream HTTP request boilerplate
-    sse/                     upstream SSE reader
+  upstream/                  shared upstream HTTP request + SSE reader
 
 internal/app/
   gateway/                   config/catalog/consumer/provider/server 조립

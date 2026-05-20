@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"llmgate/internal/llmtypes"
-	"llmgate/internal/upstream"
+	"llmgate/internal/platform/upstream"
 )
 
 const defaultUserAgent = "llmgate/0.1"

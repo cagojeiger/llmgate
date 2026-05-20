@@ -1,4 +1,4 @@
-package main
+package gateway
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	natsllmresult "llmgate/internal/platform/nats/llmresult"
 )
 
-func buildResultSink(ctx context.Context, cfg *config.Server, log *slog.Logger) (llmresultsink.Sink, error) {
+func BuildResultSink(ctx context.Context, cfg *config.Server, log *slog.Logger) (llmresultsink.Sink, error) {
 	if cfg == nil || cfg.LLMResultNATSURL == "" {
 		return llmresultsink.NopSink{}, nil
 	}

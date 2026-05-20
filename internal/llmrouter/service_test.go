@@ -175,7 +175,7 @@ func chatRequest(model, content string) *llmtypes.Request {
 // buildTestModels turns a catalog into the llmrouter.Models map by
 // picking the openai or anthropic provider per the catalog model's
 // Protocol field. Tests use this in place of the production
-// buildRouterInputs (which lives in cmd/llmgate). nil anth gets a
+// gateway.BuildRouterInputs. nil anth gets a
 // stub fake provider so tests that only care about the openai side
 // don't have to construct one.
 func buildTestModels(t *testing.T, cat *catalog.Catalog, openAI, anth llmtypes.Provider) Models {

@@ -3,12 +3,12 @@ package llmtypes
 import "strings"
 
 // Protocol is the wire shape an upstream Provider speaks. Each catalog
-// model declares one Protocol; main.go has exactly one provider factory
+// model declares one Protocol; app/gateway has exactly one provider factory
 // registered per Protocol. Adding a new wire shape (e.g. google) means:
 //
 //  1. add a new const here
 //  2. extend AllProtocols
-//  3. register a factory in cmd/llmgate/main.go
+//  3. register a factory in internal/app/gateway
 //
 // Catalog yaml decodes into Protocol via the underlying string, so an
 // invalid value fails validation at boot rather than at first request.

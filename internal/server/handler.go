@@ -107,7 +107,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	telemetry.MarkAuthSuccess(rec)
 	var call *telemetry.CallEvent
 	var req *llmtypes.Request
-	var resultResponse *llmtypes.Response
+	results := newResultRecorder(h.results)
 	defer func() {
 		telemetry.FinishAuditEvent(rec, rec.StatusCode, rec.Kind, time.Since(start).Milliseconds())
 		h.events.Emit(ctx, rec)
@@ -115,14 +115,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			telemetry.FinishCallFromAudit(call, rec)
 			h.events.Emit(ctx, call)
 		}
-		if ev, ok := llmresult.FromTelemetry(llmresult.BuildInput{
-			Audit:    rec,
-			Call:     call,
-			Request:  req,
-			Response: resultResponse,
-		}); ok {
-			h.results.Emit(ctx, ev)
-		}
+		results.Emit(ctx, rec, call)
 	}()
 	// Registered after the audit defer so it runs first and stamps the
 	// record before the audit-always hook observes it.
@@ -162,6 +155,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		response.WriteError(w, perr)
 		return
 	}
+	results.Request(req)
 	telemetry.SetResource(rec, "llm_model", req.Model)
 	if req.Model != "" && !isModelAllowed(req.Model, consumer.AllowedAliases) {
 		telemetry.MarkPolicyDenied(rec, telemetry.DenyReasonModelNotAllowed)
@@ -176,10 +170,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if req.Stream != nil && *req.Stream {
 		rec.Operation = "chat.completions.stream"
 		call.Operation = "chat.completions.stream"
-		resultResponse = h.serveStream(w, r, req, rec, call)
+		results.Response(h.serveStream(w, r, req, rec, call))
 		return
 	}
-	resultResponse = h.serveComplete(w, r, req, rec, call)
+	results.Response(h.serveComplete(w, r, req, rec, call))
 }
 
 func isModelAllowed(model string, allowed []string) bool {

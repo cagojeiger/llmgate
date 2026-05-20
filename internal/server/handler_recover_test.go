@@ -11,8 +11,8 @@ import (
 
 	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/routing"
-	"llmgate/internal/platform/http/response"
 	"llmgate/internal/domain/telemetry"
+	"llmgate/internal/platform/http/response"
 )
 
 // Panic paths must stamp audit as panic/500 and keep panic values out

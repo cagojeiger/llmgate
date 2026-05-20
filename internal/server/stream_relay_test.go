@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"llmgate/internal/domain/llmtypes"
-	"llmgate/internal/streaming"
+	"llmgate/internal/domain/streaming"
 )
 
 // stubbornStream simulates a misbehaving adapter whose Close does not

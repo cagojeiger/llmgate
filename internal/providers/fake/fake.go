@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"llmgate/internal/domain/llmtypes"
-	"llmgate/internal/streaming"
+	"llmgate/internal/domain/streaming"
 )
 
 // Provider is a deterministic llmtypes.Provider for tests.

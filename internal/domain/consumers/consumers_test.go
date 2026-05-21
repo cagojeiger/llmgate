@@ -107,7 +107,7 @@ func TestLoadDir_Errors(t *testing.T) {
 	cases := []struct {
 		name       string
 		files      map[string]string // nil ⇒ dir doesn't exist on disk
-		wantSubstr string             // empty ⇒ any error is fine
+		wantSubstr string            // empty ⇒ any error is fine
 	}{
 		{
 			name:  "missing dir",

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"llmgate/internal/domain/consumers"
 	"llmgate/internal/domain/llmtypes"
@@ -222,7 +223,7 @@ func TestServer_AuthIntegration(t *testing.T) {
 		Vendor:    "anthropic",
 		ModelUsed: "claude-x",
 	}}
-	handler := httpchat.NewHandler(stub, logger, rec, httpchat.HandlerConfig{})
+	handler := httpchat.NewHandler(stub, logger, rec, httpchat.HandlerConfig{RequestTimeout: 30 * time.Second})
 	srv := New(&config.Server{Addr: ":0"}, logger, handler, store, httpprobe.NewState())
 	ts := httptest.NewServer(srv.Handler)
 	defer ts.Close()
@@ -323,7 +324,7 @@ func TestServer_AllowedAliasesRejectDisallowedModel(t *testing.T) {
 		stubCalled = true
 		return stub.resp, nil
 	}
-	handler := httpchat.NewHandler(stub, logger, rec, httpchat.HandlerConfig{})
+	handler := httpchat.NewHandler(stub, logger, rec, httpchat.HandlerConfig{RequestTimeout: 30 * time.Second})
 	srv := New(&config.Server{Addr: ":0"}, logger, handler, store, httpprobe.NewState())
 	ts := httptest.NewServer(srv.Handler)
 	defer ts.Close()
@@ -369,7 +370,7 @@ func TestServer_HealthzPublic(t *testing.T) {
 	// Smoke-only: probes are unauthenticated even when consumers are
 	// registered. Detailed probe-state coverage lives in probe_test.go.
 	store := writeStoreYAML(t, "alpha", "good-key")
-	handler := httpchat.NewHandler(&stubService{}, slog.Default(), &recordingRecorder{}, httpchat.HandlerConfig{})
+	handler := httpchat.NewHandler(&stubService{}, slog.Default(), &recordingRecorder{}, httpchat.HandlerConfig{RequestTimeout: 30 * time.Second})
 	srv := New(&config.Server{Addr: ":0"}, slog.Default(), handler, store, httpprobe.NewState())
 	ts := httptest.NewServer(srv.Handler)
 	defer ts.Close()

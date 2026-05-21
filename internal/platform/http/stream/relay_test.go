@@ -46,7 +46,7 @@ func TestStreamReceiver_RequestsOneRecvAtATime(t *testing.T) {
 	receiver := newStreamReceiver(s)
 	defer receiver.Stop()
 
-	event, err := receiver.Recv(context.Background(), 0)
+	event, err := receiver.Recv(context.Background(), 30*time.Second)
 	if err != nil {
 		t.Fatalf("first Recv() error = %v", err)
 	}
@@ -56,7 +56,7 @@ func TestStreamReceiver_RequestsOneRecvAtATime(t *testing.T) {
 	s.mustObserveRecv(t, 1)
 	s.mustNotObserveRecv(t)
 
-	event, err = receiver.Recv(context.Background(), 0)
+	event, err = receiver.Recv(context.Background(), 30*time.Second)
 	if err != nil {
 		t.Fatalf("second Recv() error = %v", err)
 	}

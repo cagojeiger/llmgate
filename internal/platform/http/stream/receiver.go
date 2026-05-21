@@ -59,18 +59,13 @@ func (r *streamReceiver) Recv(ctx context.Context, timeout time.Duration) (*llmt
 		return nil, streamContextError(ctx.Err())
 	}
 
-	var timeoutC <-chan time.Time
-	var timer *time.Timer
-	if timeout > 0 {
-		timer = time.NewTimer(timeout)
-		defer timer.Stop()
-		timeoutC = timer.C
-	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 
 	select {
 	case got := <-r.results:
 		return got.event, got.err
-	case <-timeoutC:
+	case <-timer.C:
 		_ = r.stream.Close()
 		streaming.DrainRecvOrAbandon(r.results, streaming.CloseGrace)
 		return nil, &llmtypes.Error{Kind: llmtypes.KindTimeout, Message: "stream idle timeout"}

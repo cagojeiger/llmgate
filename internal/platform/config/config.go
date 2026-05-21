@@ -72,15 +72,15 @@ func LoadServer() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	requestTimeout, err := nonNegativeDuration("LLMGATE_REQUEST_TIMEOUT", "5m")
+	requestTimeout, err := positiveDuration("LLMGATE_REQUEST_TIMEOUT", "5m")
 	if err != nil {
 		return nil, err
 	}
-	completeTimeout, err := nonNegativeDuration("LLMGATE_COMPLETE_TIMEOUT", "1m")
+	completeTimeout, err := positiveDuration("LLMGATE_COMPLETE_TIMEOUT", "1m")
 	if err != nil {
 		return nil, err
 	}
-	streamIdleTimeout, err := nonNegativeDuration("LLMGATE_STREAM_IDLE_TIMEOUT", "1m")
+	streamIdleTimeout, err := positiveDuration("LLMGATE_STREAM_IDLE_TIMEOUT", "1m")
 	if err != nil {
 		return nil, err
 	}

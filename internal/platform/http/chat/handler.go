@@ -82,13 +82,9 @@ func NewHandler(service ChatService, log *slog.Logger, events telemetry.EventSin
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
-	ctx := r.Context()
-	if h.requestTimeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, h.requestTimeout)
-		defer cancel()
-		r = r.WithContext(ctx)
-	}
+	ctx, cancel := context.WithTimeout(r.Context(), h.requestTimeout)
+	defer cancel()
+	r = r.WithContext(ctx)
 	h.lifecycle.RequestStarted(ctx)
 	defer h.lifecycle.RequestFinished(ctx)
 

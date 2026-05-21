@@ -27,11 +27,7 @@ func (r *Service) Complete(ctx context.Context, req *llmtypes.Request) (*RouteRe
 		}
 		attemptReq := *req
 		attemptReq.Model = candidate.model
-		attemptCtx := ctx
-		cancelAttempt := func() {}
-		if r.policy.completeTimeout > 0 {
-			attemptCtx, cancelAttempt = context.WithTimeout(ctx, r.policy.completeTimeout)
-		}
+		attemptCtx, cancelAttempt := context.WithTimeout(ctx, r.policy.completeTimeout)
 
 		start := time.Now()
 		resp, err := candidate.provider.Complete(attemptCtx, &attemptReq)

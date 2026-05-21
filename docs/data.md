@@ -1,7 +1,5 @@
 # 카탈로그 / 호출자 yaml
 
-← [architecture.md](architecture.md) 로 돌아가기
-
 운영자가 게이트웨이를 다루는 *데이터 평면* 두 갈래 — vendor 등록 (`catalog/`) 과 호출자
 등록 (`consumers/`). 둘 다 yaml, 코드 0줄, 부재시 부팅 fail.
 

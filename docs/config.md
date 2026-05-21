@@ -1,14 +1,14 @@
 # 환경 변수
 
-← [architecture.md](architecture.md) 로 돌아가기
-
 게이트웨이 인프라/시크릿/타이밍 설정. yaml 이 운영 데이터를 담는다면, env 는 *프로세스가
 어디서 어떻게 사는가* 를 담는다. 폴백 / 회로 결정 근거는 [ADR 004](adr/004-fallback-policy.md),
 타임아웃 권위자 분리는 [ADR 005](adr/005-timeout-authority.md).
 
 | 변수 | 디폴트 | 의미 |
 |---|---|---|
+| `LLMGATE_ADDR` | `:8080` | HTTP listen address |
 | `LLMGATE_ENVIRONMENT` | `local` | 로그 / 텔레메트리의 배포 환경 라벨 (`local`, `staging`, `prod` 등) |
+| `LLMGATE_LOG_LEVEL` | `info` | process log level (`debug`, `info`, `warn`, `error`) |
 | `LLMGATE_FALLBACK_ON` | `rate_limit,upstream,timeout,network` | chain 진행 사유 |
 | `LLMGATE_CIRCUIT_FAILURES` | `3` | 연속 실패 임계 (0 = 비활성) |
 | `LLMGATE_CIRCUIT_OPEN_DURATION` | `30s` | 차단 기본 시간 |
@@ -23,6 +23,8 @@
 | `LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE` | `1000` | 요청 경로와 NATS publish 사이 bounded queue 크기 |
 | `LLMGATE_LLMRESULT_ASYNC_BATCH_SIZE` | `100` | worker 가 즉시 flush 하는 이벤트 개수 |
 | `LLMGATE_LLMRESULT_ASYNC_FLUSH_INTERVAL` | `1s` | batch 가 가득 차지 않아도 flush 하는 최대 대기 시간 |
+| `LLMGATE_LLMRESULT_ASYNC_EMIT_TIMEOUT` | `10s` | worker 의 NATS publish 1회 상한 |
+| `LLMGATE_LLMRESULT_ASYNC_CLOSE_TIMEOUT` | `60s` | shutdown 때 async worker 종료 대기 상한 |
 | `LLMGATE_CATALOG` | `./catalog` | catalog 디렉토리 (부재 → fail) |
 | `LLMGATE_CONSUMERS` | `./consumers` | consumers 디렉토리 (부재 → fail) |
 | `LLMGATE_SHUTDOWN_DRAIN_TIMEOUT` | `5m` | drain 최대 wall-clock, 이후 force close |

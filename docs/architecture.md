@@ -156,6 +156,7 @@ internal/domain/
     sink/                    no-op / recovering / bounded async delivery pipeline
 
 internal/platform/
+  config/                    env 기반 런타임 설정 로딩
   providers/
     openai/                   OpenAI protocol adapter
     anthropic/                Anthropic protocol adapter

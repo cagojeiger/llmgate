@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"llmgate/internal/config"
 	"llmgate/internal/domain/catalog"
 	"llmgate/internal/domain/consumers"
 	"llmgate/internal/domain/llmtypes"
+	"llmgate/internal/platform/config"
 )
 
 func TestBuildRuntime_WiresServerAndPublicEndpoints(t *testing.T) {

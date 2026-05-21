@@ -19,6 +19,7 @@ import (
 	"llmgate/internal/domain/routing"
 	"llmgate/internal/domain/telemetry"
 	"llmgate/internal/platform/config"
+	httpauth "llmgate/internal/platform/http/auth"
 )
 
 // recordingRecorder captures every emitted audit event so tests can
@@ -85,7 +86,7 @@ func writeStoreYAML(t *testing.T, name, rawKey string, allowedAliases ...string)
 
 func TestClassifyAuth_NoHeader(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	got := classifyAuth(r, nil)
+	got := httpauth.Classify(r, nil)
 	if got.AuthError != telemetry.AuthErrorMissing {
 		t.Fatalf("AuthError = %q, want %q", got.AuthError, telemetry.AuthErrorMissing)
 	}
@@ -106,7 +107,7 @@ func TestClassifyAuth_BadFormat(t *testing.T) {
 		t.Run(label, func(t *testing.T) {
 			r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 			r.Header.Set("Authorization", header)
-			got := classifyAuth(r, nil)
+			got := httpauth.Classify(r, nil)
 			if got.AuthError != telemetry.AuthErrorFormat {
 				t.Fatalf("AuthError = %q, want %q (header=%q)", got.AuthError, telemetry.AuthErrorFormat, header)
 			}
@@ -118,7 +119,7 @@ func TestClassifyAuth_UnknownKey(t *testing.T) {
 	store := writeStoreYAML(t, "alpha", "rotated-out")
 	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	r.Header.Set("Authorization", "Bearer not-issued")
-	got := classifyAuth(r, store)
+	got := httpauth.Classify(r, store)
 	if got.AuthError != telemetry.AuthErrorUnknown {
 		t.Fatalf("AuthError = %q, want %q", got.AuthError, telemetry.AuthErrorUnknown)
 	}
@@ -131,7 +132,7 @@ func TestClassifyAuth_KnownKey(t *testing.T) {
 	store := writeStoreYAML(t, "alpha", "good-key", "cheap", "worker")
 	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	r.Header.Set("Authorization", "Bearer good-key")
-	got := classifyAuth(r, store)
+	got := httpauth.Classify(r, store)
 	if got.AuthError != "" {
 		t.Fatalf("AuthError = %q, want empty (success)", got.AuthError)
 	}
@@ -150,24 +151,24 @@ func TestClassifyAuth_BearerCaseInsensitive(t *testing.T) {
 	store := writeStoreYAML(t, "alpha", "good-key")
 	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	r.Header.Set("Authorization", "bearer good-key")
-	got := classifyAuth(r, store)
+	got := httpauth.Classify(r, store)
 	if got.Name != "alpha" {
 		t.Errorf("lowercase 'bearer' should be accepted; got %+v", got)
 	}
 }
 
 // authChain mirrors the production middleware order so unit tests that
-// exercise just the auth surface still get the *ConsumerInfo pointer
-// allocated by consumerContextMiddleware.
+// exercise just the auth surface still get the *httpauth.ConsumerInfo pointer
+// allocated by httpauth.ContextMiddleware.
 func authChain(store *consumers.Store, next http.Handler) http.Handler {
-	return consumerContextMiddleware(authMiddleware(store)(next))
+	return httpauth.ContextMiddleware(httpauth.Middleware(store)(next))
 }
 
 func TestAuthMiddleware_StashesContext(t *testing.T) {
 	store := writeStoreYAML(t, "alpha", "good-key")
-	var captured ConsumerInfo
+	var captured httpauth.ConsumerInfo
 	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		captured = ConsumerFromContext(r.Context())
+		captured = httpauth.FromContext(r.Context())
 	})
 	srv := authChain(store, next)
 
@@ -188,7 +189,7 @@ func TestAuthMiddleware_AlwaysCallsNext(t *testing.T) {
 	called := false
 	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		called = true
-		got := ConsumerFromContext(r.Context())
+		got := httpauth.FromContext(r.Context())
 		if got.AuthError != telemetry.AuthErrorUnknown {
 			t.Errorf("ctx AuthError = %q, want unknown", got.AuthError)
 		}

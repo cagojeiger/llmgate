@@ -15,6 +15,7 @@ import (
 	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/routing"
 	"llmgate/internal/domain/telemetry"
+	httpauth "llmgate/internal/platform/http/auth"
 	"llmgate/internal/platform/http/response"
 )
 
@@ -94,7 +95,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.lifecycle.RequestStarted(ctx)
 	defer h.lifecycle.RequestFinished(ctx)
 
-	consumer := ConsumerFromContext(ctx)
+	consumer := httpauth.FromContext(ctx)
 	common := telemetry.NewEventCommon(telemetry.CommonInput{
 		Timestamp:      start,
 		RequestID:      RequestIDFromContext(ctx),

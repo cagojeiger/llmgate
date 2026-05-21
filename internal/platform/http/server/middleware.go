@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	httpauth "llmgate/internal/platform/http/auth"
 	"llmgate/internal/platform/http/response"
 )
 
@@ -72,7 +73,7 @@ func accessLogMiddleware(log *slog.Logger) func(http.Handler) http.Handler {
 			// for this route) set on ctx during the pre-handler phase.
 			// Empty string for routes without auth (e.g. /healthz) or
 			// when auth rejected the request.
-			consumer := ConsumerFromContext(r.Context())
+			consumer := httpauth.FromContext(r.Context())
 
 			attrs := []slog.Attr{
 				slog.String("method", r.Method),

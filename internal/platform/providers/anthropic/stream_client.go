@@ -26,7 +26,7 @@ func (c *Client) CompleteStream(ctx context.Context, req *llmtypes.Request) (llm
 		return nil, c.badRequest("build request", err, nil)
 	}
 
-	resp, statusErr, err := upstream.OpenSSE(c.http, httpReq, c.cfg.Name)
+	resp, statusErr, err := upstream.OpenSSE(c.http, httpReq, c.cfg.Name) //nolint:bodyclose // resp.Body ownership transfers to StreamBase; closed via Stream.Close
 	if err != nil {
 		return nil, err
 	}

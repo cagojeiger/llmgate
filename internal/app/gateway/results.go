@@ -22,7 +22,7 @@ func buildResultSink(ctx context.Context, cfg *config.Server, log *slog.Logger) 
 	if err != nil {
 		return nil, fmt.Errorf("build llm result nats publisher: %w", err)
 	}
-	return llmresultsink.NewAsyncSinkWithConfig(publisher, log, llmresultsink.AsyncConfig{
+	return llmresultsink.NewAsyncSinkWithConfig(publisher, log, llmresultsink.AsyncConfig{ //nolint:contextcheck // AsyncSink worker detaches from request ctx by design (see emitOne)
 		QueueSize:     cfg.LLMResultAsyncQueueSize,
 		BatchSize:     cfg.LLMResultAsyncBatchSize,
 		FlushInterval: cfg.LLMResultAsyncFlush,

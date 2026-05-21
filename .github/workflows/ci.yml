@@ -42,6 +42,19 @@ jobs:
           cache: true
       - run: go vet ./...
 
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.23'
+          cache: true
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.64.8
+
   test:
     name: go test -race
     runs-on: ubuntu-latest

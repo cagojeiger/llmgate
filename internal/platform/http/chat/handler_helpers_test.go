@@ -257,12 +257,6 @@ func (c *captureResultSink) last(t *testing.T) *llmresult.Event {
 	return c.records[len(c.records)-1]
 }
 
-func (c *captureResultSink) len() int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return len(c.records)
-}
-
 func newLogContractSink() (*bytes.Buffer, *bytes.Buffer, telemetry.EventSink) {
 	auditBuf := &bytes.Buffer{}
 	callBuf := &bytes.Buffer{}

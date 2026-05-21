@@ -88,9 +88,6 @@ func (p *Publisher) Emit(ctx context.Context, event *result.Event) {
 	if p == nil || event == nil {
 		return
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if err := p.Publish(ctx, event); err != nil {
 		p.log.LogAttrs(ctx, slog.LevelWarn, "publish llm result event failed",
 			slog.String("event_type", eventTypeOf(event)),
@@ -106,9 +103,6 @@ func (p *Publisher) Publish(ctx context.Context, event *result.Event) error {
 	}
 	if event == nil {
 		return errors.New("llm result event is nil")
-	}
-	if ctx == nil {
-		ctx = context.Background()
 	}
 	payload, err := json.Marshal(event)
 	if err != nil {
@@ -145,9 +139,6 @@ func (p *Publisher) Close() error {
 func (p *Publisher) ensureStream(ctx context.Context) error {
 	if p == nil || p.js == nil {
 		return errors.New("nats publisher is not initialized")
-	}
-	if ctx == nil {
-		ctx = context.Background()
 	}
 	_, err := p.js.StreamInfo(p.stream, natsgo.Context(ctx))
 	if err == nil {

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	"testing"
@@ -189,7 +188,7 @@ func TestBadRequest_AssemblesMessageAndRaw(t *testing.T) {
 	if perr.Provider != "opencode" {
 		t.Errorf("Provider = %q, want opencode", perr.Provider)
 	}
-	wantMsg := fmt.Sprintf("decode body: %s", cause.Error())
+	wantMsg := "decode body: " + cause.Error()
 	if perr.Message != wantMsg {
 		t.Errorf("Message = %q, want %q", perr.Message, wantMsg)
 	}

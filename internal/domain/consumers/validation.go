@@ -4,13 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
 // nameRule constrains consumer names to a safe lowercased identifier shape so
 // that audit grep / log fields / future API surfaces all behave predictably.
 // First char must be alphanumeric to avoid being mistaken for a CLI flag.
-var nameRule = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,` + fmt.Sprint(maxNameLen-1) + `}$`)
+var nameRule = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,` + strconv.Itoa(maxNameLen-1) + `}$`)
 
 var aliasRule = regexp.MustCompile(`^[a-z0-9][a-z0-9._+-]{0,127}$`)
 

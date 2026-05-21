@@ -1,0 +1,39 @@
+run:
+  timeout: 3m
+
+linters:
+  disable-all: true
+  enable:
+    - bodyclose
+    - containedctx
+    - contextcheck
+    - errorlint
+    - gocritic
+    - gosec
+    - govet
+    - ineffassign
+    - nakedret
+    - nilerr
+    - noctx
+    - perfsprint
+    - prealloc
+    - staticcheck
+    - unused
+    - wastedassign
+
+issues:
+  # Tests favor convenience over production-safety idioms:
+  #   - gosec G306/G112/G404 — file modes, dev-only http servers, jitter rand.
+  #   - noctx — http.Get / http.NewRequest used for setup brevity.
+  #   - bodyclose — test handlers own body lifecycle inline.
+  #   - errorlint — panic-value comparisons are common in recover() tests.
+  #   - contextcheck / containedctx — tests legitimately pass context.Background.
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - bodyclose
+        - containedctx
+        - contextcheck
+        - errorlint
+        - gosec
+        - noctx

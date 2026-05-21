@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
@@ -178,7 +179,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // http.ErrAbortHandler's abort semantics, and avoids writing a JSON
 // envelope after a streaming response has already started.
 func (h *Handler) recoverPanic(ctx context.Context, w http.ResponseWriter, rec *telemetry.AuditEvent, p any) {
-	if p == http.ErrAbortHandler {
+	if err, ok := p.(error); ok && errors.Is(err, http.ErrAbortHandler) {
 		panic(p)
 	}
 	rec.Kind = llmtypes.KindPanic

@@ -218,7 +218,9 @@ func (s *AsyncSink) emitOne(event *llmresult.Event) {
 			)
 		}
 	}()
-	ctx, cancel := context.WithTimeout(context.Background(), s.emitTimeout)
+	// AsyncSink is a background worker; downstream Emit must outlive any
+	// individual request ctx, so we deliberately detach from caller ctx.
+	ctx, cancel := context.WithTimeout(context.Background(), s.emitTimeout) //nolint:contextcheck // intentional detach from request ctx
 	defer cancel()
 	s.next.Emit(ctx, event)
 }

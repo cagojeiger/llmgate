@@ -8,9 +8,17 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"strings"
 
 	"llmgate/internal/domain/llmtypes"
+)
+
+// SSE wire constants. Kept as package-level []byte literals so the
+// scanner loop can compare and trim without re-allocating per line.
+var (
+	sseDataPrefix   = []byte("data:")
+	sseSpacePrefix  = []byte{' '}
+	sseDoneSentinel = []byte("[DONE]")
+	sseNewline      = []byte{'\n'}
 )
 
 // StatusError carries a non-2xx HTTP response from an SSE stream-open
@@ -89,13 +97,16 @@ func (r *SSEReader) Recv() (data []byte, err error) {
 
 	var parts [][]byte
 	for r.scanner.Scan() {
-		line := r.scanner.Text()
-		if line == "" {
+		// scanner.Bytes() reuses an internal buffer across Scan() calls;
+		// any slice we keep across iterations must be copied (see
+		// bytes.Clone below).
+		line := r.scanner.Bytes()
+		if len(line) == 0 {
 			if len(parts) == 0 {
 				continue
 			}
-			payload := bytes.Join(parts, []byte("\n"))
-			if string(payload) == "[DONE]" {
+			payload := bytes.Join(parts, sseNewline)
+			if bytes.Equal(payload, sseDoneSentinel) {
 				r.done = true
 				return nil, io.EOF
 			}
@@ -104,11 +115,12 @@ func (r *SSEReader) Recv() (data []byte, err error) {
 		// Skip comments (`:` prefix) and non-data fields (`event:`,
 		// `id:`, `retry:`). The SSE spec treats unknown fields as
 		// ignorable.
-		if !strings.HasPrefix(line, "data:") {
+		if !bytes.HasPrefix(line, sseDataPrefix) {
 			continue
 		}
-		payload := strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " ")
-		parts = append(parts, []byte(payload))
+		line = bytes.TrimPrefix(line, sseDataPrefix)
+		line = bytes.TrimPrefix(line, sseSpacePrefix)
+		parts = append(parts, bytes.Clone(line))
 	}
 
 	if err := r.scanner.Err(); err != nil {
@@ -157,8 +169,8 @@ func (r *SSEReader) Recv() (data []byte, err error) {
 	// caller successfully received.
 	if len(parts) > 0 {
 		r.done = true
-		payload := bytes.Join(parts, []byte("\n"))
-		if string(payload) == "[DONE]" {
+		payload := bytes.Join(parts, sseNewline)
+		if bytes.Equal(payload, sseDoneSentinel) {
 			return nil, io.EOF
 		}
 		return payload, nil

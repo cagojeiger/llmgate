@@ -3,7 +3,6 @@ package anthropic
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 
 	"llmgate/internal/domain/llmtypes"
@@ -20,21 +19,11 @@ func toAnthropicRequest(req *llmtypes.Request, defaultMaxTokens int, stream bool
 			system = append(system, msg.Content)
 			continue
 		}
-		content, err := buildMessageContent(msg)
+		converted, err := anthropicMessageFromOpenAI(msg)
 		if err != nil {
 			return nil, err
 		}
-		role := msg.Role
-		if role == "tool" {
-			// OpenAI uses role=tool for tool result messages; Anthropic
-			// represents the same turn as a user message containing a
-			// tool_result block.
-			role = "user"
-		}
-		messages = append(messages, anthropicMessage{
-			Role:    role,
-			Content: content,
-		})
+		messages = append(messages, converted)
 	}
 	if len(messages) == 0 {
 		return nil, errors.New("messages must include at least one non-system message")
@@ -120,64 +109,4 @@ func toAnthropicRequest(req *llmtypes.Request, defaultMaxTokens int, stream bool
 		raw[key] = value
 	}
 	return json.Marshal(raw)
-}
-
-// buildMessageContent converts one llmtypes.Message into the Anthropic
-// content shape. Plain text messages stay as a string (Anthropic accepts
-// both string and array). Assistant messages with prior tool_calls become
-// an array of [text?, tool_use*]. Tool-role messages become a single
-// tool_result block; the caller switches role to "user" since Anthropic
-// has no dedicated tool role.
-func buildMessageContent(msg llmtypes.Message) (any, error) {
-	if len(msg.ContentRaw) > 0 {
-		return nil, errors.New("anthropic provider does not support OpenAI structured message content")
-	}
-	if msg.Role == "tool" {
-		toolCallID, err := extractStringField(msg.Extra, "tool_call_id")
-		if err != nil {
-			return nil, err
-		}
-		if strings.TrimSpace(toolCallID) == "" {
-			return nil, errors.New("tool message is missing tool_call_id")
-		}
-		return []anthropicContentBlock{{
-			Type:      "tool_result",
-			ToolUseID: toolCallID,
-			Content:   msg.Content,
-		}}, nil
-	}
-
-	rawCalls, hasCalls := msg.Extra["tool_calls"]
-	if !hasCalls || len(rawCalls) == 0 {
-		return msg.Content, nil
-	}
-	var toolCalls []openAIToolCall
-	if err := json.Unmarshal(rawCalls, &toolCalls); err != nil {
-		return nil, fmt.Errorf("decode tool_calls: %w", err)
-	}
-	if len(toolCalls) == 0 {
-		return msg.Content, nil
-	}
-
-	blocks := make([]anthropicContentBlock, 0, len(toolCalls)+1)
-	if strings.TrimSpace(msg.Content) != "" {
-		blocks = append(blocks, anthropicContentBlock{Type: "text", Text: msg.Content})
-	}
-	for _, tc := range toolCalls {
-		name := strings.TrimSpace(tc.Function.Name)
-		if name == "" {
-			return nil, errors.New("tool_call.function.name is required")
-		}
-		input, err := parseToolCallArguments(tc.Function.Arguments)
-		if err != nil {
-			return nil, fmt.Errorf("tool_call %q arguments: %w", name, err)
-		}
-		blocks = append(blocks, anthropicContentBlock{
-			Type:  "tool_use",
-			ID:    tc.ID,
-			Name:  name,
-			Input: input,
-		})
-	}
-	return blocks, nil
 }

@@ -40,7 +40,7 @@ type StatusError struct {
 // Adapters use this so the four-step send → status-check → drain dance
 // lives in one place.
 func OpenSSE(client *http.Client, req *http.Request, providerName string) (*http.Response, *StatusError, error) {
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec // SSRF: req URL comes from operator-configured catalog endpoints, not user input
 	if err != nil {
 		return nil, nil, LowLevelError(providerName, "send request", err)
 	}

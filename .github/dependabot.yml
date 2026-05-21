@@ -1,0 +1,31 @@
+version: 2
+
+# Conservative auto-update policy. Groups patch/minor bumps so dep
+# churn lands as one PR per ecosystem per week, rather than a stream of
+# individual PRs. Major bumps stay separate — they need human review.
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      go-deps:
+        applies-to: version-updates
+        update-types:
+          - patch
+          - minor
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      gh-actions:
+        applies-to: version-updates
+        update-types:
+          - patch
+          - minor

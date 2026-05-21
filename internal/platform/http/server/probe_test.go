@@ -10,9 +10,10 @@ import (
 
 	"llmgate/internal/platform/config"
 	httpchat "llmgate/internal/platform/http/chat"
+	httpprobe "llmgate/internal/platform/http/probe"
 )
 
-func newTestServer(t *testing.T, probe *ProbeState) (*httptest.Server, func()) {
+func newTestServer(t *testing.T, probe *httpprobe.State) (*httptest.Server, func()) {
 	t.Helper()
 	store := writeStoreYAML(t, "alpha", "good-key")
 	handler := httpchat.NewHandler(&stubService{}, slog.Default(), &recordingRecorder{}, httpchat.HandlerConfig{})
@@ -36,7 +37,7 @@ func probeStatus(t *testing.T, url string) (int, string) {
 }
 
 func TestProbe_LiveAlwaysOK(t *testing.T) {
-	probe := NewProbeState()
+	probe := httpprobe.NewState()
 	ts, cleanup := newTestServer(t, probe)
 	defer cleanup()
 
@@ -56,7 +57,7 @@ func TestProbe_LiveAlwaysOK(t *testing.T) {
 }
 
 func TestProbe_ReadyFlipsOnShutdown(t *testing.T) {
-	probe := NewProbeState()
+	probe := httpprobe.NewState()
 	ts, cleanup := newTestServer(t, probe)
 	defer cleanup()
 
@@ -74,7 +75,7 @@ func TestProbe_HealthzAliasMatchesReady(t *testing.T) {
 	// /healthz must mirror /healthz/ready so existing manifests get the
 	// shutdown-aware behavior without an explicit migration. This is the
 	// backward-compatibility contract.
-	probe := NewProbeState()
+	probe := httpprobe.NewState()
 	ts, cleanup := newTestServer(t, probe)
 	defer cleanup()
 
@@ -88,7 +89,7 @@ func TestProbe_HealthzAliasMatchesReady(t *testing.T) {
 }
 
 func TestProbe_PublicWithoutAuth(t *testing.T) {
-	probe := NewProbeState()
+	probe := httpprobe.NewState()
 	ts, cleanup := newTestServer(t, probe)
 	defer cleanup()
 
@@ -112,7 +113,7 @@ func TestProbe_BypassesMiddlewareChain(t *testing.T) {
 	// this in with a response-header check defends against an accidental
 	// `r.Use(requestIDMiddleware)` on the top-level router that would
 	// silently pull probes back into the access log / tracing surface.
-	probe := NewProbeState()
+	probe := httpprobe.NewState()
 	ts, cleanup := newTestServer(t, probe)
 	defer cleanup()
 
@@ -130,7 +131,7 @@ func TestProbe_BypassesMiddlewareChain(t *testing.T) {
 }
 
 func TestProbe_NilStateTreatedAsHealthy(t *testing.T) {
-	// server.New tolerates a nil ProbeState (used by some unit tests
+	// server.New tolerates a nil probe state (used by some unit tests
 	// that don't care about probes). When state is nil the readiness
 	// handler must still return a sane 200 instead of panicking.
 	ts, cleanup := newTestServer(t, nil)
@@ -138,25 +139,5 @@ func TestProbe_NilStateTreatedAsHealthy(t *testing.T) {
 
 	if code, status := probeStatus(t, ts.URL+"/healthz/ready"); code != 200 || status != "ready" {
 		t.Fatalf("nil state: code=%d status=%q, want 200 ready", code, status)
-	}
-}
-
-func TestProbeState_Idempotent(t *testing.T) {
-	probe := NewProbeState()
-	if probe.IsShuttingDown() {
-		t.Fatal("zero state must report not shutting down")
-	}
-	probe.MarkShuttingDown()
-	probe.MarkShuttingDown() // idempotent — no panic, no flip back
-	if !probe.IsShuttingDown() {
-		t.Fatal("after MarkShuttingDown must report shutting down")
-	}
-}
-
-func TestProbeState_NilSafe(t *testing.T) {
-	var probe *ProbeState
-	probe.MarkShuttingDown() // no panic
-	if probe.IsShuttingDown() {
-		t.Fatal("nil pointer must read as not shutting down")
 	}
 }

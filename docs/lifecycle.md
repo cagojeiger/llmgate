@@ -18,13 +18,13 @@ graph TD
     ServerCfg --> Server
     Store --> Server
     Service --> Server
-    Probe[ProbeState] --> Server
+    Probe["http/probe State"] --> Server
     Server --> Listen([HTTP Listen])
 ```
 
 순서: `cmd/llmgate/main.go` 가 env / config / logger 를 준비한다. `internal/app/gateway` 가
 catalog 와 consumers 를 로드하고, catalog 모델을 provider 로 바꿔 `routing.Service` 를 만든다.
-이어서 telemetry recorders / llmresult sink / Handler / middleware / ProbeState / HTTP server 를
+이어서 telemetry recorders / llmresult sink / Handler / middleware / probe state / HTTP server 를
 조립한다. 이후 main 은 signal context 를 만들고 `gateway.Runtime.Run` 이 Listen / graceful
 shutdown 을 실행한다.
 

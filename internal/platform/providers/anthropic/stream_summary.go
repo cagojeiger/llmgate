@@ -34,10 +34,10 @@ func (s *stream) Summary() *llmtypes.Summary {
 	return summary
 }
 
+// buildFinishEvent assembles the final chunk from a non-nil end. The two
+// production callers gate on s.pendingFinish != nil immediately above,
+// so a nil end is unreachable and intentionally not defended here.
 func (s *stream) buildFinishEvent(end *anthropicEnd) *llmtypes.Event {
-	if end == nil {
-		end = &anthropicEnd{finishReason: "stop"}
-	}
 	usage := &llmtypes.Usage{
 		PromptTokens:     s.inputTokens,
 		CompletionTokens: end.outputTokens,

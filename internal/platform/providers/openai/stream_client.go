@@ -101,15 +101,6 @@ func (s *stream) Summary() *llmtypes.Summary {
 	}
 }
 
-// requestBodyWithStream marshals a copy of req with Stream forced true
-// so callers don't need to set the flag themselves.
-func requestBodyWithStream(req *llmtypes.Request) ([]byte, error) {
-	cp := *req
-	t := true
-	cp.Stream = &t
-	return json.Marshal(&cp)
-}
-
 // parseStreamError returns a *llmtypes.Error if the SSE event payload is
 // an upstream error envelope (mid-stream surfaced as data: {"error":...}).
 // Heuristic kind detection: error.type or message string match — best

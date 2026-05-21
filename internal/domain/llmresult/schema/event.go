@@ -66,10 +66,6 @@ func cloneResponse(resp *llmtypes.Response) *llmtypes.Response {
 	return cloneJSON(resp)
 }
 
-func cloneUsage(usage *llmtypes.Usage) *llmtypes.Usage {
-	return cloneJSON(usage)
-}
-
 func cloneAttempts(attempts []llmtypes.Attempt) []llmtypes.Attempt {
 	if len(attempts) == 0 {
 		return nil

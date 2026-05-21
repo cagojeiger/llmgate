@@ -3,6 +3,7 @@ package stream
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -17,14 +18,19 @@ type recvResult struct {
 
 type streamReceiver struct {
 	stream   llmtypes.Stream
+	log      *slog.Logger
 	requests chan struct{}
 	results  chan recvResult
 	stopOnce sync.Once
 }
 
-func newStreamReceiver(stream llmtypes.Stream) *streamReceiver {
+func newStreamReceiver(stream llmtypes.Stream, log *slog.Logger) *streamReceiver {
+	if log == nil {
+		log = slog.Default()
+	}
 	r := &streamReceiver{
 		stream:   stream,
+		log:      log,
 		requests: make(chan struct{}),
 		results:  make(chan recvResult, 1),
 	}
@@ -67,13 +73,29 @@ func (r *streamReceiver) Recv(ctx context.Context, timeout time.Duration) (*llmt
 		return got.event, got.err
 	case <-timer.C:
 		_ = r.stream.Close()
-		streaming.DrainRecvOrAbandon(r.results, streaming.CloseGrace)
+		if !streaming.DrainRecvOrAbandon(r.results, streaming.CloseGrace) {
+			r.logAbandoned(ctx, "idle_timeout")
+		}
 		return nil, &llmtypes.Error{Kind: llmtypes.KindTimeout, Message: "stream idle timeout"}
 	case <-ctx.Done():
 		_ = r.stream.Close()
-		streaming.DrainRecvOrAbandon(r.results, streaming.CloseGrace)
+		if !streaming.DrainRecvOrAbandon(r.results, streaming.CloseGrace) {
+			r.logAbandoned(ctx, "ctx_cancelled")
+		}
 		return nil, streamContextError(ctx.Err())
 	}
+}
+
+// logAbandoned signals that the Recv() goroutine did not exit within
+// CloseGrace after Close() — an upstream adapter that did not honor
+// the Stream contract. The goroutine continues in the background until
+// the next Recv() naturally returns; until then it holds upstream
+// resources (HTTP body, parser buffers).
+func (r *streamReceiver) logAbandoned(ctx context.Context, trigger string) {
+	r.log.LogAttrs(ctx, slog.LevelWarn, "stream receiver recv abandoned",
+		slog.String("trigger", trigger),
+		slog.Duration("grace", streaming.CloseGrace),
+	)
 }
 
 func streamContextError(err error) error {

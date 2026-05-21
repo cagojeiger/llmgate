@@ -1,7 +1,7 @@
 # llmgate — agent context
 
 OpenAI-wire-compatible LLM router with alias/fallback chains and per-vendor
-circuit breakers. See `docs/architecture.md` for the request flow.
+circuit breakers. See `docs/adr/000-identity.md` for the service boundary.
 
 ## Build / test
 

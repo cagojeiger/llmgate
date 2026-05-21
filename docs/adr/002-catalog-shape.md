@@ -34,4 +34,4 @@
 
 - 같은 벤더의 N개 모델이 `base_url`을 N번 반복한다. sync 도구로 자동 생성하는 것을 전제로 둔다.
 - 별명마다 다른 정책(예: 별명별로 다른 OnKinds)은 표현되지 않는다. 필요해지면 별명 YAML에 override를 더해 확장한다.
-- 모델 메타(가격, context window)는 카탈로그 밖. [identity.md "의도적 미지원"](../identity.md) 참조.
+- 모델 메타(가격, context window)는 카탈로그 밖. [ADR 000](000-identity.md)의 작은 실행기 경계를 따른다.

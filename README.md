@@ -28,8 +28,10 @@ make e2e        # real upstream — costs vendor credits
 
 ## Docs
 
-- `docs/adr/` — design decisions
-- `docs/architecture.md` — request flow + components
+- `docs/adr/` — design decisions and service identity
+- `docs/config.md` — runtime environment contract
+- `docs/data.md` — catalog and consumer file contract
+- `docs/logs.md`, `docs/metrics.md` — observability policy
 
 ## License
 

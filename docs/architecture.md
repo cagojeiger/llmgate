@@ -101,7 +101,7 @@ Routing 이 Delivery 로 돌려주는 형식은 `llmtypes.Stream` / `llmtypes.Re
 
 | 레이어 | 컴포넌트 | 역할 |
 |---|---|---|
-| Delivery | HTTP Server | chi 라우터, request id, access log, recoverer, probes, optional `/metrics` |
+| Delivery | HTTP Server | chi 라우터, request id, access log, recoverer, probes, `/metrics` |
 | Delivery | http/auth | Bearer 키 sha256 lookup. 실패해도 Handler 까지 보내 audit-always 보장 ([ADR 003](adr/003-consumers.md)) |
 | Delivery | http/chat | 요청 decode, stream/non-stream 분기, audit/call finalize, request wall-clock timeout ([ADR 005](adr/005-timeout-authority.md)) |
 | Delivery | http/stream | 200 OK 이후 SSE relay, idle timeout, client close, `[DONE]` ([ADR 004](adr/004-fallback-policy.md)) |

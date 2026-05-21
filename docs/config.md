@@ -29,6 +29,7 @@
 | `LLMGATE_CONSUMERS` | `./consumers` | consumers 디렉토리 (부재 → fail) |
 | `LLMGATE_SHUTDOWN_DRAIN_TIMEOUT` | `5m` | drain 최대 wall-clock, 이후 force close |
 
-vendor 별 API 키는 `LLMGATE_<VENDOR>_API_KEY` 패턴 (예: `LLMGATE_OPENCODE_API_KEY`,
-`LLMGATE_OPENROUTER_API_KEY`).
+vendor 별 API 키는 `LLMGATE_<VENDOR>_API_KEY` 패턴이다. 현재 기본값은 catalog `vendor` 를
+대문자화한 문자열 그대로 쓰므로, 하이픈 등 shell 변수에 부적합한 vendor 는 catalog yaml 의
+`auth_env` 를 명시한다.
 catalog yaml 의 `auth_env` 가 명시적으로 다른 이름을 가리키면 그쪽이 우선.

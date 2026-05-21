@@ -13,6 +13,7 @@
 | 라우팅 정책 + 서버 런타임 | env → Server config | 프로세스 수명 |
 | 회로 차단 상태 | `routing.Service` breakerStore (per-process) | 프로세스 수명 |
 | 호출자 lookup | consumers Store (per-process) | 프로세스 수명 |
+| 호출자 model allowlist | `consumers/` yaml `allowed_aliases` | 외부 갱신 시 재시작 |
 | 요청별 시도 이력 | `routing.RouteResult.Attempts` → `telemetry.CallEvent` | 요청 1 회 |
 | 운영 / 보안 감사 event | `telemetry.EventSink` → `platform/telemetry/slog` → stdout JSON | 로그 보존 정책 |
 | LLM 호출 결과 event | `telemetry.EventSink` → `platform/telemetry/slog` → stdout JSON | 로그 보존 정책 |

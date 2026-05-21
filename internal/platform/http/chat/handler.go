@@ -7,6 +7,7 @@ import (
 	"runtime/debug"
 	"time"
 
+	llmresultschema "llmgate/internal/domain/llmresult/schema"
 	llmresultsink "llmgate/internal/domain/llmresult/sink"
 	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/routing"
@@ -105,7 +106,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	telemetry.MarkAuthSuccess(rec)
 	var call *telemetry.CallEvent
 	var req *llmtypes.Request
-	results := newResultRecorder(h.results)
+	var resultResp *llmtypes.Response
 	defer func() {
 		telemetry.FinishAuditEvent(rec, rec.StatusCode, rec.Kind, time.Since(start).Milliseconds())
 		h.events.Emit(ctx, rec)
@@ -113,7 +114,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			telemetry.FinishCallFromAudit(call, rec)
 			h.events.Emit(ctx, call)
 		}
-		results.Emit(ctx, rec, call)
+		if h.results != nil {
+			if ev, ok := llmresultschema.FromTelemetry(llmresultschema.BuildInput{
+				Audit:    rec,
+				Call:     call,
+				Request:  req,
+				Response: resultResp,
+			}); ok {
+				h.results.Emit(ctx, ev)
+			}
+		}
 	}()
 	// Registered after the audit defer so it runs first and stamps the
 	// record before the audit-always hook observes it.
@@ -143,7 +153,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		response.WriteError(w, err)
 		return
 	}
-	results.Request(req)
 	telemetry.SetResource(rec, "llm_model", req.Model)
 	if !modelAllowed(req.Model, consumer.AllowedAliases) {
 		telemetry.MarkPolicyDenied(rec, telemetry.DenyReasonModelNotAllowed)
@@ -158,10 +167,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if req.Stream != nil && *req.Stream {
 		rec.Operation = "chat.completions.stream"
 		call.Operation = "chat.completions.stream"
-		results.Response(h.serveStream(w, r, req, rec, call))
+		resultResp = h.serveStream(w, r, req, rec, call)
 		return
 	}
-	results.Response(h.serveComplete(w, r, req, rec, call))
+	resultResp = h.serveComplete(w, r, req, rec, call)
 }
 
 // recoverPanic stamps panic outcomes for audit, preserves

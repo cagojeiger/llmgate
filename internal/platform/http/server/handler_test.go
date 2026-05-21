@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +11,7 @@ import (
 	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/routing"
 	"llmgate/internal/domain/telemetry"
+	httpauth "llmgate/internal/platform/http/auth"
 )
 
 func TestHandler_SingleAttempt_RecordPopulated(t *testing.T) {
@@ -165,7 +165,7 @@ func TestHandler_AllowedAliasesRejectBeforeService(t *testing.T) {
 
 	body := `{"model":"smart","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
-	req = req.WithContext(context.WithValue(req.Context(), consumerCtxKey{}, &ConsumerInfo{
+	req = req.WithContext(httpauth.WithConsumer(req.Context(), &httpauth.ConsumerInfo{
 		Name:           "alpha",
 		KeyID:          "12345678",
 		AllowedAliases: []string{"cheap"},

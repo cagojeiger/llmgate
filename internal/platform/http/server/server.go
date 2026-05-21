@@ -10,6 +10,7 @@ import (
 
 	"llmgate/internal/domain/consumers"
 	"llmgate/internal/platform/config"
+	httpauth "llmgate/internal/platform/http/auth"
 )
 
 type ServerOptions struct {
@@ -66,17 +67,17 @@ func NewWithOptions(opts ServerOptions) *http.Server {
 	// when configured, so nothing in this group ever sees them.
 	r.Group(func(r chi.Router) {
 		r.Use(requestIDMiddleware)
-		// consumerContextMiddleware must run before accessLogMiddleware so the
+		// auth.ContextMiddleware must run before accessLogMiddleware so the
 		// access log's defer can read whatever the auth middleware later
-		// writes through the shared *ConsumerInfo pointer.
-		r.Use(consumerContextMiddleware)
+		// writes through the shared *httpauth.ConsumerInfo pointer.
+		r.Use(httpauth.ContextMiddleware)
 		r.Use(accessLogMiddleware(log))
 		r.Use(chimiddleware.Recoverer)
 
 		// Auth scope: only chat sits behind auth today. Future
 		// auth-required routes go inside this inner Group.
 		r.Group(func(r chi.Router) {
-			r.Use(authMiddleware(store))
+			r.Use(httpauth.Middleware(store))
 			r.Post("/v1/chat/completions", h.ServeHTTP)
 		})
 	})

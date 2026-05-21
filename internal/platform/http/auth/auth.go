@@ -1,4 +1,4 @@
-package server
+package auth
 
 import (
 	"context"
@@ -25,26 +25,32 @@ type ConsumerInfo struct {
 
 type consumerCtxKey struct{}
 
-// ConsumerFromContext returns the latest ConsumerInfo placed on ctx. The
-// underlying value is a *ConsumerInfo (allocated by consumerContextMiddleware
+// FromContext returns the latest ConsumerInfo placed on ctx. The
+// underlying value is a *ConsumerInfo (allocated by ContextMiddleware
 // at the start of the chain) so that inner middleware mutations are
 // visible to outer middleware after the chain unwinds — see the doc on
-// consumerContextMiddleware. Returns the zero value if no context
+// ContextMiddleware. Returns the zero value if no context
 // bootstrap ran (e.g. unit tests calling the handler directly).
-func ConsumerFromContext(ctx context.Context) ConsumerInfo {
+func FromContext(ctx context.Context) ConsumerInfo {
 	if p, ok := ctx.Value(consumerCtxKey{}).(*ConsumerInfo); ok && p != nil {
 		return *p
 	}
 	return ConsumerInfo{}
 }
 
-// consumerContextMiddleware allocates a heap *ConsumerInfo and places it on
+// WithConsumer returns a context carrying consumer info. Tests use this to
+// exercise handlers without building the full middleware chain.
+func WithConsumer(ctx context.Context, info *ConsumerInfo) context.Context {
+	return context.WithValue(ctx, consumerCtxKey{}, info)
+}
+
+// ContextMiddleware allocates a heap *ConsumerInfo and places it on
 // ctx so the auth middleware can mutate it via pointer. Without this
 // step a value-typed ctx update by the auth middleware would be
 // invisible to the outer access log (the outer holds a reference to the
 // parent ctx, not the chain-modified one). Run this before any
 // middleware that wants to read consumer identity.
-func consumerContextMiddleware(next http.Handler) http.Handler {
+func ContextMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		info := &ConsumerInfo{}
 		ctx := context.WithValue(r.Context(), consumerCtxKey{}, info)
@@ -52,26 +58,26 @@ func consumerContextMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// authMiddleware builds an HTTP middleware that classifies the
+// Middleware builds an HTTP middleware that classifies the
 // Authorization header against the given consumers store and writes the
 // result through the *ConsumerInfo pointer placed on ctx by
-// consumerContextMiddleware. Always calls next — the handler is the
+// ContextMiddleware. Always calls next — the handler is the
 // single audit emitter and must run even on auth failure.
-func authMiddleware(store *consumers.Store) func(http.Handler) http.Handler {
+func Middleware(store *consumers.Store) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if p, ok := r.Context().Value(consumerCtxKey{}).(*ConsumerInfo); ok && p != nil {
-				*p = classifyAuth(r, store)
+				*p = Classify(r, store)
 			}
 			next.ServeHTTP(w, r)
 		})
 	}
 }
 
-// classifyAuth inspects the Authorization header and looks the bearer
+// Classify inspects the Authorization header and looks the bearer
 // token up in store. It deliberately does not log the raw key on any
 // failure path — AuthError is the only signal that escapes.
-func classifyAuth(r *http.Request, store *consumers.Store) ConsumerInfo {
+func Classify(r *http.Request, store *consumers.Store) ConsumerInfo {
 	raw := r.Header.Get("Authorization")
 	if raw == "" {
 		return ConsumerInfo{AuthError: telemetry.AuthErrorMissing}

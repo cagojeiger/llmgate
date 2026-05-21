@@ -55,3 +55,4 @@ internal/app/        부팅 조립, provider 생성, shutdown
    `internal/platform/telemetry/*` 로 분리한다.
 9. 실제 vendor adapter 는 `internal/platform/providers/*` 로 이동한다.
 10. env 기반 런타임 설정 로딩은 `internal/platform/config` 로 이동한다.
+11. bearer token auth middleware 는 `internal/platform/http/auth` 로 이동한다.

@@ -13,6 +13,7 @@ import (
 	"llmgate/internal/domain/llmtypes/fake"
 	"llmgate/internal/domain/routing"
 	"llmgate/internal/domain/telemetry"
+	httpauth "llmgate/internal/platform/http/auth"
 )
 
 func TestHandler_LogContract_AuthFailure(t *testing.T) {
@@ -21,7 +22,7 @@ func TestHandler_LogContract_AuthFailure(t *testing.T) {
 
 	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
-	req = requestWithTelemetryContext(req, "req-auth-contract", &ConsumerInfo{AuthError: telemetry.AuthErrorMissing})
+	req = requestWithTelemetryContext(req, "req-auth-contract", &httpauth.ConsumerInfo{AuthError: telemetry.AuthErrorMissing})
 	w := httptest.NewRecorder()
 
 	h.ServeHTTP(w, req)
@@ -53,7 +54,7 @@ func TestHandler_LogContract_NonStreamSuccess(t *testing.T) {
 	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"Reply with exactly OK."}],"max_tokens":8}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer example-key-001")
-	req = requestWithTelemetryContext(req, "req-non-stream-contract", &ConsumerInfo{
+	req = requestWithTelemetryContext(req, "req-non-stream-contract", &httpauth.ConsumerInfo{
 		Name:  "example",
 		KeyID: "467d813a",
 	})
@@ -103,7 +104,7 @@ func TestHandler_LogContract_StreamSuccess(t *testing.T) {
 	}, "")
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer example-key-001")
-	req = requestWithTelemetryContext(req, "req-stream-contract", &ConsumerInfo{
+	req = requestWithTelemetryContext(req, "req-stream-contract", &httpauth.ConsumerInfo{
 		Name:  "example",
 		KeyID: "467d813a",
 	})

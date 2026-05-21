@@ -102,7 +102,7 @@ graph LR
 | 레이어 | 컴포넌트 | 역할 |
 |---|---|---|
 | Delivery | HTTP Server | chi 라우터 + request_id / clientContext / access log / recoverer / read+request timeout. `/v1/chat/completions` (auth 보호), `/healthz/live` · `/healthz/ready` · `/healthz` (공개), 선택적 `/metrics` (middleware 밖) |
-| Delivery | auth middleware | `Authorization: Bearer` 추출 → sha256 → consumers Store lookup → ctx 에 ConsumerInfo 기록. 실패해도 short-circuit 안 함 — Handler 가 audit-always emit ([ADR 003](adr/003-consumers.md)) |
+| Delivery | http/auth | `Authorization: Bearer` 추출 → sha256 → consumers Store lookup → ctx 에 ConsumerInfo 기록. 실패해도 short-circuit 안 함 — Handler 가 audit-always emit ([ADR 003](adr/003-consumers.md)) |
 | Delivery | Handler | 요청 디코드, stream / non-stream 분기. ConsumerInfo 로 `AuditEvent` / `CallEvent` 공통 키를 채움 + auth 실패 시 401. 요청 총 wall-clock 한도의 권위자 ([ADR 005](adr/005-timeout-authority.md)) |
 | Delivery | response | OpenAI-style error envelope, Retry-After, SSE frame writer, response status/bytes accounting |
 | Delivery | streamRelay | 스트림 열린 뒤 SSE wire transcript. 이벤트 전송, idle timeout, client_closed, mid-stream error, `[DONE]` ([ADR 004](adr/004-fallback-policy.md)). 스트림 idle 한도의 권위자 ([ADR 005](adr/005-timeout-authority.md)) |

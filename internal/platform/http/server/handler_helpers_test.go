@@ -18,6 +18,7 @@ import (
 	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/routing"
 	"llmgate/internal/domain/telemetry"
+	httpauth "llmgate/internal/platform/http/auth"
 	slogtelemetry "llmgate/internal/platform/telemetry/slog"
 )
 
@@ -276,9 +277,9 @@ func decodeSingleLogLine(t *testing.T, buf *bytes.Buffer) map[string]any {
 	return out
 }
 
-func requestWithTelemetryContext(req *http.Request, requestID string, consumer *ConsumerInfo) *http.Request {
+func requestWithTelemetryContext(req *http.Request, requestID string, consumer *httpauth.ConsumerInfo) *http.Request {
 	ctx := context.WithValue(req.Context(), requestIDCtxKey{}, requestID)
-	ctx = context.WithValue(ctx, consumerCtxKey{}, consumer)
+	ctx = httpauth.WithConsumer(ctx, consumer)
 	return req.WithContext(ctx)
 }
 

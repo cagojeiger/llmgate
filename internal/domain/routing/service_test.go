@@ -11,7 +11,7 @@ import (
 
 	"llmgate/internal/domain/catalog"
 	"llmgate/internal/domain/llmtypes"
-	"llmgate/internal/providers/fake"
+	"llmgate/internal/domain/llmtypes/fake"
 )
 
 // testPolicy mirrors the production defaults so the Service behaves the

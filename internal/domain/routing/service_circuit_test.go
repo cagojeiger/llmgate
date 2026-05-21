@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"llmgate/internal/domain/llmtypes"
-	"llmgate/internal/providers/fake"
+	"llmgate/internal/domain/llmtypes/fake"
 )
 
 func TestService_CircuitOpensAfterRepeatedFailures(t *testing.T) {

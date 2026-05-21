@@ -3,7 +3,9 @@ package stream
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -39,6 +41,27 @@ func newStreamReceiver(stream llmtypes.Stream, log *slog.Logger) *streamReceiver
 }
 
 func (r *streamReceiver) run() {
+	defer func() {
+		if p := recover(); p != nil {
+			r.log.LogAttrs(context.Background(), slog.LevelError,
+				"stream receiver worker panic",
+				slog.Any("panic", p),
+				slog.String("stack", string(debug.Stack())),
+			)
+			// Surface the panic as an error so the calling Recv() does
+			// not block forever on r.results. The results channel has
+			// capacity 1 and the request/response cadence guarantees it
+			// is empty whenever stream.Recv runs, so a non-blocking send
+			// is safe here.
+			select {
+			case r.results <- recvResult{err: &llmtypes.Error{
+				Kind:    llmtypes.KindPanic,
+				Message: fmt.Sprintf("stream receiver panic: %v", p),
+			}}:
+			default:
+			}
+		}
+	}()
 	for range r.requests {
 		event, err := r.stream.Recv()
 		r.results <- recvResult{event: event, err: err}

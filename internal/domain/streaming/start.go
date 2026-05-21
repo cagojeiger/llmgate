@@ -3,7 +3,10 @@ package streaming
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"log/slog"
+	"runtime/debug"
 
 	"llmgate/internal/domain/llmtypes"
 )
@@ -26,7 +29,26 @@ func ValidateStreamStart(ctx context.Context, raw llmtypes.Stream) (llmtypes.Str
 		err   error
 	}
 	ch := make(chan result, 1)
-	go func() {
+	// Recover defer below intentionally logs via a fresh context — the
+	// parent ctx may have fired by the time the goroutine panics.
+	go func() { //nolint:contextcheck // process-detached recover ctx
+		defer func() {
+			if p := recover(); p != nil {
+				slog.Default().LogAttrs(context.Background(), slog.LevelError,
+					"stream start worker panic",
+					slog.Any("panic", p),
+					slog.String("stack", string(debug.Stack())),
+				)
+				// Non-blocking: ch is capacity 1 and empty at this point.
+				select {
+				case ch <- result{err: &llmtypes.Error{
+					Kind:    llmtypes.KindPanic,
+					Message: fmt.Sprintf("stream start panic: %v", p),
+				}}:
+				default:
+				}
+			}
+		}()
 		event, err := raw.Recv()
 		ch <- result{event, err}
 	}()

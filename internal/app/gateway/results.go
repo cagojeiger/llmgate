@@ -26,5 +26,7 @@ func buildResultSink(ctx context.Context, cfg *config.Server, log *slog.Logger) 
 		QueueSize:     cfg.LLMResultAsyncQueueSize,
 		BatchSize:     cfg.LLMResultAsyncBatchSize,
 		FlushInterval: cfg.LLMResultAsyncFlush,
+		EmitTimeout:   cfg.LLMResultAsyncEmitTimeout,
+		CloseTimeout:  cfg.LLMResultAsyncCloseTimeout,
 	}), nil
 }

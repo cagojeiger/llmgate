@@ -38,6 +38,13 @@ type Server struct {
 	LLMResultAsyncQueueSize int
 	LLMResultAsyncBatchSize int
 	LLMResultAsyncFlush     time.Duration
+	// LLMResultAsyncEmitTimeout caps one NATS publish from the async
+	// worker so a stuck broker cannot freeze the drain loop.
+	LLMResultAsyncEmitTimeout time.Duration
+	// LLMResultAsyncCloseTimeout caps Close()'s wait on the worker
+	// goroutine. Operators sizing terminationGracePeriodSeconds should
+	// budget ShutdownDrainTimeout + this value + a small margin.
+	LLMResultAsyncCloseTimeout time.Duration
 }
 
 func LoadServer() (*Server, error) {
@@ -89,25 +96,35 @@ func LoadServer() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	llmResultEmitTimeout, err := positiveDuration("LLMGATE_LLMRESULT_ASYNC_EMIT_TIMEOUT", "10s")
+	if err != nil {
+		return nil, err
+	}
+	llmResultCloseTimeout, err := positiveDuration("LLMGATE_LLMRESULT_ASYNC_CLOSE_TIMEOUT", "60s")
+	if err != nil {
+		return nil, err
+	}
 
 	return &Server{
-		Addr:                    orDefault("LLMGATE_ADDR", ":8080"),
-		Environment:             orDefault("LLMGATE_ENVIRONMENT", "local"),
-		ShutdownDrainTimeout:    drainTimeout,
-		LogLevel:                logLevel,
-		FallbackOn:              parseCSV("LLMGATE_FALLBACK_ON", "rate_limit,upstream,timeout,network"),
-		CircuitFailures:         circuitFailures,
-		CircuitOpen:             circuitOpen,
-		CircuitMaxOpen:          circuitMaxOpen,
-		CircuitJitter:           circuitJitter,
-		RequestTimeout:          requestTimeout,
-		CompleteTimeout:         completeTimeout,
-		StreamIdleTimeout:       streamIdleTimeout,
-		LLMResultNATSURL:        orDefault("LLMGATE_LLMRESULT_NATS_URL", ""),
-		LLMResultNATSStream:     orDefault("LLMGATE_LLMRESULT_NATS_STREAM", "LLMRESULT"),
-		LLMResultNATSSubject:    orDefault("LLMGATE_LLMRESULT_NATS_SUBJECT", "llmgate.llmresult.finalized"),
-		LLMResultAsyncQueueSize: llmResultQueueSize,
-		LLMResultAsyncBatchSize: llmResultBatchSize,
-		LLMResultAsyncFlush:     llmResultFlush,
+		Addr:                       orDefault("LLMGATE_ADDR", ":8080"),
+		Environment:                orDefault("LLMGATE_ENVIRONMENT", "local"),
+		ShutdownDrainTimeout:       drainTimeout,
+		LogLevel:                   logLevel,
+		FallbackOn:                 parseCSV("LLMGATE_FALLBACK_ON", "rate_limit,upstream,timeout,network"),
+		CircuitFailures:            circuitFailures,
+		CircuitOpen:                circuitOpen,
+		CircuitMaxOpen:             circuitMaxOpen,
+		CircuitJitter:              circuitJitter,
+		RequestTimeout:             requestTimeout,
+		CompleteTimeout:            completeTimeout,
+		StreamIdleTimeout:          streamIdleTimeout,
+		LLMResultNATSURL:           orDefault("LLMGATE_LLMRESULT_NATS_URL", ""),
+		LLMResultNATSStream:        orDefault("LLMGATE_LLMRESULT_NATS_STREAM", "LLMRESULT"),
+		LLMResultNATSSubject:       orDefault("LLMGATE_LLMRESULT_NATS_SUBJECT", "llmgate.llmresult.finalized"),
+		LLMResultAsyncQueueSize:    llmResultQueueSize,
+		LLMResultAsyncBatchSize:    llmResultBatchSize,
+		LLMResultAsyncFlush:        llmResultFlush,
+		LLMResultAsyncEmitTimeout:  llmResultEmitTimeout,
+		LLMResultAsyncCloseTimeout: llmResultCloseTimeout,
 	}, nil
 }

@@ -14,20 +14,23 @@ import (
 	"llmgate/internal/platform/providers/openai"
 )
 
-// BuildRouterInputs walks the catalog and turns it into the runtime shape the
-// Service expects: model id to Provider, alias name to ordered model chain.
-func BuildRouterInputs(cat *catalog.Catalog) (routing.Models, routing.Aliases, error) {
-	return buildRouterInputs(cat, map[llmtypes.Protocol]providerFactory{
-		llmtypes.ProtocolOpenAI:    openaiFactory,
-		llmtypes.ProtocolAnthropic: anthropicFactory,
-	})
-}
-
 // providerFactory builds the Provider for one catalog model. This package
 // bridges catalog yaml shape and env-driven credential lookup; routing stays
 // catalog-agnostic.
 type providerFactory func(*catalog.Model) (llmtypes.Provider, error)
 
+// defaultProviderFactories is the production protocol → factory map. Tests
+// inject a substituted map directly into buildRouterInputs.
+func defaultProviderFactories() map[llmtypes.Protocol]providerFactory {
+	return map[llmtypes.Protocol]providerFactory{
+		llmtypes.ProtocolOpenAI:    openaiFactory,
+		llmtypes.ProtocolAnthropic: anthropicFactory,
+	}
+}
+
+// buildRouterInputs walks the catalog and turns it into the runtime shape
+// the Service expects: model id to Provider, alias name to ordered model
+// chain. Factories let tests inject substituted providers per protocol.
 func buildRouterInputs(cat *catalog.Catalog, factories map[llmtypes.Protocol]providerFactory) (routing.Models, routing.Aliases, error) {
 	models := make(routing.Models, len(cat.Models))
 	for id, m := range cat.Models {

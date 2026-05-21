@@ -58,7 +58,7 @@ func (s *Relay) Run(
 	rec.StatusCode = http.StatusOK
 	call.StatusCode = rec.StatusCode
 
-	receiver := newStreamReceiver(stream)
+	receiver := newStreamReceiver(stream, s.log)
 	defer receiver.Stop()
 	for {
 		event, err := receiver.Recv(ctx, s.idleTimeout)

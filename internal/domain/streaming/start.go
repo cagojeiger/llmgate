@@ -50,7 +50,12 @@ func ValidateStreamStart(ctx context.Context, raw llmtypes.Stream) (llmtypes.Str
 		return &replayStream{first: r.event, underlying: raw}, nil
 	case <-ctx.Done():
 		_ = raw.Close()
-		DrainRecvOrAbandon(ch, CloseGrace)
+		// Bool return is discarded here: the caller's ctx was already
+		// cancelled (timeout or client disconnect) so the outer log
+		// path has the abandon's root cause. We just need the grace
+		// window so the per-request first-event goroutine doesn't
+		// strand the buffered channel.
+		_ = DrainRecvOrAbandon(ch, CloseGrace)
 		return nil, ctx.Err()
 	}
 }

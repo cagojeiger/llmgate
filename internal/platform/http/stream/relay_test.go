@@ -43,7 +43,7 @@ func TestStreamReceiver_RequestsOneRecvAtATime(t *testing.T) {
 		streamEvent("first"),
 		streamEvent("second"),
 	)
-	receiver := newStreamReceiver(s)
+	receiver := newStreamReceiver(s, nil)
 	defer receiver.Stop()
 
 	event, err := receiver.Recv(context.Background(), 30*time.Second)
@@ -132,7 +132,7 @@ func TestStreamReceiver_BoundedDrainOnContextCancel(t *testing.T) {
 
 	s := newStubbornStream()
 	defer s.release()
-	receiver := newStreamReceiver(s)
+	receiver := newStreamReceiver(s, nil)
 	defer receiver.Stop()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -160,7 +160,7 @@ func TestStreamReceiver_BoundedDrainOnIdleTimeout(t *testing.T) {
 
 	s := newStubbornStream()
 	defer s.release()
-	receiver := newStreamReceiver(s)
+	receiver := newStreamReceiver(s, nil)
 	defer receiver.Stop()
 
 	start := time.Now()

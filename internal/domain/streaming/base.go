@@ -16,11 +16,16 @@ var CloseGrace = 5 * time.Second
 // DrainRecvOrAbandon waits up to grace for ch to deliver a result, or returns.
 // The caller's buffered channel keeps the abandoned Recv goroutine from
 // leaking the channel itself; the goroutine is left to complete in the
-// background if the adapter never honors Close.
-func DrainRecvOrAbandon[T any](ch <-chan T, grace time.Duration) {
+// background if the adapter never honors Close. Returns true if the
+// channel delivered before the grace expired (clean), false if the
+// goroutine was abandoned (operator-visible signal that an adapter
+// did not unblock Recv promptly on Close).
+func DrainRecvOrAbandon[T any](ch <-chan T, grace time.Duration) bool {
 	select {
 	case <-ch:
+		return true
 	case <-time.After(grace):
+		return false
 	}
 }
 

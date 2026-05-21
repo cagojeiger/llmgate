@@ -162,6 +162,7 @@ internal/platform/
     anthropic/                Anthropic protocol adapter
   http/
     server/                  chi route + lifecycle + probe wiring
+    middleware/              request id middleware + access log middleware
     auth/                    bearer token extraction + consumer context
     requestid/               request id validation + context propagation
     probe/                   liveness + readiness handlers and state

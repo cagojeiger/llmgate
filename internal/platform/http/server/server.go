@@ -11,6 +11,7 @@ import (
 	"llmgate/internal/domain/consumers"
 	"llmgate/internal/platform/config"
 	httpauth "llmgate/internal/platform/http/auth"
+	httpmiddleware "llmgate/internal/platform/http/middleware"
 	httpprobe "llmgate/internal/platform/http/probe"
 )
 
@@ -67,12 +68,12 @@ func NewWithOptions(opts ServerOptions) *http.Server {
 	// already mounted above, and /metrics joins that public scrape surface
 	// when configured, so nothing in this group ever sees them.
 	r.Group(func(r chi.Router) {
-		r.Use(requestIDMiddleware)
-		// auth.ContextMiddleware must run before accessLogMiddleware so the
+		r.Use(httpmiddleware.RequestID)
+		// auth.ContextMiddleware must run before middleware.AccessLog so the
 		// access log's defer can read whatever the auth middleware later
 		// writes through the shared *httpauth.ConsumerInfo pointer.
 		r.Use(httpauth.ContextMiddleware)
-		r.Use(accessLogMiddleware(log))
+		r.Use(httpmiddleware.AccessLog(log))
 		r.Use(chimiddleware.Recoverer)
 
 		// Auth scope: only chat sits behind auth today. Future

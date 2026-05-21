@@ -125,23 +125,37 @@ func (s *AsyncSink) Close() error {
 		close(s.queue)
 		s.mu.Unlock()
 
+		start := time.Now()
 		if s.closeTimeout > 0 {
 			select {
 			case <-s.done:
+				s.log.LogAttrs(context.Background(), slog.LevelInfo,
+					"llm result async sink drained",
+					slog.Int64("duration_ms", time.Since(start).Milliseconds()),
+					slog.Uint64("dropped_total", s.dropped.Load()),
+				)
 			case <-time.After(s.closeTimeout):
 				// Worker is still inside next.Emit (broker hang). We
 				// abandon it: the underlying NATS conn close below will
 				// usually unblock it; if not, the worker goroutine
-				// outlives Close until process exit. Pending in-queue
-				// events are accepted as lost.
+				// outlives Close until process exit. queue_remaining
+				// is how many already-enqueued events the worker had
+				// not yet handed to next.Emit at the abandon point —
+				// those are lost.
 				s.log.LogAttrs(context.Background(), slog.LevelWarn,
 					"llm result async sink close timeout — worker abandoned",
 					slog.Duration("budget", s.closeTimeout),
+					slog.Int("queue_remaining", len(s.queue)),
 					slog.Uint64("dropped_total", s.dropped.Load()),
 				)
 			}
 		} else {
 			<-s.done
+			s.log.LogAttrs(context.Background(), slog.LevelInfo,
+				"llm result async sink drained",
+				slog.Int64("duration_ms", time.Since(start).Milliseconds()),
+				slog.Uint64("dropped_total", s.dropped.Load()),
+			)
 		}
 		s.closeErr = s.next.Close()
 	})

@@ -9,12 +9,13 @@ import (
 	"testing"
 
 	"llmgate/internal/platform/config"
+	httpchat "llmgate/internal/platform/http/chat"
 )
 
 func newTestServer(t *testing.T, probe *ProbeState) (*httptest.Server, func()) {
 	t.Helper()
 	store := writeStoreYAML(t, "alpha", "good-key")
-	handler := NewHandler(&stubService{}, slog.Default(), &recordingRecorder{}, HandlerConfig{})
+	handler := httpchat.NewHandler(&stubService{}, slog.Default(), &recordingRecorder{}, httpchat.HandlerConfig{})
 	srv := New(&config.Server{Addr: ":0"}, slog.Default(), handler, store, probe)
 	ts := httptest.NewServer(srv.Handler)
 	return ts, ts.Close

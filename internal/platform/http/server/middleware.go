@@ -1,61 +1,27 @@
 package server
 
 import (
-	"context"
-	"crypto/rand"
-	"encoding/hex"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
 
 	httpauth "llmgate/internal/platform/http/auth"
+	"llmgate/internal/platform/http/requestid"
 	"llmgate/internal/platform/http/response"
 )
-
-type requestIDCtxKey struct{}
 
 func requestIDMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get("X-Request-Id")
-		if !validRequestID(id) {
-			id = newRequestID()
+		if !requestid.Valid(id) {
+			id = requestid.New()
 		}
 
 		w.Header().Set("X-Request-Id", id)
 		r.Header.Set("X-Request-Id", id)
-		ctx := context.WithValue(r.Context(), requestIDCtxKey{}, id)
+		ctx := requestid.WithContext(r.Context(), id)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
-}
-
-func RequestIDFromContext(ctx context.Context) string {
-	id, _ := ctx.Value(requestIDCtxKey{}).(string)
-	return id
-}
-
-func validRequestID(id string) bool {
-	if len(id) == 0 || len(id) > 128 {
-		return false
-	}
-	for i := 0; i < len(id); i++ {
-		if id[i] < 0x20 || id[i] > 0x7e {
-			return false
-		}
-	}
-	return true
-}
-
-func newRequestID() string {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err == nil {
-		return hex.EncodeToString(b[:])
-	}
-	n := time.Now().UnixNano()
-	if n == 0 {
-		n = 1
-	}
-	return fmt.Sprintf("ts-%016x", n)
 }
 
 func accessLogMiddleware(log *slog.Logger) func(http.Handler) http.Handler {
@@ -81,7 +47,7 @@ func accessLogMiddleware(log *slog.Logger) func(http.Handler) http.Handler {
 				slog.Int("status", cw.Status()),
 				slog.Int64("duration_ms", time.Since(start).Milliseconds()),
 				slog.Int64("bytes_out", cw.Bytes()),
-				slog.String("request_id", RequestIDFromContext(r.Context())),
+				slog.String("request_id", requestid.FromContext(r.Context())),
 				slog.String("consumer_name", consumer.Name),
 			}
 			if consumer.AuthError != "" {

@@ -18,6 +18,7 @@ import (
 	"llmgate/internal/domain/routing"
 	"llmgate/internal/domain/telemetry"
 	"llmgate/internal/platform/config"
+	httpchat "llmgate/internal/platform/http/chat"
 	"llmgate/internal/platform/http/server"
 	promtelemetry "llmgate/internal/platform/telemetry/prometheus"
 	slogtelemetry "llmgate/internal/platform/telemetry/slog"
@@ -131,7 +132,7 @@ func BuildRuntime(ctx context.Context, in RuntimeInput) (*Runtime, error) {
 		return nil, err
 	}
 
-	handler := server.NewHandler(svc, in.Logger, events, server.HandlerConfig{
+	handler := httpchat.NewHandler(svc, in.Logger, events, httpchat.HandlerConfig{
 		RequestTimeout:    in.Config.RequestTimeout,
 		StreamIdleTimeout: in.Config.StreamIdleTimeout,
 		ServiceVersion:    in.Version,

@@ -1,4 +1,4 @@
-package server
+package chat
 
 import (
 	"bytes"
@@ -19,6 +19,7 @@ import (
 	"llmgate/internal/domain/routing"
 	"llmgate/internal/domain/telemetry"
 	httpauth "llmgate/internal/platform/http/auth"
+	"llmgate/internal/platform/http/requestid"
 	slogtelemetry "llmgate/internal/platform/telemetry/slog"
 )
 
@@ -278,7 +279,7 @@ func decodeSingleLogLine(t *testing.T, buf *bytes.Buffer) map[string]any {
 }
 
 func requestWithTelemetryContext(req *http.Request, requestID string, consumer *httpauth.ConsumerInfo) *http.Request {
-	ctx := context.WithValue(req.Context(), requestIDCtxKey{}, requestID)
+	ctx := requestid.WithContext(req.Context(), requestID)
 	ctx = httpauth.WithConsumer(ctx, consumer)
 	return req.WithContext(ctx)
 }

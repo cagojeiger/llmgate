@@ -57,3 +57,5 @@ internal/app/        부팅 조립, provider 생성, shutdown
 10. env 기반 런타임 설정 로딩은 `internal/platform/config` 로 이동한다.
 11. bearer token auth middleware 는 `internal/platform/http/auth` 로 이동한다.
 12. SSE relay 와 stream receiver 는 `internal/platform/http/stream` 으로 이동한다.
+13. chat completions handler 와 result recorder 는 `internal/platform/http/chat` 으로 이동하고,
+    request id context helper 는 `internal/platform/http/requestid` 로 분리한다.

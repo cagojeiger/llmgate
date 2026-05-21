@@ -1,4 +1,4 @@
-package server
+package chat
 
 import (
 	"context"
@@ -16,6 +16,7 @@ import (
 	"llmgate/internal/domain/routing"
 	"llmgate/internal/domain/telemetry"
 	httpauth "llmgate/internal/platform/http/auth"
+	"llmgate/internal/platform/http/requestid"
 	"llmgate/internal/platform/http/response"
 	httpstream "llmgate/internal/platform/http/stream"
 )
@@ -99,7 +100,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	consumer := httpauth.FromContext(ctx)
 	common := telemetry.NewEventCommon(telemetry.CommonInput{
 		Timestamp:      start,
-		RequestID:      RequestIDFromContext(ctx),
+		RequestID:      requestid.FromContext(ctx),
 		ServiceVersion: h.serviceVersion,
 		Environment:    h.environment,
 		Operation:      "chat.completions",

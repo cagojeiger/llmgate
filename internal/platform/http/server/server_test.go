@@ -16,7 +16,7 @@ func TestNew_ReadTimeoutFollowsRequestTimeout(t *testing.T) {
 		RequestTimeout: 2 * time.Second,
 	}
 
-	srv := New(cfg, nil, &Handler{}, nil, nil)
+	srv := New(cfg, nil, http.NotFoundHandler(), nil, nil)
 
 	if srv.ReadTimeout != cfg.RequestTimeout {
 		t.Fatalf("ReadTimeout = %v, want %v", srv.ReadTimeout, cfg.RequestTimeout)
@@ -32,7 +32,7 @@ func TestNewWithOptions_MetricsMountedOutsideMiddleware(t *testing.T) {
 	})
 	srv := NewWithOptions(ServerOptions{
 		Config:         &config.Server{Addr: ":0"},
-		Handler:        &Handler{},
+		Handler:        http.NotFoundHandler(),
 		MetricsHandler: metrics,
 	})
 	ts := httptest.NewServer(srv.Handler)

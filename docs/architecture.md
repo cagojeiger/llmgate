@@ -34,7 +34,7 @@ graph LR
     subgraph Delivery[Delivery — HTTP transport]
         direction TB
         Server["HTTP Server<br/>chi + middleware + auth"]
-        Handler[Handler]
+        Handler["http/chat Handler"]
         StreamRelay["http/stream Relay"]
         Response["response<br/>errors + SSE frames"]
         ResultEvent["llmresult Event"]
@@ -91,7 +91,7 @@ graph LR
 
 ### 레이어와 의존 방향
 
-- **Delivery** (`internal/platform/http/server`, `internal/platform/http/*`) — HTTP 전송 책임. chi + middleware + auth + Handler + http/stream relay + response wire helpers + probes + metrics. SSE / `[DONE]` / idle timeout / 401 / readiness 같은 *와이어 시맨틱* 을 책임.
+- **Delivery** (`internal/platform/http/server`, `internal/platform/http/*`) — HTTP 전송 책임. chi + middleware + auth + http/chat Handler + http/stream relay + response wire helpers + probes + metrics. SSE / `[DONE]` / idle timeout / 401 / readiness 같은 *와이어 시맨틱* 을 책임.
 - **Domain** (`internal/domain/*`) — 호출 계약과 분석/학습용 durable event 모델. `llmtypes` 는 OpenAI-shaped DTO / Provider 계약이고, `catalog` 는 model / alias 등록 계약이며, `consumers` 는 호출자 identity / allowed_aliases 등록 계약이다. `llmresult` 는 finalized request/response payload 경계이고, `telemetry` 는 audit / call event fact 와 sink/lifecycle 계약이다. `llmresult/sink` 는 요청 경로와 remote publish 를 분리하는 bounded delivery 경계다.
 - **App** (`internal/app/gateway`) — catalog / consumers 로딩, provider / router / telemetry / sink / HTTP server 조립, listen / graceful shutdown 실행 책임. `cmd/llmgate` 는 CLI entrypoint 와 process input 준비에 집중한다.
 - **Routing** (`internal/domain/routing/`) — *standalone* 서비스. alias → chain 해석, fallback 적격 판정, 회로 차단. stdlib + `llmtypes` 만 import. HTTP 외 frontend (CLI / queue / gRPC) 가 `routing.NewService(models, aliases, ...)` 만 호출하면 그대로 구동.
@@ -103,7 +103,7 @@ graph LR
 |---|---|---|
 | Delivery | HTTP Server | chi 라우터 + request_id / clientContext / access log / recoverer / read+request timeout. `/v1/chat/completions` (auth 보호), `/healthz/live` · `/healthz/ready` · `/healthz` (공개), 선택적 `/metrics` (middleware 밖) |
 | Delivery | http/auth | `Authorization: Bearer` 추출 → sha256 → consumers Store lookup → ctx 에 ConsumerInfo 기록. 실패해도 short-circuit 안 함 — Handler 가 audit-always emit ([ADR 003](adr/003-consumers.md)) |
-| Delivery | Handler | 요청 디코드, stream / non-stream 분기. ConsumerInfo 로 `AuditEvent` / `CallEvent` 공통 키를 채움 + auth 실패 시 401. 요청 총 wall-clock 한도의 권위자 ([ADR 005](adr/005-timeout-authority.md)) |
+| Delivery | http/chat | 요청 디코드, stream / non-stream 분기. ConsumerInfo 로 `AuditEvent` / `CallEvent` 공통 키를 채움 + auth 실패 시 401. 요청 총 wall-clock 한도의 권위자 ([ADR 005](adr/005-timeout-authority.md)) |
 | Delivery | response | OpenAI-style error envelope, Retry-After, SSE frame writer, response status/bytes accounting |
 | Delivery | http/stream | 스트림 열린 뒤 SSE wire transcript. 이벤트 전송, idle timeout, client_closed, mid-stream error, `[DONE]` ([ADR 004](adr/004-fallback-policy.md)). 스트림 idle 한도의 권위자 ([ADR 005](adr/005-timeout-authority.md)) |
 | Delivery | ProbeState | SIGTERM 시 `MarkShuttingDown()` → readiness 만 503. liveness · in-flight 영향 없음 |
@@ -163,6 +163,7 @@ internal/platform/
   http/
     server/                  chi route + lifecycle + probe wiring
     auth/                    bearer token extraction + consumer context
+    requestid/               request id validation + context propagation
     chat/                    chat completions handler + result recorder
     stream/                  SSE relay + stream receiver
     response/                OpenAI-style error + SSE frame + response accounting

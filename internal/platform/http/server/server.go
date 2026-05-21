@@ -16,13 +16,13 @@ import (
 type ServerOptions struct {
 	Config         *config.Server
 	Log            *slog.Logger
-	Handler        *Handler
+	Handler        http.Handler
 	Consumers      *consumers.Store
 	Probe          *ProbeState
 	MetricsHandler http.Handler
 }
 
-func New(cfg *config.Server, log *slog.Logger, h *Handler, store *consumers.Store, probe *ProbeState) *http.Server {
+func New(cfg *config.Server, log *slog.Logger, h http.Handler, store *consumers.Store, probe *ProbeState) *http.Server {
 	return NewWithOptions(ServerOptions{
 		Config:    cfg,
 		Log:       log,

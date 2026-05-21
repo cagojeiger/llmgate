@@ -93,7 +93,7 @@ func TestHandler_PanicAfterResponseStarted_DoesNotCorruptWireBody(t *testing.T) 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
 
 	inner := httptest.NewRecorder()
-	// Simulate streamRelay having already flushed 200/SSE headers.
+	// Simulate http/stream relay having already flushed 200/SSE headers.
 	cw := response.NewCountingWriter(inner)
 	cw.WriteHeader(http.StatusOK)
 

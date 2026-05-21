@@ -1,4 +1,4 @@
-package server
+package stream
 
 import (
 	"context"
@@ -16,28 +16,28 @@ import (
 	"llmgate/internal/platform/http/response"
 )
 
-// streamRelay owns the SSE wire transcript for one streaming
+// Relay owns the SSE wire transcript for one streaming
 // request. Caller (Handler) handles the pre-stream phases (parse →
 // Service → call event adoption) and the deferred Stream.Close /
-// stream summary adoption; streamRelay takes over once a Stream is in
+// stream summary adoption; Relay takes over once a Stream is in
 // hand and runs the Recv loop until terminal state — EOF / idle
 // timeout / client disconnect / mid-stream provider error / encode
 // failure — translating each into the right SSE wire pattern and
 // audit fields.
-type streamRelay struct {
+type Relay struct {
 	log         *slog.Logger
 	idleTimeout time.Duration
 }
 
-func newStreamRelay(log *slog.Logger, idleTimeout time.Duration) *streamRelay {
-	return &streamRelay{log: log, idleTimeout: idleTimeout}
+func NewRelay(log *slog.Logger, idleTimeout time.Duration) *Relay {
+	return &Relay{log: log, idleTimeout: idleTimeout}
 }
 
 // Run drives the SSE wire response. Returns when the stream has been
 // fully drained or a terminal condition was reached. rec/call are mutated in
 // place: StatusCode, ResponseBytes, Kind. The caller's deferred
 // stream.Close() and telemetry.AdoptStreamSummary() finalize the rest.
-func (s *streamRelay) Run(
+func (s *Relay) Run(
 	ctx context.Context,
 	w http.ResponseWriter,
 	stream llmtypes.Stream,
@@ -109,7 +109,7 @@ func (s *streamRelay) Run(
 // recordClientClosed marks rec terminal state as a client disconnect.
 // Caller should return immediately afterwards — further writes would
 // fail the same way and SendDone would too.
-func (s *streamRelay) recordClientClosed(
+func (s *Relay) recordClientClosed(
 	ctx context.Context,
 	rec *telemetry.AuditEvent,
 	call *telemetry.CallEvent,
@@ -199,4 +199,9 @@ func streamContextError(err error) error {
 		return &llmtypes.Error{Kind: llmtypes.KindTimeout, Message: err.Error(), Cause: err}
 	}
 	return err
+}
+
+func adoptError(rec *telemetry.AuditEvent, err error) {
+	rec.Kind = llmtypes.ErrorKindOf(err)
+	rec.StatusCode = response.Status(err)
 }

@@ -14,7 +14,7 @@
 
 - **요청 전체 시간(wall-clock)** → Handler. 호출 진입에서 한 번 건다. 모든 단계가 이 한도 안에 들어간다. 호출자에게 노출되는 상한.
 - **비스트림에서 한 시도 시간** → routing.Service. 시도가 끝나면 즉시 풀린다. 폴백을 트리거하는 자연스러운 짝이라 [ADR 004](004-fallback-policy.md)와 같은 컴포넌트에 둔다.
-- **스트리밍 중 이벤트 사이 유휴(idle) 시간** → streamRelay. 누적 한도가 아니라 사이 간격 — 길게 흐르는 응답이 자연스럽게 통과한다.
+- **스트리밍 중 이벤트 사이 유휴(idle) 시간** → http/stream relay. 누적 한도가 아니라 사이 간격 — 길게 흐르는 응답이 자연스럽게 통과한다.
 
 ### 경계선
 
@@ -25,7 +25,7 @@
 ## 근거
 
 - 동시에 살아 있는 타이머가 줄어, 취소 순서 버그가 생길 여지가 줄어든다.
-- `record.error_kind`가 컴포넌트의 책임으로 바로 매핑된다 (Handler / Service / streamRelay).
+- `record.error_kind`가 컴포넌트의 책임으로 바로 매핑된다 (Handler / Service / http/stream relay).
 - 새 한도를 더할 때도 같은 잣대를 쓴다 — *어느 단계의 권위자에 둘 것인가*부터 묻는다 ([ADR 001](001-component-boundaries.md)).
 
 ## 결과

@@ -31,9 +31,9 @@ type streamToolCallState struct {
 // tool_calls fragment carrying id + function.name. Other block types
 // (text / thinking) need no preamble in the OpenAI wire — the deltas
 // themselves carry everything callers expect.
-func (s *stream) handleContentBlockStart(event *anthropicStreamEvent) (bool, *llmtypes.Event, error) {
+func (s *stream) handleContentBlockStart(event *anthropicStreamEvent) streamEventResult {
 	if event.ContentBlock == nil || event.ContentBlock.Type != "tool_use" {
-		return false, nil, nil
+		return skipStreamEvent()
 	}
 	state := &streamToolCallState{
 		ID:    event.ContentBlock.ID,
@@ -48,49 +48,49 @@ func (s *stream) handleContentBlockStart(event *anthropicStreamEvent) (bool, *ll
 		// Wait for input_json_delta events to fill in the real args; if
 		// none arrive (zero-arg tool) content_block_stop will flush "{}".
 		s.toolCalls[event.Index] = state
-		return false, nil, nil
+		return skipStreamEvent()
 	}
 	state.Started = true
 	s.toolCalls[event.Index] = state
-	return true, s.buildDeltaEvent(buildToolCallStartDelta(state, initial)), nil
+	return emitStreamEvent(s.buildDeltaEvent(buildToolCallStartDelta(state, initial)))
 }
 
 // handleInputJSONDelta is the body of content_block_delta when Anthropic
 // is incrementally streaming a tool_use block's JSON input. The first
 // delta also carries the id + name (because content_block_start used a
 // placeholder); subsequent deltas only extend arguments.
-func (s *stream) handleInputJSONDelta(event *anthropicStreamEvent) (bool, *llmtypes.Event, error) {
+func (s *stream) handleInputJSONDelta(event *anthropicStreamEvent) streamEventResult {
 	if event.Delta.PartialJSON == "" {
-		return false, nil, nil
+		return skipStreamEvent()
 	}
 	state, ok := s.toolCalls[event.Index]
 	if !ok || state == nil {
-		return false, nil, nil
+		return skipStreamEvent()
 	}
 	if state.Placeholder {
 		state.Placeholder = false
 	}
 	if !state.Started {
 		state.Started = true
-		return true, s.buildDeltaEvent(buildToolCallStartDelta(state, event.Delta.PartialJSON)), nil
+		return emitStreamEvent(s.buildDeltaEvent(buildToolCallStartDelta(state, event.Delta.PartialJSON)))
 	}
-	return true, s.buildDeltaEvent(buildToolCallArgsDelta(state.Index, event.Delta.PartialJSON)), nil
+	return emitStreamEvent(s.buildDeltaEvent(buildToolCallArgsDelta(state.Index, event.Delta.PartialJSON)))
 }
 
 // handleContentBlockStop flushes the deferred placeholder case for a
 // zero-argument tool (content_block_start saw input "{}", no
 // input_json_delta events arrived, content_block_stop now closes the
 // block). Other paths have already emitted their deltas.
-func (s *stream) handleContentBlockStop(event *anthropicStreamEvent) (bool, *llmtypes.Event, error) {
+func (s *stream) handleContentBlockStop(event *anthropicStreamEvent) streamEventResult {
 	state, ok := s.toolCalls[event.Index]
 	if !ok || state == nil || state.Started {
-		return false, nil, nil
+		return skipStreamEvent()
 	}
 	if !state.Placeholder {
-		return false, nil, nil
+		return skipStreamEvent()
 	}
 	state.Started = true
-	return true, s.buildDeltaEvent(buildToolCallStartDelta(state, "{}")), nil
+	return emitStreamEvent(s.buildDeltaEvent(buildToolCallStartDelta(state, "{}")))
 }
 
 // initialToolArguments returns the trimmed JSON form of an Anthropic

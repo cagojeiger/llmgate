@@ -3,6 +3,7 @@ package assembly
 import (
 	"encoding/json"
 	"sort"
+	"strings"
 
 	"llmgate/internal/domain/llmtypes"
 )
@@ -98,8 +99,8 @@ func (b *StreamResponseBuilder) choice(index int) *streamChoice {
 type streamChoice struct {
 	index            int
 	role             string
-	content          string
-	reasoningContent string
+	content          strings.Builder
+	reasoningContent strings.Builder
 	finishReason     string
 	logprobs         json.RawMessage
 	msgExtra         map[string]json.RawMessage
@@ -111,8 +112,8 @@ func (c *streamChoice) add(choice llmtypes.ChoiceDelta) {
 	if choice.Delta.Role != "" {
 		c.role = choice.Delta.Role
 	}
-	c.content += choice.Delta.Content
-	c.reasoningContent += choice.Delta.ReasoningContent
+	c.content.WriteString(choice.Delta.Content)
+	c.reasoningContent.WriteString(choice.Delta.ReasoningContent)
 	if choice.FinishReason != "" {
 		c.finishReason = choice.FinishReason
 	}
@@ -129,8 +130,8 @@ func (c *streamChoice) choice() llmtypes.Choice {
 		Index: c.index,
 		Message: llmtypes.Message{
 			Role:             c.role,
-			Content:          c.content,
-			ReasoningContent: c.reasoningContent,
+			Content:          c.content.String(),
+			ReasoningContent: c.reasoningContent.String(),
 			Extra:            cloneRawMap(c.msgExtra),
 		},
 		FinishReason: c.finishReason,

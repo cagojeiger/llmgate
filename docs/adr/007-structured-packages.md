@@ -64,3 +64,8 @@ internal/app/        부팅 조립, provider 생성, shutdown
 16. stream delta → final response assembly 는 `internal/domain/llmresult/assembly` 로 이동한다.
 17. finalized LLM result event schema 와 telemetry builder 는 `internal/domain/llmresult/schema`
     로 이동한다.
+
+## 마이그레이션 완료 기록
+
+2026-05-21 기준 위 순서의 구조 이동은 완료됐다. 이후 새 코드도 같은 세 밴드와 하위 소유권을
+따른다.

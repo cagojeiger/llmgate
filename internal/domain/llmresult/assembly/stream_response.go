@@ -1,4 +1,4 @@
-package llmresult
+package assembly
 
 import (
 	"encoding/json"
@@ -255,4 +255,19 @@ func cloneRawMap(in map[string]json.RawMessage) map[string]json.RawMessage {
 	out := make(map[string]json.RawMessage, len(in))
 	mergeRaw(out, in)
 	return out
+}
+
+func cloneUsage(usage *llmtypes.Usage) *llmtypes.Usage {
+	if usage == nil {
+		return nil
+	}
+	out, err := json.Marshal(usage)
+	if err != nil {
+		return nil
+	}
+	var cloned llmtypes.Usage
+	if err := json.Unmarshal(out, &cloned); err != nil {
+		return nil
+	}
+	return &cloned
 }

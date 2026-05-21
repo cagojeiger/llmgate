@@ -2,8 +2,9 @@ package telemetry
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
+
+	"llmgate/internal/domain/sinkutil"
 )
 
 // Event is the common contract for telemetry facts emitted by the gateway.
@@ -16,16 +17,15 @@ type Event interface {
 // EventSink receives finalized telemetry events. Implementations must not
 // assume they can block the request path indefinitely; future remote sinks
 // should wrap their transport with a bounded async queue.
-type EventSink interface {
-	Emit(ctx context.Context, event Event)
-	Close() error
-}
+type EventSink = sinkutil.Sink[Event]
 
 // NopSink drops every event.
-type NopSink struct{}
+type NopSink = sinkutil.Nop[Event]
 
-func (NopSink) Emit(context.Context, Event) {}
-func (NopSink) Close() error                { return nil }
+// NewRecoveringSink wraps next so a panic in Emit is logged and isolated.
+func NewRecoveringSink(next EventSink, log *slog.Logger) EventSink {
+	return sinkutil.NewRecovering(next, log, "telemetry sink panic", eventTypeOf)
+}
 
 // FanoutSink fans each event out to every contained sink. A panic in one sink
 // is logged and isolated so later sinks still receive the event.
@@ -46,7 +46,8 @@ func (s *FanoutSink) Emit(ctx context.Context, event Event) {
 		if sink == nil {
 			continue
 		}
-		emitRecover(ctx, s.log, sink, event)
+		// Wrap per-call so one sink panic does not stop later sinks.
+		sinkutil.NewRecovering(sink, s.log, "telemetry sink panic", eventTypeOf).Emit(ctx, event)
 	}
 }
 
@@ -61,42 +62,6 @@ func (s *FanoutSink) Close() error {
 		}
 	}
 	return firstErr
-}
-
-// RecoveringSink wraps one sink with panic isolation and structured reporting.
-type RecoveringSink struct {
-	next EventSink
-	log  *slog.Logger
-}
-
-func NewRecoveringSink(next EventSink, log *slog.Logger) EventSink {
-	if next == nil {
-		next = NopSink{}
-	}
-	if log == nil {
-		log = slog.Default()
-	}
-	return &RecoveringSink{next: next, log: log}
-}
-
-func (s *RecoveringSink) Emit(ctx context.Context, event Event) {
-	emitRecover(ctx, s.log, s.next, event)
-}
-
-func (s *RecoveringSink) Close() error {
-	return s.next.Close()
-}
-
-func emitRecover(ctx context.Context, log *slog.Logger, sink EventSink, event Event) {
-	defer func() {
-		if p := recover(); p != nil && log != nil {
-			log.LogAttrs(ctx, slog.LevelError, "telemetry sink panic",
-				slog.String("event_type", eventTypeOf(event)),
-				slog.String("panic", fmt.Sprint(p)),
-			)
-		}
-	}()
-	sink.Emit(ctx, event)
 }
 
 func eventTypeOf(event Event) string {

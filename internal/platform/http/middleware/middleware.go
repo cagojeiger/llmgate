@@ -14,7 +14,7 @@ func RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get("X-Request-Id")
 		if !requestid.Valid(id) {
-			id = requestid.New()
+			id = requestid.MustNew()
 		}
 
 		w.Header().Set("X-Request-Id", id)

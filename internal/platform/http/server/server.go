@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	chimiddleware "github.com/go-chi/chi/v5/middleware"
 
 	"llmgate/internal/domain/consumers"
 	"llmgate/internal/platform/config"
@@ -64,17 +63,14 @@ func NewWithOptions(opts ServerOptions) *http.Server {
 		r.Handle("/metrics", opts.MetricsHandler)
 	}
 
-	// Business traffic carries the full middleware chain. Probes are
-	// already mounted above, and /metrics joins that public scrape surface
+	// Business traffic carries the full middleware chain. Order is
+	// encoded inside StandardChain.Apply so it cannot drift by
+	// re-arranging r.Use calls at this site. Probes are already
+	// mounted above, and /metrics joins that public scrape surface
 	// when configured, so nothing in this group ever sees them.
+	chain := httpmiddleware.NewStandardChain(log)
 	r.Group(func(r chi.Router) {
-		r.Use(httpmiddleware.RequestID)
-		// auth.ContextMiddleware must run before middleware.AccessLog so the
-		// access log's defer can read whatever the auth middleware later
-		// writes through the shared *httpauth.ConsumerInfo pointer.
-		r.Use(httpauth.ContextMiddleware)
-		r.Use(httpmiddleware.AccessLog(log))
-		r.Use(chimiddleware.Recoverer)
+		chain.Apply(r)
 
 		// Auth scope: only chat sits behind auth today. Future
 		// auth-required routes go inside this inner Group.

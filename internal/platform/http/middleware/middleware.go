@@ -1,4 +1,4 @@
-package server
+package middleware
 
 import (
 	"log/slog"
@@ -10,7 +10,7 @@ import (
 	"llmgate/internal/platform/http/response"
 )
 
-func requestIDMiddleware(next http.Handler) http.Handler {
+func RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get("X-Request-Id")
 		if !requestid.Valid(id) {
@@ -24,7 +24,7 @@ func requestIDMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func accessLogMiddleware(log *slog.Logger) func(http.Handler) http.Handler {
+func AccessLog(log *slog.Logger) func(http.Handler) http.Handler {
 	if log == nil {
 		log = slog.Default()
 	}

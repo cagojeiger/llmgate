@@ -60,3 +60,4 @@ internal/app/        부팅 조립, provider 생성, shutdown
 13. chat completions handler 와 result recorder 는 `internal/platform/http/chat` 으로 이동하고,
     request id context helper 는 `internal/platform/http/requestid` 로 분리한다.
 14. liveness / readiness probe state 와 handlers 는 `internal/platform/http/probe` 로 이동한다.
+15. request id / access log middleware 는 `internal/platform/http/middleware` 로 이동한다.

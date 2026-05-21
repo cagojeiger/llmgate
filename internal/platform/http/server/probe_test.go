@@ -111,7 +111,7 @@ func TestProbe_PublicWithoutAuth(t *testing.T) {
 func TestProbe_BypassesMiddlewareChain(t *testing.T) {
 	// Probes are mounted outside the global middleware chain. Locking
 	// this in with a response-header check defends against an accidental
-	// `r.Use(requestIDMiddleware)` on the top-level router that would
+	// `r.Use(httpmiddleware.RequestID)` on the top-level router that would
 	// silently pull probes back into the access log / tracing surface.
 	probe := httpprobe.NewState()
 	ts, cleanup := newTestServer(t, probe)
@@ -125,7 +125,7 @@ func TestProbe_BypassesMiddlewareChain(t *testing.T) {
 		_, _ = io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 		if got := resp.Header.Get("X-Request-Id"); got != "" {
-			t.Errorf("%s response carried X-Request-Id=%q; probes must bypass requestIDMiddleware", path, got)
+			t.Errorf("%s response carried X-Request-Id=%q; probes must bypass request id middleware", path, got)
 		}
 	}
 }

@@ -126,6 +126,10 @@ func (r *Service) candidates(model string) ([]candidate, error) {
 	for _, modelID := range chain {
 		p, ok := r.byModel[modelID]
 		if !ok {
+			// Normally caught at catalog load — this surfaces if dynamic
+			// reconfiguration or a test wires an alias chain to a model
+			// id the byModel map does not actually hold.
+			r.log.Warn("skip model: provider missing", slog.String("model", modelID))
 			continue
 		}
 		if r.breakers.isOpen(modelID) {

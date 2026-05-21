@@ -15,6 +15,10 @@ type Provider interface {
 }
 
 type Stream interface {
+	// Recv returns the next chunk in the stream. It must be called from a
+	// single goroutine — implementations do not synchronize per-stream
+	// protocol state across concurrent readers. Recv may be called
+	// concurrently with Close; after Close, Recv returns io.EOF.
 	Recv() (*Event, error)
 	// Close must be safe to call while Recv is blocked, and must cause any
 	// in-flight Recv to return promptly (within seconds, not minutes) — the

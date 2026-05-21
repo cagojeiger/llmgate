@@ -8,7 +8,7 @@ import (
 
 	natsgo "github.com/nats-io/nats.go"
 
-	result "llmgate/internal/domain/llmresult"
+	result "llmgate/internal/domain/llmresult/schema"
 )
 
 func TestPublisher_PublishWritesSubjectHeadersAndPayload(t *testing.T) {

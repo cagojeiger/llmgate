@@ -1,4 +1,4 @@
-package llmresult
+package schema
 
 import (
 	"net/http"

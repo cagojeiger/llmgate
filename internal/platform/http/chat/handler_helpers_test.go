@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"llmgate/internal/domain/llmresult"
+	llmresult "llmgate/internal/domain/llmresult/schema"
 	llmresultsink "llmgate/internal/domain/llmresult/sink"
 	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/routing"

@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"llmgate/internal/domain/llmtypes"
+	"llmgate/internal/domain/llmtypes/fake"
 	"llmgate/internal/domain/routing"
-	"llmgate/internal/providers/fake"
 )
 
 // TestHandler_Stream_ClientDisconnect_MidStream simulates a client that

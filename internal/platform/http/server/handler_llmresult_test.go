@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"llmgate/internal/domain/llmtypes"
+	"llmgate/internal/domain/llmtypes/fake"
 	"llmgate/internal/domain/routing"
-	"llmgate/internal/providers/fake"
 )
 
 func TestHandler_LLMResult_NonStreamFinalized(t *testing.T) {

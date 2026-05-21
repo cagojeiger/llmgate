@@ -95,7 +95,7 @@ graph LR
 - **Domain** (`internal/domain/*`) — 호출 계약과 분석/학습용 durable event 모델. `llmtypes` 는 OpenAI-shaped DTO / Provider 계약이고, `catalog` 는 model / alias 등록 계약이며, `consumers` 는 호출자 identity / allowed_aliases 등록 계약이다. `llmresult` 는 finalized request/response payload 경계이고, `telemetry` 는 audit / call event fact 와 sink/lifecycle 계약이다. `llmresult/sink` 는 요청 경로와 remote publish 를 분리하는 bounded delivery 경계다.
 - **App** (`internal/app/gateway`) — catalog / consumers 로딩, provider / router / telemetry / sink / HTTP server 조립, listen / graceful shutdown 실행 책임. `cmd/llmgate` 는 CLI entrypoint 와 process input 준비에 집중한다.
 - **Routing** (`internal/domain/routing/`) — *standalone* 서비스. alias → chain 해석, fallback 적격 판정, 회로 차단. stdlib + `llmtypes` 만 import. HTTP 외 frontend (CLI / queue / gRPC) 가 `routing.NewService(models, aliases, ...)` 만 호출하면 그대로 구동.
-- **Providers** (`internal/providers/openai|anthropic/`) — `llmtypes.Provider` 구현. vendor 와이어 차이 (status 분류 / 첫 이벤트 검증 / 와이어 정규화) 를 자기 안에 가둠.
+- **Providers** (`internal/platform/providers/openai|anthropic/`) — `llmtypes.Provider` 구현. vendor 와이어 차이 (status 분류 / 첫 이벤트 검증 / 와이어 정규화) 를 자기 안에 가둠.
 - **Contracts** (`internal/domain/llmtypes/`) — Provider / Stream / Request / Response / Error / Attempt — 모든 런타임 레이어가 import 하는 *도메인 계약 모듈*. 런타임 호출 노드가 아니므로 시스템 지도에서 점선 import 로만 표시.
 - **boundary**: Routing 이 Delivery 로 돌려주는 형식은 `llmtypes.Stream` (인터페이스) / `llmtypes.Response` (struct). 둘 다 HTTP 모름. ADR 004 의 *first-event boundary* = 시간축에서의 레이어 경계 표현.
 
@@ -156,6 +156,9 @@ internal/domain/
     sink/                    no-op / recovering / bounded async delivery pipeline
 
 internal/platform/
+  providers/
+    openai/                   OpenAI protocol adapter
+    anthropic/                Anthropic protocol adapter
   http/
     server/                  chi route + lifecycle + probe wiring
     auth/                    bearer token extraction + consumer context

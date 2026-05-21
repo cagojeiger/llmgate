@@ -14,7 +14,7 @@
 
 - **Handler** — HTTP 의미 경계, 스트림 / 비스트림 분기. 요청 전체의 시간 한도(wall-clock)를 정한다 ([ADR 005](005-timeout-authority.md)).
 - **routing.Service** — 별명을 후보 모델 체인으로 풀고, 폴백 적격성과 회로 차단을 판정한다 ([ADR 004](004-fallback-policy.md)). 비스트림에서 한 시도당 시간 한도도 여기서 정한다 ([ADR 005](005-timeout-authority.md)).
-- **Adapter** (`internal/providers/{openai,anthropic}`) — 한 벤더의 와이어 프로토콜을 다룬다. 응답 상태 분류와 첫 이벤트 검증이 여기 산다.
+- **Adapter** (`internal/platform/providers/{openai,anthropic}`) — 한 벤더의 와이어 프로토콜을 다룬다. 응답 상태 분류와 첫 이벤트 검증이 여기 산다.
 - **streamRelay** — 스트림이 열린 뒤의 SSE 전송. 이벤트 사이 유휴 한도(idle), 취소, 종결을 담당한다 ([ADR 005](005-timeout-authority.md)).
 - **Telemetry EventSink** — finalized `AuditEvent` / `CallEvent` delivery boundary. 기본 구현은 stdout JSON 이고, 원격 sink 는 이 경계 뒤에 붙는다.
 

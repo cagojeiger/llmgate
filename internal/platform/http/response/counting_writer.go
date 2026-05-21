@@ -50,3 +50,21 @@ func (w *CountingWriter) Flush() {
 func (w *CountingWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
 }
+
+// HeadersWritten reports whether the response chain has already flushed
+// status/headers. It walks Unwrap() so middleware wrappers added between
+// the AccessLog CountingWriter and the handler cannot silently hide the
+// signal — recoverPanic relies on this to avoid appending a JSON error
+// envelope into an in-flight SSE stream.
+func HeadersWritten(w http.ResponseWriter) bool {
+	for {
+		if started, ok := w.(interface{ WroteHeader() bool }); ok {
+			return started.WroteHeader()
+		}
+		u, ok := w.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			return false
+		}
+		w = u.Unwrap()
+	}
+}

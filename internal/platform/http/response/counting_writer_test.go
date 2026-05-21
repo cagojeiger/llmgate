@@ -42,3 +42,45 @@ func TestCountingWriter_WriteHeaderOnlyOnce(t *testing.T) {
 		t.Errorf("rec.Code = %d, want 202", rec.Code)
 	}
 }
+
+// passThroughWrapper mimics a downstream middleware that wraps the
+// upstream ResponseWriter without exposing WroteHeader. It implements
+// Unwrap so HeadersWritten can still reach the CountingWriter beneath.
+type passThroughWrapper struct {
+	http.ResponseWriter
+}
+
+func (p *passThroughWrapper) Unwrap() http.ResponseWriter { return p.ResponseWriter }
+
+func TestHeadersWritten_DirectCountingWriter(t *testing.T) {
+	cw := NewCountingWriter(httptest.NewRecorder())
+	if HeadersWritten(cw) {
+		t.Error("HeadersWritten = true before any write, want false")
+	}
+	cw.WriteHeader(http.StatusOK)
+	if !HeadersWritten(cw) {
+		t.Error("HeadersWritten = false after WriteHeader, want true")
+	}
+}
+
+func TestHeadersWritten_WrappedCountingWriter(t *testing.T) {
+	cw := NewCountingWriter(httptest.NewRecorder())
+	wrapped := &passThroughWrapper{ResponseWriter: cw}
+	if HeadersWritten(wrapped) {
+		t.Error("HeadersWritten through wrapper = true before write, want false")
+	}
+	cw.WriteHeader(http.StatusOK)
+	if !HeadersWritten(wrapped) {
+		t.Error("HeadersWritten through wrapper = false after write, want true")
+	}
+}
+
+func TestHeadersWritten_NoSignal(t *testing.T) {
+	// A bare ResponseWriter without WroteHeader and without Unwrap.
+	// The current convention is to treat that as "headers not written" —
+	// the rare case is recoverPanic before any wrap was installed, where
+	// it is still safe to write the JSON envelope.
+	if HeadersWritten(httptest.NewRecorder()) {
+		t.Error("HeadersWritten on bare recorder = true, want false")
+	}
+}

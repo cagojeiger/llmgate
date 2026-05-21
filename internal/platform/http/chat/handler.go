@@ -181,8 +181,10 @@ func (h *Handler) recoverPanic(ctx context.Context, w http.ResponseWriter, rec *
 		slog.String("stack", string(debug.Stack())),
 	)
 	// A second WriteHeader is ignored, but body bytes would still corrupt
-	// an in-flight SSE stream.
-	if started, ok := w.(interface{ WroteHeader() bool }); ok && started.WroteHeader() {
+	// an in-flight SSE stream. HeadersWritten walks the Unwrap chain so a
+	// middleware wrap between AccessLog and the handler cannot silently
+	// hide the CountingWriter's signal.
+	if response.HeadersWritten(w) {
 		return
 	}
 	response.WriteError(w, &llmtypes.Error{Kind: llmtypes.KindUnknown, Message: "internal server error"})

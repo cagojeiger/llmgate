@@ -3,6 +3,7 @@ package assembly
 import (
 	"encoding/json"
 	"sort"
+	"strings"
 )
 
 func (c *streamChoice) addToolCalls(raw json.RawMessage) {
@@ -61,7 +62,7 @@ type toolCallState struct {
 	ID        string
 	Type      string
 	Name      string
-	Arguments string
+	arguments strings.Builder
 }
 
 func (s *toolCallState) add(delta toolCallDelta) {
@@ -75,7 +76,7 @@ func (s *toolCallState) add(delta toolCallDelta) {
 		if delta.Function.Name != "" {
 			s.Name = delta.Function.Name
 		}
-		s.Arguments += delta.Function.Arguments
+		s.arguments.WriteString(delta.Function.Arguments)
 	}
 }
 
@@ -89,7 +90,7 @@ func (s *toolCallState) wire() map[string]any {
 		"type": typ,
 		"function": map[string]any{
 			"name":      s.Name,
-			"arguments": s.Arguments,
+			"arguments": s.arguments.String(),
 		},
 	}
 }

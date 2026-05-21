@@ -3,11 +3,9 @@ package chat
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
-	"strings"
 	"time"
 
 	llmresultassembly "llmgate/internal/domain/llmresult/assembly"
@@ -20,8 +18,6 @@ import (
 	"llmgate/internal/platform/http/response"
 	httpstream "llmgate/internal/platform/http/stream"
 )
-
-const maxChatRequestBytes = 1 << 20
 
 // ChatService is the upstream contract Handler needs.
 type ChatService interface {
@@ -143,27 +139,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxChatRequestBytes))
+	req, requestBytes, err := decodeChatRequest(w, r)
 	if err != nil {
-		perr := &llmtypes.Error{Kind: llmtypes.KindBadRequest, Message: "read request body: " + err.Error()}
-		adoptError(rec, perr)
-		response.WriteError(w, perr)
-		return
-	}
-	requestBytes := int64(len(body))
-
-	req = &llmtypes.Request{}
-	if err := json.Unmarshal(body, req); err != nil {
-		perr := &llmtypes.Error{Kind: llmtypes.KindBadRequest, Message: "decode request: " + err.Error()}
-		adoptError(rec, perr)
-		response.WriteError(w, perr)
+		adoptError(rec, err)
+		response.WriteError(w, err)
 		return
 	}
 	results.Request(req)
 	telemetry.SetResource(rec, "llm_model", req.Model)
-	if req.Model != "" && !isModelAllowed(req.Model, consumer.AllowedAliases) {
+	if !modelAllowed(req.Model, consumer.AllowedAliases) {
 		telemetry.MarkPolicyDenied(rec, telemetry.DenyReasonModelNotAllowed)
-		perr := &llmtypes.Error{Kind: llmtypes.KindForbidden, Message: "model not allowed"}
+		perr := modelNotAllowedError()
 		adoptError(rec, perr)
 		response.WriteError(w, perr)
 		return
@@ -178,18 +164,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	results.Response(h.serveComplete(w, r, req, rec, call))
-}
-
-func isModelAllowed(model string, allowed []string) bool {
-	if len(allowed) == 0 {
-		return true
-	}
-	for _, alias := range allowed {
-		if strings.EqualFold(model, alias) {
-			return true
-		}
-	}
-	return false
 }
 
 // recoverPanic stamps panic outcomes for audit, preserves

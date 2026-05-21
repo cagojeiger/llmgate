@@ -46,10 +46,28 @@ operation = chat.completions | chat.completions.stream
 success error_kind = none
 ```
 
-```text
-caller 오류:  auth, bad_request, forbidden
-gateway/vendor 오류: upstream, timeout, panic, empty_response, client_closed
-```
+`error_kind` 값은 코드의 `llmtypes.ErrorKind` enum 이 source of truth 다. metric recorder 는
+성공처럼 kind 가 비어 있는 경우 `none` 으로 내보낸다.
+
+| error_kind | 의미 |
+|---|---|
+| `none` | 성공 또는 error kind 없음 |
+| `auth` | 호출자 인증 실패 |
+| `forbidden` | gateway 정책 거부 |
+| `rate_limit` | upstream rate limit |
+| `bad_request` | 요청 decode / validation / unknown model |
+| `context_length` | provider context length 초과 |
+| `content_filter` | provider content filter / refusal |
+| `upstream` | provider 5xx 등 upstream 실패 |
+| `timeout` | 요청 / attempt timeout |
+| `network` | transport / connection 실패 |
+| `empty_response` | provider 응답 body 또는 stream event 없음 |
+| `client_closed` | 호출자 연결 종료 |
+| `panic` | handler panic |
+| `unknown` | 분류되지 않은 오류 |
+
+Grafana Overview 의 caller / gateway-vendor split 은 빠른 incident triage 용 grouping 이다.
+완전한 enum 목록은 위 표를 기준으로 보고, 전체 오류율은 `error_kind!="none"` 을 사용한다.
 
 ## LLM upstream
 
@@ -85,10 +103,17 @@ audit/call log 또는 trace 분석 계층의 책임이다.
 ```text
 process_cpu_seconds_total
 process_resident_memory_bytes
+process_open_fds
+process_max_fds
 go_goroutines
 go_threads
+go_gc_duration_seconds
 go_memstats_*
 ```
+
+runtime resource metric 은 `collectors.NewGoCollector()` 와
+`collectors.NewProcessCollector()` 가 노출하는 값이다. 위 목록은 현재 dashboard 가 직접 보는
+대표 값이며, collector 가 노출하는 전체 Go / process metric 목록을 다시 정의하지 않는다.
 
 llmgate 자체 saturation gauge:
 

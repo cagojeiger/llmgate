@@ -17,6 +17,7 @@ import (
 	"llmgate/internal/domain/telemetry"
 	httpauth "llmgate/internal/platform/http/auth"
 	"llmgate/internal/platform/http/response"
+	httpstream "llmgate/internal/platform/http/stream"
 )
 
 const maxChatRequestBytes = 1 << 20
@@ -36,7 +37,7 @@ type Handler struct {
 	serviceVersion string
 	environment    string
 	requestTimeout time.Duration
-	stream         *streamRelay
+	stream         *httpstream.Relay
 }
 
 type HandlerConfig struct {
@@ -79,7 +80,7 @@ func NewHandler(service ChatService, log *slog.Logger, events telemetry.EventSin
 		serviceVersion: serviceVersion,
 		environment:    environment,
 		requestTimeout: cfg.RequestTimeout,
-		stream:         newStreamRelay(log, cfg.StreamIdleTimeout),
+		stream:         httpstream.NewRelay(log, cfg.StreamIdleTimeout),
 	}
 }
 

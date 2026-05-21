@@ -70,7 +70,7 @@ func toOpenAIResponse(in *anthropicResponse) (*llmtypes.Response, error) {
 // see a valid object literal. No path can fail — this is a structural
 // reshape of already-decoded data.
 func extractToolCalls(blocks []anthropicContent) []map[string]any {
-	var out []map[string]any
+	out := make([]map[string]any, 0, len(blocks))
 	for _, b := range blocks {
 		if b.Type != "tool_use" || b.Name == "" {
 			continue

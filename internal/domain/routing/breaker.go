@@ -139,7 +139,7 @@ func (s *breakerStore) nextOpenDurationLocked(opens int) time.Duration {
 	if jitter > 1 {
 		jitter = 1
 	}
-	scale := 1 - jitter + rand.Float64()*(2*jitter)
+	scale := 1 - jitter + rand.Float64()*(2*jitter) //nolint:gosec // jitter; cryptographic randomness not required
 	jittered := time.Duration(float64(cooldown) * scale)
 	if jittered > maxOpen {
 		return maxOpen

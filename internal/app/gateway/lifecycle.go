@@ -3,7 +3,6 @@ package gateway
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -11,7 +10,7 @@ import (
 
 func (r *Runtime) Run(ctx context.Context) error {
 	if r == nil || r.Server == nil {
-		return fmt.Errorf("gateway runtime server is required")
+		return errors.New("gateway runtime server is required")
 	}
 	log := r.logger()
 	errCh := make(chan error, 1)
@@ -33,7 +32,7 @@ func (r *Runtime) Run(ctx context.Context) error {
 	if r.Probe != nil {
 		r.Probe.MarkShuttingDown()
 	}
-	r.shutdown()
+	r.shutdown() //nolint:contextcheck // shutdown creates a fresh deadline after parent ctx is already done (SIGTERM caught)
 	if serveErr != nil {
 		return serveErr
 	}

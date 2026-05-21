@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -79,13 +80,13 @@ func LoadRuntime(ctx context.Context, in LoadInput) (*Runtime, error) {
 
 func BuildRuntime(ctx context.Context, in RuntimeInput) (*Runtime, error) {
 	if in.Config == nil {
-		return nil, fmt.Errorf("gateway runtime config is required")
+		return nil, errors.New("gateway runtime config is required")
 	}
 	if in.Catalog == nil {
-		return nil, fmt.Errorf("gateway runtime catalog is required")
+		return nil, errors.New("gateway runtime catalog is required")
 	}
 	if in.Consumers == nil {
-		return nil, fmt.Errorf("gateway runtime consumers are required")
+		return nil, errors.New("gateway runtime consumers are required")
 	}
 	if in.Logger == nil {
 		in.Logger = slog.Default()

@@ -19,7 +19,6 @@ func (panicSink) Close() error                { return nil }
 
 type captureSink struct {
 	events []Event
-	err    error
 }
 
 func (c *captureSink) Emit(_ context.Context, event Event) {

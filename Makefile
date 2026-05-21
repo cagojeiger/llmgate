@@ -1,4 +1,4 @@
-.PHONY: test tidy build clean run e2e e2e-mock
+.PHONY: test tidy build clean run e2e e2e-mock lint
 
 VERSION := $(shell cat VERSION)
 LDFLAGS := -X main.version=$(VERSION)
@@ -8,6 +8,12 @@ test:
 
 tidy:
 	go mod tidy
+
+# Static analysis. Config lives in .golangci.yml; CI runs the same command.
+# Requires `golangci-lint` on PATH (install via `go install
+# github.com/golangci/golangci-lint/cmd/golangci-lint@latest`).
+lint:
+	golangci-lint run ./...
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o bin/llmgate ./cmd/llmgate

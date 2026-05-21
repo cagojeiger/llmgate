@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"llmgate/internal/domain/llmresult"
+	llmresultassembly "llmgate/internal/domain/llmresult/assembly"
 	llmresultsink "llmgate/internal/domain/llmresult/sink"
 	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/routing"
@@ -270,7 +270,7 @@ func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *llmty
 	defer h.lifecycle.StreamFinished(r.Context(), rec, call)
 	defer func() { telemetry.AdoptStreamSummary(call, stream.Summary(), time.Now()) }()
 
-	builder := llmresult.NewStreamResponseBuilder()
+	builder := llmresultassembly.NewStreamResponseBuilder()
 	h.stream.Run(r.Context(), w, stream, rec, call, builder.Add)
 	if rec.Kind != "" {
 		return nil

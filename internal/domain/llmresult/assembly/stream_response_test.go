@@ -1,4 +1,4 @@
-package llmresult
+package assembly
 
 import (
 	"encoding/json"

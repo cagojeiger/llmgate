@@ -25,7 +25,8 @@ func (r *Service) Complete(ctx context.Context, req *llmtypes.Request) (*RouteRe
 		if err := ctx.Err(); err != nil {
 			return result, contextError(err)
 		}
-		attemptReq := requestForCandidate(req, candidate)
+		attemptReq := *req
+		attemptReq.Model = candidate.model
 		attemptCtx := ctx
 		cancelAttempt := func() {}
 		if r.policy.completeTimeout > 0 {
@@ -61,7 +62,8 @@ func (r *Service) Complete(ctx context.Context, req *llmtypes.Request) (*RouteRe
 			return result, nil
 		}
 
-		adoptAttemptError(&att, err)
+		att.Kind = llmtypes.ErrorKindOf(err)
+		att.StatusCode = llmtypes.StatusCodeOf(err)
 		result.Attempts = append(result.Attempts, att)
 		result.Vendor = candidate.provider.Name()
 		result.ModelUsed = candidate.model

@@ -38,8 +38,8 @@ func FromTelemetry(in BuildInput) (*Event, bool) {
 		ErrorKind:  audit.Kind,
 		DurationMS: audit.DurationMS,
 
-		Request:  cloneRequest(in.Request),
-		Response: cloneResponse(in.Response),
+		Request:  cloneJSON(in.Request),
+		Response: cloneJSON(in.Response),
 		Usage:    call.Usage.Clone(),
 		Attempts: cloneAttempts(call.Attempts),
 

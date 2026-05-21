@@ -58,14 +58,6 @@ func (e *Event) AnalyticsEventType() string {
 	return e.EventType
 }
 
-func cloneRequest(req *llmtypes.Request) *llmtypes.Request {
-	return cloneJSON(req)
-}
-
-func cloneResponse(resp *llmtypes.Response) *llmtypes.Response {
-	return cloneJSON(resp)
-}
-
 func cloneAttempts(attempts []llmtypes.Attempt) []llmtypes.Attempt {
 	if len(attempts) == 0 {
 		return nil

@@ -153,6 +153,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		response.WriteError(w, err)
 		return
 	}
+	if verr := req.Validate(); verr != nil {
+		adoptError(rec, verr)
+		response.WriteError(w, verr)
+		return
+	}
 	telemetry.SetResource(rec, "llm_model", req.Model)
 	if !modelAllowed(req.Model, consumer.AllowedAliases) {
 		telemetry.MarkPolicyDenied(rec, telemetry.DenyReasonModelNotAllowed)

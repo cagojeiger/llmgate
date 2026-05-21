@@ -77,6 +77,11 @@ func Middleware(store *consumers.Store) func(http.Handler) http.Handler {
 // Classify inspects the Authorization header and looks the bearer
 // token up in store. It deliberately does not log the raw key on any
 // failure path — AuthError is the only signal that escapes.
+//
+// A nil store is treated as a closed allowlist (every key unknown). This
+// keeps tests that invoke handlers without wiring a Store, or future
+// route configurations that drop the consumers loader, from panicking on
+// the lookup.
 func Classify(r *http.Request, store *consumers.Store) ConsumerInfo {
 	raw := r.Header.Get("Authorization")
 	if raw == "" {
@@ -89,6 +94,9 @@ func Classify(r *http.Request, store *consumers.Store) ConsumerInfo {
 	key := strings.TrimSpace(raw[len(prefix):])
 	if key == "" {
 		return ConsumerInfo{AuthError: telemetry.AuthErrorFormat}
+	}
+	if store == nil {
+		return ConsumerInfo{AuthError: telemetry.AuthErrorUnknown}
 	}
 	info, ok := store.LookupInfo(key)
 	if !ok {

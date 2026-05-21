@@ -25,6 +25,11 @@ type ChatService interface {
 	CompleteStream(ctx context.Context, req *llmtypes.Request) (*routing.RouteResult, error)
 }
 
+// Handler is the HTTP entry point for OpenAI-wire chat.completions.
+// It owns per-request lifecycle (timeout context, lifecycle observer
+// hooks, panic recovery), branches stream vs non-stream off the
+// request body's "stream" flag, and stamps the audit / call /
+// llm-result telemetry records that get emitted after the response.
 type Handler struct {
 	service        ChatService
 	log            *slog.Logger
@@ -37,6 +42,19 @@ type Handler struct {
 	stream         *httpstream.Relay
 }
 
+// HandlerConfig is the operator-tunable surface for NewHandler.
+//
+//   - RequestTimeout caps the full request including streaming
+//     response — must be positive (zero is rejected by the env
+//     loader to stop the timeout=0=disabled anti-pattern).
+//   - StreamIdleTimeout caps the gap between SSE events from
+//     upstream; expires sooner than RequestTimeout for hung
+//     vendors.
+//   - ResultSink receives one llmresult.Event per finalized request;
+//     LifecycleObserver receives RequestStarted / RequestFinished /
+//     StreamFinished hooks (typically the Prometheus recorder).
+//   - ServiceVersion / Environment are stamped on every audit and
+//     call event for cross-fleet correlation.
 type HandlerConfig struct {
 	RequestTimeout    time.Duration
 	StreamIdleTimeout time.Duration
@@ -46,6 +64,13 @@ type HandlerConfig struct {
 	ResultSink        llmresultsink.Sink
 }
 
+// NewHandler wires a Handler with safe defaults: nil log →
+// slog.Default, nil events / lifecycle observer → no-op stubs,
+// missing ServiceVersion / Environment → "dev" / "local". Both the
+// audit event sink and the llm-result sink are wrapped in a
+// panic-recovering layer so a downstream broker hang or schema bug
+// can never escape into the request goroutine and crash the
+// process.
 func NewHandler(service ChatService, log *slog.Logger, events telemetry.EventSink, cfg HandlerConfig) *Handler {
 	if log == nil {
 		log = slog.Default()
@@ -81,6 +106,13 @@ func NewHandler(service ChatService, log *slog.Logger, events telemetry.EventSin
 	}
 }
 
+// ServeHTTP handles one OpenAI-wire chat request. The request body's
+// "stream" bit selects the wire format: stream=true goes through the
+// SSE Relay; non-stream goes through serveComplete and renders one
+// JSON response. Both paths stamp the same audit / call records,
+// which are emitted by the deferred lifecycle hooks after the
+// response is on the wire (see inline comments for the defer
+// ordering invariants).
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(r.Context(), h.requestTimeout)

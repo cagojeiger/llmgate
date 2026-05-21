@@ -10,6 +10,13 @@ import (
 	"llmgate/internal/platform/http/response"
 )
 
+// RequestID propagates an X-Request-Id header end-to-end: it
+// validates any inbound value via requestid.Valid (printable ASCII,
+// length-bounded so a client can't smuggle log-injection bytes or
+// oversize blobs), generates a fresh id otherwise, mirrors the final
+// value on both the request and response headers, and stashes it on
+// ctx so downstream code (access log, audit emit, llm-result emit)
+// resolves the same id via requestid.FromContext.
 func RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get("X-Request-Id")
@@ -24,6 +31,13 @@ func RequestID(next http.Handler) http.Handler {
 	})
 }
 
+// AccessLog returns the per-request access-log middleware. It must be
+// mounted *after* the auth-context middleware so the deferred log
+// line can read whatever consumer identity (or auth_error) the auth
+// step later wrote through the shared pointer. The auth_error attr
+// is the only place an operator can tell apart "no Authorization
+// header" / "bad format" / "unknown key" — the wire response just
+// returns 401 for all three.
 func AccessLog(log *slog.Logger) func(http.Handler) http.Handler {
 	if log == nil {
 		log = slog.Default()

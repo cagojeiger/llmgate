@@ -15,6 +15,11 @@ import (
 	httpprobe "llmgate/internal/platform/http/probe"
 )
 
+// ServerOptions wires NewWithOptions. Handler is the business endpoint
+// (typically the chat Handler); Consumers backs the auth middleware;
+// Probe is shared with the lifecycle code so readiness can flip on
+// SIGTERM. MetricsHandler is optional — when set, /metrics joins the
+// public scrape surface alongside the probes.
 type ServerOptions struct {
 	Config         *config.Server
 	Log            *slog.Logger
@@ -24,6 +29,9 @@ type ServerOptions struct {
 	MetricsHandler http.Handler
 }
 
+// New is the legacy positional constructor. NewWithOptions is the
+// preferred form so future option additions don't keep extending the
+// argument list.
 func New(cfg *config.Server, log *slog.Logger, h http.Handler, store *consumers.Store, probe *httpprobe.State) *http.Server {
 	return NewWithOptions(ServerOptions{
 		Config:    cfg,
@@ -34,6 +42,20 @@ func New(cfg *config.Server, log *slog.Logger, h http.Handler, store *consumers.
 	})
 }
 
+// NewWithOptions assembles the chi-based *http.Server. The router is
+// split into two regions:
+//
+//   - Outside any middleware: probe handlers (/healthz, /healthz/live,
+//     /healthz/ready) and the optional /metrics scrape. These are
+//     hot-pathed by k8s and Prometheus and must skip both the access
+//     log and Recoverer.
+//   - Inside the standard chain: request-id → auth-context →
+//     access-log → recoverer, with an inner group that enforces auth
+//     for /v1/chat/completions.
+//
+// Middleware ordering is load-bearing — see inline comments at the
+// usage sites for the invariants (auth-context must precede the
+// access log so the latter can read the consumer identity).
 func NewWithOptions(opts ServerOptions) *http.Server {
 	cfg := opts.Config
 	log := opts.Log

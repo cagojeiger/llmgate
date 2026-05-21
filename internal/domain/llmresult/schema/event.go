@@ -38,7 +38,6 @@ type Event struct {
 	Response   *llmtypes.Response `json:"response,omitempty"`
 	Usage      *llmtypes.Usage    `json:"usage,omitempty"`
 	Attempts   []llmtypes.Attempt `json:"attempts,omitempty"`
-	Meta       map[string]any     `json:"meta,omitempty"`
 
 	ModelRequested string `json:"model_requested,omitempty"`
 	ModelUsed      string `json:"model_used,omitempty"`

@@ -21,6 +21,7 @@ import (
 	"llmgate/internal/platform/config"
 	httpauth "llmgate/internal/platform/http/auth"
 	httpchat "llmgate/internal/platform/http/chat"
+	httpprobe "llmgate/internal/platform/http/probe"
 )
 
 // recordingRecorder captures every emitted audit event so tests can
@@ -222,7 +223,7 @@ func TestServer_AuthIntegration(t *testing.T) {
 		ModelUsed: "claude-x",
 	}}
 	handler := httpchat.NewHandler(stub, logger, rec, httpchat.HandlerConfig{})
-	srv := New(&config.Server{Addr: ":0"}, logger, handler, store, NewProbeState())
+	srv := New(&config.Server{Addr: ":0"}, logger, handler, store, httpprobe.NewState())
 	ts := httptest.NewServer(srv.Handler)
 	defer ts.Close()
 
@@ -323,7 +324,7 @@ func TestServer_AllowedAliasesRejectDisallowedModel(t *testing.T) {
 		return stub.resp, nil
 	}
 	handler := httpchat.NewHandler(stub, logger, rec, httpchat.HandlerConfig{})
-	srv := New(&config.Server{Addr: ":0"}, logger, handler, store, NewProbeState())
+	srv := New(&config.Server{Addr: ":0"}, logger, handler, store, httpprobe.NewState())
 	ts := httptest.NewServer(srv.Handler)
 	defer ts.Close()
 
@@ -369,7 +370,7 @@ func TestServer_HealthzPublic(t *testing.T) {
 	// registered. Detailed probe-state coverage lives in probe_test.go.
 	store := writeStoreYAML(t, "alpha", "good-key")
 	handler := httpchat.NewHandler(&stubService{}, slog.Default(), &recordingRecorder{}, httpchat.HandlerConfig{})
-	srv := New(&config.Server{Addr: ":0"}, slog.Default(), handler, store, NewProbeState())
+	srv := New(&config.Server{Addr: ":0"}, slog.Default(), handler, store, httpprobe.NewState())
 	ts := httptest.NewServer(srv.Handler)
 	defer ts.Close()
 

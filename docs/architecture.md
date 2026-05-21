@@ -38,7 +38,7 @@ graph LR
         StreamRelay["http/stream Relay"]
         Response["response<br/>errors + SSE frames"]
         ResultEvent["llmresult Event"]
-        Probe[ProbeState]
+        Probe["http/probe State"]
         Lifecycle[LifecycleObserver]
         Telemetry[Telemetry EventSink]
         SlogSink[slogtelemetry.Sink]
@@ -106,7 +106,7 @@ graph LR
 | Delivery | http/chat | 요청 디코드, stream / non-stream 분기. ConsumerInfo 로 `AuditEvent` / `CallEvent` 공통 키를 채움 + auth 실패 시 401. 요청 총 wall-clock 한도의 권위자 ([ADR 005](adr/005-timeout-authority.md)) |
 | Delivery | response | OpenAI-style error envelope, Retry-After, SSE frame writer, response status/bytes accounting |
 | Delivery | http/stream | 스트림 열린 뒤 SSE wire transcript. 이벤트 전송, idle timeout, client_closed, mid-stream error, `[DONE]` ([ADR 004](adr/004-fallback-policy.md)). 스트림 idle 한도의 권위자 ([ADR 005](adr/005-timeout-authority.md)) |
-| Delivery | ProbeState | SIGTERM 시 `MarkShuttingDown()` → readiness 만 503. liveness · in-flight 영향 없음 |
+| Delivery | http/probe | SIGTERM 시 `MarkShuttingDown()` → readiness 만 503. liveness · in-flight 영향 없음 |
 | Delivery | LifecycleObserver | request / stream 시작·종료 hook. live gauge 같은 관측값용이며 완료된 사실은 telemetry event 로 남김 |
 | Domain | telemetry | finalized `AuditEvent` / `CallEvent`, `EventSink`, `LifecycleObserver` 계약. Handler 와 platform sink 사이의 공통 event 언어 |
 | Platform | telemetry/slog | 기본 sink. audit / call event 를 Loki-friendly stdout JSON 라인으로 라우팅 |
@@ -164,6 +164,7 @@ internal/platform/
     server/                  chi route + lifecycle + probe wiring
     auth/                    bearer token extraction + consumer context
     requestid/               request id validation + context propagation
+    probe/                   liveness + readiness handlers and state
     chat/                    chat completions handler + result recorder
     stream/                  SSE relay + stream receiver
     response/                OpenAI-style error + SSE frame + response accounting

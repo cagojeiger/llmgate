@@ -11,6 +11,7 @@ import (
 	"llmgate/internal/domain/consumers"
 	"llmgate/internal/platform/config"
 	httpauth "llmgate/internal/platform/http/auth"
+	httpprobe "llmgate/internal/platform/http/probe"
 )
 
 type ServerOptions struct {
@@ -18,11 +19,11 @@ type ServerOptions struct {
 	Log            *slog.Logger
 	Handler        http.Handler
 	Consumers      *consumers.Store
-	Probe          *ProbeState
+	Probe          *httpprobe.State
 	MetricsHandler http.Handler
 }
 
-func New(cfg *config.Server, log *slog.Logger, h http.Handler, store *consumers.Store, probe *ProbeState) *http.Server {
+func New(cfg *config.Server, log *slog.Logger, h http.Handler, store *consumers.Store, probe *httpprobe.State) *http.Server {
 	return NewWithOptions(ServerOptions{
 		Config:    cfg,
 		Log:       log,
@@ -54,9 +55,9 @@ func NewWithOptions(opts ServerOptions) *http.Server {
 	//                    controllers can drop this pod before drain
 	// /healthz stays as a backward-compatible alias of /healthz/ready
 	// so existing manifests get the better shutdown behavior for free.
-	readyHandler := readiness(probe)
+	readyHandler := httpprobe.Ready(probe)
 	r.Get("/healthz", readyHandler)
-	r.Get("/healthz/live", liveness)
+	r.Get("/healthz/live", httpprobe.Live)
 	r.Get("/healthz/ready", readyHandler)
 	if opts.MetricsHandler != nil {
 		r.Handle("/metrics", opts.MetricsHandler)

@@ -19,6 +19,7 @@ import (
 	"llmgate/internal/domain/telemetry"
 	"llmgate/internal/platform/config"
 	httpchat "llmgate/internal/platform/http/chat"
+	httpprobe "llmgate/internal/platform/http/probe"
 	"llmgate/internal/platform/http/server"
 	promtelemetry "llmgate/internal/platform/telemetry/prometheus"
 	slogtelemetry "llmgate/internal/platform/telemetry/slog"
@@ -40,7 +41,7 @@ type LoadInput struct {
 
 type Runtime struct {
 	Server *http.Server
-	Probe  *server.ProbeState
+	Probe  *httpprobe.State
 
 	cfg     *config.Server
 	log     *slog.Logger
@@ -140,7 +141,7 @@ func BuildRuntime(ctx context.Context, in RuntimeInput) (*Runtime, error) {
 		LifecycleObserver: metricsRecorder,
 		ResultSink:        results,
 	})
-	probe := server.NewProbeState()
+	probe := httpprobe.NewState()
 	srv := server.NewWithOptions(server.ServerOptions{
 		Config:    in.Config,
 		Log:       in.Logger.With(slog.String("log", "access")),

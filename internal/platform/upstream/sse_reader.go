@@ -79,12 +79,22 @@ type SSEReader struct {
 	done    bool
 }
 
+// SSE scanner buffer sizing. Reasoning-heavy LLM events (DeepSeek
+// thinking chains, GPT-5 chain-of-thought) can exceed bufio.Scanner's
+// 64 KiB default in a single SSE frame, so we provision a 1 MiB
+// starting buffer and a 10 MiB hard cap.
+const (
+	sseScannerInitialBuf = 1 << 20      // 1 MiB
+	sseScannerMaxBuf     = 10 * 1 << 20 // 10 MiB
+)
+
 // NewSSEReader constructs an SSE reader over r. The underlying scanner
-// is sized to handle large single-line payloads (up to 10 MiB) since
-// reasoning-heavy LLM events can exceed the default 64 KiB cap.
+// is sized to handle large single-line payloads (see
+// sseScannerMaxBuf) since reasoning-heavy LLM events can exceed the
+// default 64 KiB cap.
 func NewSSEReader(r io.ReadCloser) *SSEReader {
 	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024)
+	scanner.Buffer(make([]byte, sseScannerInitialBuf), sseScannerMaxBuf)
 	return &SSEReader{scanner: scanner}
 }
 

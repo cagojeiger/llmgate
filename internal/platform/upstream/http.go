@@ -32,18 +32,30 @@ const rawBodyLimit = 256
 // practical retry policies.
 const maxRetryAfter = 24 * time.Hour
 
+// HTTP transport pool sizing. Defaults match a single gateway
+// fronting hundreds of concurrent upstream requests; the per-host
+// pool is sized so a few vendor endpoints don't starve each other.
+// http.Transport defaults (MaxIdleConnsPerHost=2) would force most
+// requests to redial TLS on every call.
+const (
+	httpMaxIdleConns          = 100
+	httpMaxIdleConnsPerHost   = 50
+	httpIdleConnTimeout       = 90 * time.Second
+	httpTLSHandshakeTimeout   = 10 * time.Second
+	httpExpectContinueTimeout = 1 * time.Second
+)
+
 // DefaultClient builds an *http.Client tuned for LLM upstreams: no
 // client-level timeout (first byte can take minutes — cancellation
-// flows via the request context), and pool sizes that match a single
-// gateway typically fronting hundreds of concurrent requests.
+// flows via the request context), and the pool constants above.
 func DefaultClient() *http.Client {
 	return &http.Client{
 		Transport: &http.Transport{
-			MaxIdleConns:          100,
-			MaxIdleConnsPerHost:   50,
-			IdleConnTimeout:       90 * time.Second,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ExpectContinueTimeout: 1 * time.Second,
+			MaxIdleConns:          httpMaxIdleConns,
+			MaxIdleConnsPerHost:   httpMaxIdleConnsPerHost,
+			IdleConnTimeout:       httpIdleConnTimeout,
+			TLSHandshakeTimeout:   httpTLSHandshakeTimeout,
+			ExpectContinueTimeout: httpExpectContinueTimeout,
 		},
 	}
 }

@@ -62,7 +62,15 @@ func TestAsyncSink_FlushesWhenBatchSizeReached(t *testing.T) {
 	defer sink.Close()
 
 	sink.Emit(context.Background(), &llmresult.Event{RequestID: "req-1"})
-	assertEventuallyLen(t, next, 0)
+
+	// Batch size is 2; one event alone must not flush. There is no
+	// deterministic signal we can poll for *absence* of a flush — only
+	// give the worker a window long enough that a buggy early-flush
+	// would have already happened.
+	time.Sleep(50 * time.Millisecond)
+	if got := next.len(); got != 0 {
+		t.Fatalf("captured events = %d, want 0 (batch not yet full)", got)
+	}
 
 	sink.Emit(context.Background(), &llmresult.Event{RequestID: "req-2"})
 	waitLen(t, next, 2)
@@ -231,14 +239,6 @@ func waitLen(t *testing.T, sink *captureResultSink, want int) {
 			t.Fatalf("captured events = %d, want %d", sink.len(), want)
 		case <-ticker.C:
 		}
-	}
-}
-
-func assertEventuallyLen(t *testing.T, sink *captureResultSink, want int) {
-	t.Helper()
-	time.Sleep(20 * time.Millisecond)
-	if got := sink.len(); got != want {
-		t.Fatalf("captured events = %d, want %d", got, want)
 	}
 }
 

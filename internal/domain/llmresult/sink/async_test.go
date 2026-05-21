@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"llmgate/internal/domain/llmresult"
+	llmresult "llmgate/internal/domain/llmresult/schema"
 )
 
 func TestAsyncSink_EmitDoesNotWaitForTransport(t *testing.T) {

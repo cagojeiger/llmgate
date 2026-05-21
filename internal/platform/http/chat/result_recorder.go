@@ -3,7 +3,7 @@ package chat
 import (
 	"context"
 
-	"llmgate/internal/domain/llmresult"
+	llmresultschema "llmgate/internal/domain/llmresult/schema"
 	llmresultsink "llmgate/internal/domain/llmresult/sink"
 	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/telemetry"
@@ -31,7 +31,7 @@ func (r *resultRecorder) Emit(ctx context.Context, audit *telemetry.AuditEvent, 
 	if r == nil || r.sink == nil {
 		return
 	}
-	ev, ok := llmresult.FromTelemetry(llmresult.BuildInput{
+	ev, ok := llmresultschema.FromTelemetry(llmresultschema.BuildInput{
 		Audit:    audit,
 		Call:     call,
 		Request:  r.request,

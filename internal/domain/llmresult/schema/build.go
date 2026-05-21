@@ -1,4 +1,4 @@
-package llmresult
+package schema
 
 import (
 	"llmgate/internal/domain/llmtypes"

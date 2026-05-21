@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"llmgate/internal/domain/llmresult"
+	llmresult "llmgate/internal/domain/llmresult/schema"
 )
 
 const (

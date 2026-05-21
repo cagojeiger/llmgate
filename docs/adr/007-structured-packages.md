@@ -62,3 +62,5 @@ internal/app/        부팅 조립, provider 생성, shutdown
 14. liveness / readiness probe state 와 handlers 는 `internal/platform/http/probe` 로 이동한다.
 15. request id / access log middleware 는 `internal/platform/http/middleware` 로 이동한다.
 16. stream delta → final response assembly 는 `internal/domain/llmresult/assembly` 로 이동한다.
+17. finalized LLM result event schema 와 telemetry builder 는 `internal/domain/llmresult/schema`
+    로 이동한다.

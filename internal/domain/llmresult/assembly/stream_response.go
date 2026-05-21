@@ -167,4 +167,3 @@ func cloneRawMap(in map[string]json.RawMessage) map[string]json.RawMessage {
 	mergeRaw(out, in)
 	return out
 }
-

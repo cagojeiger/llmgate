@@ -12,7 +12,7 @@
 
 **카탈로그는 모델 데이터와 별명 체인만 담는다. 정책과 알고리즘은 다른 자리에 산다.**
 
-- `catalog/models/<id>.yaml` = 모델 한 개. 필수 필드 — `id`, `vendor`, `protocol`, `base_url`, `auth_scheme`. `auth_env` 는 생략 시 `LLMGATE_<VENDOR>_API_KEY` 로 해석한다. `extra_body` 는 optional 모델별 기본 request body extra 다. `protocol`은 `llmtypes.Protocol`이 정의한 닫힌 enum.
+- `catalog/models/<id>.yaml` = 모델 한 개의 운영 데이터. 벤더, 프로토콜, endpoint, 인증 env, 벤더별 기본 요청값을 담는다. 정확한 schema는 [data.md](../data.md)가 맡는다.
 - `catalog/aliases/<name>.yaml` = 모델 ID 체인. raw 모델 ID로 호출하면 체인 길이가 1이라 폴백이 발동하지 않는다 — *별명만이 실제 제어 단위*.
 - 정책(`LLMGATE_FALLBACK_ON`, 회로 차단, 시간 한도)은 환경 변수에 둔다. YAML에는 라우팅 정책을 두지 않는다.
 
@@ -20,9 +20,9 @@
 
 - **YAML = 데이터, env = 정책, 코드 = 알고리즘.** 운영자가 어디를 보고 어디를 바꿀지 한눈에 안다.
 - **카탈로그가 검증하는 것**: 스키마 구조 — 모르는 필드가 있으면 부팅 실패, 별명 chain이 존재하지 않는 모델을 가리키면 부팅 실패.
-- **카탈로그가 판단하지 않는 것**: alias 이름의 의미, chain 순서의 타당성, 가격, context window, 모델 적합도 ([ADR 000](000-identity.md)). `extra_body` 는 vendor 호출에 필요한 기본 request body 조각일 뿐 모델 메타나 라우팅 정책이 아니다.
+- **카탈로그가 판단하지 않는 것**: alias 이름의 의미, chain 순서의 타당성, 가격, context window, 모델 적합도 ([ADR 000](000-identity.md)). 벤더 호출에 필요한 기본 요청값은 pass-through 데이터일 뿐 모델 메타나 라우팅 정책이 아니다.
 - **hot-reload 없음.** YAML 변경은 재시작이 적용 시점이다. *언제 적용됐나*가 흐려지는 race를 만드는 대신, 재시작 경계가 그 답이다.
-- **저장 위치**: `LLMGATE_CATALOG=<dir>` 또는 작업 디렉토리의 `./catalog`.
+- **저장 위치는 설정으로 주입한다.** 구체 env와 기본값은 [config.md](../config.md)가 맡는다.
 
 ## 근거
 

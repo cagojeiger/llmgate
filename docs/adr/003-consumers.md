@@ -12,14 +12,14 @@
 
 **호출자는 Bearer 키 하나만 보낸다. 게이트웨이는 그 키의 해시만 저장한다.**
 
-- `consumers/`는 `catalog/`와 형제(sibling) 디렉토리. 마운트 경로도 따로 받는다 (`LLMGATE_CONSUMERS=<dir>`). 비어 있으면 부팅 실패.
-- `consumers/<name>.yaml` = `name` + `key_hashes` + optional `allowed_aliases`. 키 해시(sha256)만 저장하고, 평문 키는 두지 않는다.
+- `consumers/`는 `catalog/`와 형제(sibling) 디렉토리. 마운트 경로도 따로 받는다. 비어 있으면 부팅 실패.
+- `consumers/<name>.yaml` = 호출자 이름, 키 해시, 선택적 모델 allowlist. 정확한 schema는 [data.md](../data.md)가 맡는다.
 - 키 회전은 다중 키 배열로 처리: 새 해시 추가 → 배포 → 옛 해시 제거.
 - 인증 헤더는 `Authorization: Bearer <key>` — OpenAI SDK 관례를 그대로 따른다.
-- 인증에 실패해도 감사 기록을 남긴다 (`consumer_name`은 비우고, `error_kind=auth`, `status=401`, `auth_error=missing|format|unknown`).
-- 감사 레코드에 `consumer_name`과 `consumer_key_id`(해시 앞 8자)를 추가한다.
-- `allowed_aliases` 가 비어 있으면 unrestricted, 값이 있으면 요청 `model` 이 그 목록에 있어야 한다. 거부 시 `deny_reason=model_not_allowed`.
-- 이름 규칙은 `^[a-z0-9][a-z0-9_-]{0,63}$`. 한 번 정해진 이름은 영구 식별자로 둔다.
+- 인증에 실패해도 감사 기록을 남긴다. 실패 모드와 wire 응답의 정확한 필드는 [logs.md](../logs.md)가 맡는다.
+- 감사 레코드에는 호출자 이름과 키 식별자를 남긴다. 평문 키는 로그에 남기지 않는다.
+- 모델 allowlist가 있으면 호출자의 요청 모델을 coarse하게 제한한다. 값이 비어 있으면 제한하지 않는다.
+- 한 번 정해진 호출자 이름은 영구 식별자로 둔다.
 
 ### 경계선
 

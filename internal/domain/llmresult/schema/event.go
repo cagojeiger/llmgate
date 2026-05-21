@@ -2,6 +2,7 @@ package schema
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"llmgate/internal/domain/llmtypes"
@@ -72,26 +73,32 @@ func cloneAttempts(attempts []llmtypes.Attempt) []llmtypes.Attempt {
 	}
 	out, err := json.Marshal(attempts)
 	if err != nil {
-		return nil
+		panic(fmt.Errorf("schema: marshal attempts for clone: %w", err))
 	}
 	var cloned []llmtypes.Attempt
 	if err := json.Unmarshal(out, &cloned); err != nil {
-		return nil
+		panic(fmt.Errorf("schema: unmarshal attempts for clone: %w", err))
 	}
 	return cloned
 }
 
+// cloneJSON deep-copies via the encoding/json round-trip. The schema
+// types (Request / Response) only contain primitives, strings, slices,
+// maps, and json.RawMessage, so this round-trip is total — a marshal
+// failure can only mean a new field type slipped in that encoding/json
+// cannot serialize, which we want surfaced in tests/CI rather than
+// silently dropping the durable audit payload at runtime.
 func cloneJSON[T any](in *T) *T {
 	if in == nil {
 		return nil
 	}
 	out, err := json.Marshal(in)
 	if err != nil {
-		return nil
+		panic(fmt.Errorf("schema: marshal for clone: %w", err))
 	}
 	var cloned T
 	if err := json.Unmarshal(out, &cloned); err != nil {
-		return nil
+		panic(fmt.Errorf("schema: unmarshal for clone: %w", err))
 	}
 	return &cloned
 }

@@ -36,8 +36,8 @@ func TestValid(t *testing.T) {
 	}
 }
 
-func TestNew(t *testing.T) {
-	if got := New(); !Valid(got) {
-		t.Fatalf("New() = %q, want valid request id", got)
+func TestMustNew(t *testing.T) {
+	if got := MustNew(); !Valid(got) {
+		t.Fatalf("MustNew() = %q, want valid request id", got)
 	}
 }

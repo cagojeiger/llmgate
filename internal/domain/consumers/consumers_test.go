@@ -98,27 +98,88 @@ func TestLoadDir_HappyPath(t *testing.T) {
 	}
 }
 
-func TestLoadDir_MissingDir(t *testing.T) {
-	_, err := LoadDir(filepath.Join(t.TempDir(), "does-not-exist"))
-	if err == nil {
-		t.Fatal("LoadDir on missing dir = nil, want error")
+// TestLoadDir_Errors covers the eight failure modes LoadDir must
+// reject with an informative error. Adding a new failure case is one
+// struct entry — no new test function, no test name to invent, no
+// setup duplication. wantSubstr lets each case assert the operator-
+// facing diagnostic without being brittle to exact wording.
+func TestLoadDir_Errors(t *testing.T) {
+	cases := []struct {
+		name       string
+		files      map[string]string // nil ⇒ dir doesn't exist on disk
+		wantSubstr string            // empty ⇒ any error is fine
+	}{
+		{
+			name:  "missing dir",
+			files: nil,
+		},
+		{
+			name:       "empty dir",
+			files:      map[string]string{},
+			wantSubstr: "no consumers registered",
+		},
+		{
+			name: "strict unknown field",
+			files: map[string]string{
+				"alpha.yaml": "name: alpha\nkey_hashes:\n  - " + sha256Hash("k") + "\nquota: 10\n",
+			},
+			wantSubstr: "quota",
+		},
+		{
+			name: "filename does not match name field",
+			files: map[string]string{
+				"alpha.yaml": "name: bravo\nkey_hashes:\n  - " + sha256Hash("k") + "\n",
+			},
+			wantSubstr: "does not match",
+		},
+		{
+			name: "empty key_hashes",
+			files: map[string]string{
+				"alpha.yaml": "name: alpha\nkey_hashes: []\n",
+			},
+			wantSubstr: "key_hashes",
+		},
+		{
+			name: "duplicate name across files",
+			files: map[string]string{
+				"alpha.yaml": "name: alpha\nkey_hashes:\n  - " + sha256Hash("rawA") + "\n",
+				"alpha.yml":  "name: alpha\nkey_hashes:\n  - " + sha256Hash("rawB") + "\n",
+			},
+			wantSubstr: "duplicate consumer name",
+		},
+		{
+			name: "duplicate hash across clients",
+			files: map[string]string{
+				"alpha.yaml": "name: alpha\nkey_hashes:\n  - " + sha256Hash("shared-secret") + "\n",
+				"bravo.yaml": "name: bravo\nkey_hashes:\n  - " + sha256Hash("shared-secret") + "\n",
+			},
+			wantSubstr: "duplicate key hash",
+		},
+		{
+			name: "duplicate hash within one client",
+			files: map[string]string{
+				"alpha.yaml": "name: alpha\nkey_hashes:\n  - " + sha256Hash("k") + "\n  - " + sha256Hash("k") + "\n",
+			},
+			wantSubstr: "duplicate hash",
+		},
 	}
-}
 
-func TestLoadDir_EmptyDir(t *testing.T) {
-	_, err := LoadDir(t.TempDir())
-	if err == nil || !strings.Contains(err.Error(), "no consumers registered") {
-		t.Fatalf("error = %v, want no-consumers-registered error", err)
-	}
-}
-
-func TestLoadDir_StrictUnknownField(t *testing.T) {
-	dir := writeClientDir(t, map[string]string{
-		"alpha.yaml": "name: alpha\nkey_hashes:\n  - " + sha256Hash("k") + "\nquota: 10\n",
-	})
-	_, err := LoadDir(dir)
-	if err == nil || !strings.Contains(err.Error(), "quota") {
-		t.Fatalf("error = %v, want strict-parse error mentioning quota", err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var dir string
+			if tc.files == nil {
+				dir = filepath.Join(t.TempDir(), "does-not-exist")
+			} else {
+				dir = writeClientDir(t, tc.files)
+			}
+			_, err := LoadDir(dir)
+			if err == nil {
+				t.Fatalf("LoadDir = nil error, want error (substr=%q)", tc.wantSubstr)
+			}
+			if tc.wantSubstr != "" && !strings.Contains(err.Error(), tc.wantSubstr) {
+				t.Fatalf("error = %v, want substring %q", err, tc.wantSubstr)
+			}
+		})
 	}
 }
 
@@ -173,16 +234,6 @@ func TestLoadDir_InvalidAllowedAliases(t *testing.T) {
 	}
 }
 
-func TestLoadDir_FilenameNameMismatch(t *testing.T) {
-	dir := writeClientDir(t, map[string]string{
-		"alpha.yaml": "name: bravo\nkey_hashes:\n  - " + sha256Hash("k") + "\n",
-	})
-	_, err := LoadDir(dir)
-	if err == nil || !strings.Contains(err.Error(), "does not match") {
-		t.Fatalf("error = %v, want filename-mismatch error", err)
-	}
-}
-
 func TestLoadDir_InvalidName(t *testing.T) {
 	cases := map[string]string{
 		"empty":      "",
@@ -212,16 +263,6 @@ func TestLoadDir_InvalidName(t *testing.T) {
 	}
 }
 
-func TestLoadDir_EmptyKeyHashes(t *testing.T) {
-	dir := writeClientDir(t, map[string]string{
-		"alpha.yaml": "name: alpha\nkey_hashes: []\n",
-	})
-	_, err := LoadDir(dir)
-	if err == nil || !strings.Contains(err.Error(), "key_hashes") {
-		t.Fatalf("error = %v, want empty-key_hashes error", err)
-	}
-}
-
 func TestLoadDir_BadHashFormat(t *testing.T) {
 	cases := map[string]string{
 		"missing-prefix": sha256Hex("k"),                               // no "sha256:" prefix
@@ -239,44 +280,6 @@ func TestLoadDir_BadHashFormat(t *testing.T) {
 				t.Fatalf("expected error for bad hash %q", hashStr)
 			}
 		})
-	}
-}
-
-func TestLoadDir_DuplicateNameAcrossFiles(t *testing.T) {
-	// Same name in two different files (different filenames so filename-name
-	// check passes individually). LoadDir should still catch the dup.
-	rawA := "rawA"
-	rawB := "rawB"
-	dir := writeClientDir(t, map[string]string{
-		"alpha.yaml": "name: alpha\nkey_hashes:\n  - " + sha256Hash(rawA) + "\n",
-		"alpha.yml":  "name: alpha\nkey_hashes:\n  - " + sha256Hash(rawB) + "\n",
-	})
-	_, err := LoadDir(dir)
-	if err == nil || !strings.Contains(err.Error(), "duplicate consumer name") {
-		t.Fatalf("error = %v, want duplicate-name error", err)
-	}
-}
-
-func TestLoadDir_DuplicateHashAcrossClients(t *testing.T) {
-	shared := sha256Hash("shared-secret")
-	dir := writeClientDir(t, map[string]string{
-		"alpha.yaml": "name: alpha\nkey_hashes:\n  - " + shared + "\n",
-		"bravo.yaml": "name: bravo\nkey_hashes:\n  - " + shared + "\n",
-	})
-	_, err := LoadDir(dir)
-	if err == nil || !strings.Contains(err.Error(), "duplicate key hash") {
-		t.Fatalf("error = %v, want duplicate-hash error", err)
-	}
-}
-
-func TestLoadDir_DuplicateHashWithinClient(t *testing.T) {
-	dup := sha256Hash("k")
-	dir := writeClientDir(t, map[string]string{
-		"alpha.yaml": "name: alpha\nkey_hashes:\n  - " + dup + "\n  - " + dup + "\n",
-	})
-	_, err := LoadDir(dir)
-	if err == nil || !strings.Contains(err.Error(), "duplicate hash") {
-		t.Fatalf("error = %v, want intra-consumer duplicate-hash error", err)
 	}
 }
 

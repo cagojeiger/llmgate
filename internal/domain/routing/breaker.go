@@ -19,6 +19,10 @@ type breakerState struct {
 // breakerStore is per-process, in-memory. No half-open phase — once
 // cooldown expires, all callers proceed as if closed. Cross-process
 // coordination belongs in a redis-backed alternative.
+//
+// now is the store's source of wall-clock time. Production wires it
+// to time.Now; tests substitute a fake clock so cooldown windows can
+// be asserted exactly without racing against the real wall clock.
 type breakerStore struct {
 	mu          sync.Mutex
 	states      map[string]*breakerState
@@ -27,6 +31,7 @@ type breakerStore struct {
 	max         time.Duration
 	jitter      float64
 	log         *slog.Logger
+	now         func() time.Time
 }
 
 func newBreakerStore(failureTrip int, base, max time.Duration, jitter float64, log *slog.Logger) *breakerStore {
@@ -37,6 +42,7 @@ func newBreakerStore(failureTrip int, base, max time.Duration, jitter float64, l
 		max:         max,
 		jitter:      jitter,
 		log:         log,
+		now:         time.Now,
 	}
 }
 
@@ -56,7 +62,7 @@ func (s *breakerStore) isOpen(modelID string) bool {
 	if !ok {
 		return false
 	}
-	if !b.openUntil.IsZero() && time.Now().Before(b.openUntil) {
+	if !b.openUntil.IsZero() && s.now().Before(b.openUntil) {
 		return true
 	}
 	// Expired: reset failures so next attempt starts fresh; keep opens
@@ -83,7 +89,7 @@ func (s *breakerStore) recordFailure(modelID string) {
 	if b.failures >= s.failureTrip {
 		b.opens++
 		cooldown := s.nextOpenDurationLocked(b.opens)
-		b.openUntil = time.Now().Add(cooldown)
+		b.openUntil = s.now().Add(cooldown)
 		s.log.Warn("circuit opened",
 			slog.String("model", modelID),
 			slog.Int("opens", b.opens),

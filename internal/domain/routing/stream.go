@@ -24,7 +24,8 @@ func (r *Service) CompleteStream(ctx context.Context, req *llmtypes.Request) (*R
 		if err := ctx.Err(); err != nil {
 			return result, contextError(err)
 		}
-		attemptReq := requestForCandidate(req, candidate)
+		attemptReq := *req
+		attemptReq.Model = candidate.model
 		att := llmtypes.Attempt{
 			Vendor:    candidate.provider.Name(),
 			Model:     candidate.model,
@@ -53,7 +54,8 @@ func (r *Service) CompleteStream(ctx context.Context, req *llmtypes.Request) (*R
 // whether to fall back. Returns the error to surface (caller returns)
 // or nil (caller continues to next candidate).
 func (r *Service) finalizeStreamFailure(result *RouteResult, candidate candidate, att *llmtypes.Attempt, err error, routeCtx context.Context) error {
-	adoptAttemptError(att, err)
+	att.Kind = llmtypes.ErrorKindOf(err)
+	att.StatusCode = llmtypes.StatusCodeOf(err)
 	att.DurationMS = time.Since(att.StartedAt).Milliseconds()
 	result.Attempts = append(result.Attempts, *att)
 	result.Vendor = candidate.provider.Name()

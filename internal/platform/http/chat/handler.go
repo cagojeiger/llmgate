@@ -2,13 +2,11 @@ package chat
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
 	"time"
 
-	llmresultassembly "llmgate/internal/domain/llmresult/assembly"
 	llmresultsink "llmgate/internal/domain/llmresult/sink"
 	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/routing"
@@ -194,60 +192,4 @@ func (h *Handler) recoverPanic(ctx context.Context, w http.ResponseWriter, rec *
 func adoptError(rec *telemetry.AuditEvent, err error) {
 	rec.Kind = llmtypes.ErrorKindOf(err)
 	rec.StatusCode = response.Status(err)
-}
-
-func (h *Handler) serveComplete(w http.ResponseWriter, r *http.Request, req *llmtypes.Request, rec *telemetry.AuditEvent, call *telemetry.CallEvent) *llmtypes.Response {
-	result, err := h.service.Complete(r.Context(), req)
-	telemetry.AdoptRouteResult(call, result)
-	if err != nil {
-		adoptError(rec, err)
-		response.WriteError(w, err)
-		return nil
-	}
-
-	out, err := json.Marshal(result.Response)
-	if err != nil {
-		perr := &llmtypes.Error{Kind: llmtypes.KindUnknown, Message: "encode response: " + err.Error(), Cause: err}
-		adoptError(rec, perr)
-		response.WriteError(w, perr)
-		return nil
-	}
-
-	rec.StatusCode = http.StatusOK
-	telemetry.AdoptResponse(call, result.Response, int64(len(out)))
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	if _, werr := w.Write(out); werr != nil {
-		rec.Kind = llmtypes.KindClientClosed
-		telemetry.SetCallKind(call, rec.Kind)
-		h.log.LogAttrs(r.Context(), slog.LevelInfo, "client write failed",
-			slog.String("vendor", call.Vendor),
-			slog.String("err", werr.Error()),
-		)
-		return nil
-	}
-	return result.Response
-}
-
-func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, req *llmtypes.Request, rec *telemetry.AuditEvent, call *telemetry.CallEvent) *llmtypes.Response {
-	result, err := h.service.CompleteStream(r.Context(), req)
-	telemetry.AdoptRouteResult(call, result)
-	if err != nil {
-		adoptError(rec, err)
-		response.WriteError(w, err)
-		return nil
-	}
-	stream := result.Stream
-	defer stream.Close()
-	h.lifecycle.StreamStarted(r.Context(), call.EventCommon)
-	defer h.lifecycle.StreamFinished(r.Context(), rec, call)
-	defer func() { telemetry.AdoptStreamSummary(call, stream.Summary(), time.Now()) }()
-
-	builder := llmresultassembly.NewStreamResponseBuilder()
-	h.stream.Run(r.Context(), w, stream, rec, call, builder.Add)
-	if rec.Kind != "" {
-		return nil
-	}
-	return builder.Response()
 }

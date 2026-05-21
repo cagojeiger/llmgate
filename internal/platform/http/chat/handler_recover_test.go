@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/routing"
@@ -25,7 +26,7 @@ func TestHandler_PanicInComplete_StampsAuditAndReturns500(t *testing.T) {
 			panic("boom in complete")
 		},
 	}
-	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{RequestTimeout: 30 * time.Second})
 
 	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -55,7 +56,7 @@ func TestHandler_PanicInStream_StampsAuditAndReturns500(t *testing.T) {
 			panic("boom in stream")
 		},
 	}
-	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{RequestTimeout: 30 * time.Second})
 
 	body := `{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -87,7 +88,7 @@ func TestHandler_PanicAfterResponseStarted_DoesNotCorruptWireBody(t *testing.T) 
 			panic("late boom")
 		},
 	}
-	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{RequestTimeout: 30 * time.Second})
 
 	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -122,7 +123,7 @@ func TestHandler_AbortHandlerPanic_Repropagates_NotStamped(t *testing.T) {
 			panic(http.ErrAbortHandler)
 		},
 	}
-	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{})
+	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), recorder, HandlerConfig{RequestTimeout: 30 * time.Second})
 
 	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -151,7 +152,7 @@ func TestHandler_RecoverPanic_OverridesPreStampedStatus(t *testing.T) {
 		&fakeService{vendor: "opencode"},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		recorder,
-		HandlerConfig{},
+		HandlerConfig{RequestTimeout: 30 * time.Second},
 	)
 
 	rec := &telemetry.AuditEvent{
@@ -181,7 +182,7 @@ func TestHandler_RecoverPanic_OverridesPreStampedStatus(t *testing.T) {
 }
 
 func TestHandler_TelemetrySinkPanic_DoesNotBreakResponse(t *testing.T) {
-	h := NewHandler(okFakeService(), slog.New(slog.NewTextHandler(io.Discard, nil)), panicEventSink{}, HandlerConfig{})
+	h := NewHandler(okFakeService(), slog.New(slog.NewTextHandler(io.Discard, nil)), panicEventSink{}, HandlerConfig{RequestTimeout: 30 * time.Second})
 
 	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -197,6 +198,7 @@ func TestHandler_TelemetrySinkPanic_DoesNotBreakResponse(t *testing.T) {
 func TestHandler_LifecyclePanic_DoesNotBreakResponse(t *testing.T) {
 	h := NewHandler(okFakeService(), slog.New(slog.NewTextHandler(io.Discard, nil)), telemetry.NopSink{}, HandlerConfig{
 		LifecycleObserver: panicLifecycleObserver{},
+		RequestTimeout:    30 * time.Second,
 	})
 
 	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`

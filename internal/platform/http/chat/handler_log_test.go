@@ -18,7 +18,7 @@ import (
 
 func TestHandler_LogContract_AuthFailure(t *testing.T) {
 	auditBuf, callBuf, sink := newLogContractSink()
-	h := NewHandler(okFakeService(), slog.New(slog.NewTextHandler(io.Discard, nil)), sink, HandlerConfig{})
+	h := NewHandler(okFakeService(), slog.New(slog.NewTextHandler(io.Discard, nil)), sink, HandlerConfig{RequestTimeout: 30 * time.Second})
 
 	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -49,7 +49,7 @@ func TestHandler_LogContract_AuthFailure(t *testing.T) {
 
 func TestHandler_LogContract_NonStreamSuccess(t *testing.T) {
 	auditBuf, callBuf, sink := newLogContractSink()
-	h := NewHandler(okFakeService(), slog.New(slog.NewTextHandler(io.Discard, nil)), sink, HandlerConfig{})
+	h := NewHandler(okFakeService(), slog.New(slog.NewTextHandler(io.Discard, nil)), sink, HandlerConfig{RequestTimeout: 30 * time.Second})
 
 	body := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"Reply with exactly OK."}],"max_tokens":8}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
@@ -95,7 +95,7 @@ func TestHandler_LogContract_StreamSuccess(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), sink, HandlerConfig{})
+	h := NewHandler(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), sink, HandlerConfig{RequestTimeout: 30 * time.Second})
 
 	body := strings.Join([]string{
 		`{"model":"deepseek-v4-flash","stream":true,`,

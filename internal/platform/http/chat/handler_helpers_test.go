@@ -100,6 +100,12 @@ func newTestHandler(
 	callSink telemetry.EventSink,
 	cfg HandlerConfig,
 ) *Handler {
+	if cfg.RequestTimeout == 0 {
+		cfg.RequestTimeout = 30 * time.Second
+	}
+	if cfg.StreamIdleTimeout == 0 {
+		cfg.StreamIdleTimeout = 30 * time.Second
+	}
 	return NewHandler(
 		service,
 		slog.New(slog.NewTextHandler(io.Discard, nil)),

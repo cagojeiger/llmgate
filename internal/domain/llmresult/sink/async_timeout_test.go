@@ -91,32 +91,3 @@ func TestAsyncSink_Emit_RespectsTimeoutAndDrainsQueue(t *testing.T) {
 		t.Errorf("ctx-done unblocks = %d, want %d (worker did not respect EmitTimeout)", got, want)
 	}
 }
-
-// TestAsyncSink_Close_NoTimeoutWhenDisabled verifies negative
-// CloseTimeout disables the wait truncation (Close blocks until worker
-// exits naturally). This is the legacy behavior, kept available for
-// tests that need it.
-func TestAsyncSink_Close_NoTimeoutWhenDisabled(t *testing.T) {
-	next := &ctxRespectingSlowSink{}
-	sink := NewAsyncSinkWithConfig(next, discardLogger(), AsyncConfig{
-		QueueSize:     2,
-		BatchSize:     1,
-		FlushInterval: time.Hour,
-		EmitTimeout:   20 * time.Millisecond,
-		CloseTimeout:  -1, // disabled
-	})
-
-	sink.Emit(context.Background(), &llmresult.Event{RequestID: "e"})
-
-	done := make(chan struct{})
-	go func() {
-		_ = sink.Close()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("Close hung longer than expected even with EmitTimeout active")
-	}
-}

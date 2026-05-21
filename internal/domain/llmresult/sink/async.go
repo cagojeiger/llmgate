@@ -28,8 +28,7 @@ type AsyncConfig struct {
 	QueueSize     int
 	BatchSize     int
 	FlushInterval time.Duration
-	// EmitTimeout caps one downstream Emit call. 0 → default. Set negative
-	// to disable (not recommended outside tests).
+	// EmitTimeout caps one downstream Emit call. 0 → default.
 	EmitTimeout time.Duration
 	// CloseTimeout caps Close()'s wait on the worker goroutine. 0 → default.
 	CloseTimeout time.Duration
@@ -126,34 +125,25 @@ func (s *AsyncSink) Close() error {
 		s.mu.Unlock()
 
 		start := time.Now()
-		if s.closeTimeout > 0 {
-			select {
-			case <-s.done:
-				s.log.LogAttrs(context.Background(), slog.LevelInfo,
-					"llm result async sink drained",
-					slog.Int64("duration_ms", time.Since(start).Milliseconds()),
-					slog.Uint64("dropped_total", s.dropped.Load()),
-				)
-			case <-time.After(s.closeTimeout):
-				// Worker is still inside next.Emit (broker hang). We
-				// abandon it: the underlying NATS conn close below will
-				// usually unblock it; if not, the worker goroutine
-				// outlives Close until process exit. queue_remaining
-				// is how many already-enqueued events the worker had
-				// not yet handed to next.Emit at the abandon point —
-				// those are lost.
-				s.log.LogAttrs(context.Background(), slog.LevelWarn,
-					"llm result async sink close timeout — worker abandoned",
-					slog.Duration("budget", s.closeTimeout),
-					slog.Int("queue_remaining", len(s.queue)),
-					slog.Uint64("dropped_total", s.dropped.Load()),
-				)
-			}
-		} else {
-			<-s.done
+		select {
+		case <-s.done:
 			s.log.LogAttrs(context.Background(), slog.LevelInfo,
 				"llm result async sink drained",
 				slog.Int64("duration_ms", time.Since(start).Milliseconds()),
+				slog.Uint64("dropped_total", s.dropped.Load()),
+			)
+		case <-time.After(s.closeTimeout):
+			// Worker is still inside next.Emit (broker hang). We
+			// abandon it: the underlying NATS conn close below will
+			// usually unblock it; if not, the worker goroutine
+			// outlives Close until process exit. queue_remaining is
+			// how many already-enqueued events the worker had not yet
+			// handed to next.Emit at the abandon point — those are
+			// lost.
+			s.log.LogAttrs(context.Background(), slog.LevelWarn,
+				"llm result async sink close timeout — worker abandoned",
+				slog.Duration("budget", s.closeTimeout),
+				slog.Int("queue_remaining", len(s.queue)),
 				slog.Uint64("dropped_total", s.dropped.Load()),
 			)
 		}
@@ -228,12 +218,8 @@ func (s *AsyncSink) emitOne(event *llmresult.Event) {
 			)
 		}
 	}()
-	ctx := context.Background()
-	if s.emitTimeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, s.emitTimeout)
-		defer cancel()
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), s.emitTimeout)
+	defer cancel()
 	s.next.Emit(ctx, event)
 }
 

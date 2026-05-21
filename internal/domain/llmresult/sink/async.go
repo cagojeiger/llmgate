@@ -3,6 +3,7 @@ package sink
 import (
 	"context"
 	"log/slog"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -166,6 +167,15 @@ func (s *AsyncSink) Dropped() uint64 {
 // returns.
 func (s *AsyncSink) run() {
 	defer close(s.done)
+	defer func() {
+		if p := recover(); p != nil {
+			s.log.LogAttrs(context.Background(), slog.LevelError,
+				"async sink worker panic",
+				slog.Any("panic", p),
+				slog.String("stack", string(debug.Stack())),
+			)
+		}
+	}()
 	batch := make([]*llmresult.Event, 0, s.batchSize)
 	timer := time.NewTimer(s.flushInterval)
 	stopTimer(timer)

@@ -58,7 +58,9 @@ func (s *Relay) Run(
 	rec.StatusCode = http.StatusOK
 	call.StatusCode = rec.StatusCode
 
-	receiver := newStreamReceiver(stream, s.log)
+	// Receiver worker is process/request-detached for panic-recover logging;
+	// the recover path uses a fresh ctx by design.
+	receiver := newStreamReceiver(stream, s.log) //nolint:contextcheck // detached recover ctx
 	defer receiver.Stop()
 	for {
 		event, err := receiver.Recv(ctx, s.idleTimeout)

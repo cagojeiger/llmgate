@@ -41,7 +41,7 @@ func (b *StreamResponseBuilder) Add(event *llmtypes.Event) {
 		b.systemFingerprint = event.SystemFingerprint
 	}
 	if event.Usage != nil {
-		b.usage = cloneUsage(event.Usage)
+		b.usage = event.Usage.Clone()
 	}
 	if len(event.Extra) > 0 {
 		if b.extra == nil {
@@ -64,7 +64,7 @@ func (b *StreamResponseBuilder) Response() *llmtypes.Response {
 		Created:           b.created,
 		Model:             b.model,
 		SystemFingerprint: b.systemFingerprint,
-		Usage:             cloneUsage(b.usage),
+		Usage:             b.usage.Clone(),
 		Extra:             cloneRawMap(b.extra),
 	}
 	indexes := make([]int, 0, len(b.choices))
@@ -166,19 +166,4 @@ func cloneRawMap(in map[string]json.RawMessage) map[string]json.RawMessage {
 	out := make(map[string]json.RawMessage, len(in))
 	mergeRaw(out, in)
 	return out
-}
-
-func cloneUsage(usage *llmtypes.Usage) *llmtypes.Usage {
-	if usage == nil {
-		return nil
-	}
-	out, err := json.Marshal(usage)
-	if err != nil {
-		return nil
-	}
-	var cloned llmtypes.Usage
-	if err := json.Unmarshal(out, &cloned); err != nil {
-		return nil
-	}
-	return &cloned
 }

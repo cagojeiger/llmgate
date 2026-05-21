@@ -110,6 +110,26 @@ type Usage struct {
 	Extra map[string]json.RawMessage `json:"-"`
 }
 
+// Clone returns an independent copy of the receiver. Stream assembly
+// re-clones Usage on every chunk that carries one, so this uses an
+// explicit field-wise copy rather than a JSON round-trip — and it must
+// never silently drop the value.
+func (u *Usage) Clone() *Usage {
+	if u == nil {
+		return nil
+	}
+	c := *u
+	if len(u.Extra) > 0 {
+		c.Extra = make(map[string]json.RawMessage, len(u.Extra))
+		for k, v := range u.Extra {
+			c.Extra[k] = append(json.RawMessage(nil), v...)
+		}
+	} else {
+		c.Extra = nil
+	}
+	return &c
+}
+
 type Event struct {
 	ID                string `json:"id,omitempty"`
 	Object            string `json:"object,omitempty"`

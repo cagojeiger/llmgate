@@ -40,7 +40,7 @@ func FromTelemetry(in BuildInput) (*Event, bool) {
 
 		Request:  cloneRequest(in.Request),
 		Response: cloneResponse(in.Response),
-		Usage:    cloneUsage(call.Usage),
+		Usage:    call.Usage.Clone(),
 		Attempts: cloneAttempts(call.Attempts),
 
 		ModelRequested: call.ModelRequested,

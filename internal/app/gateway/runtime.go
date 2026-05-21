@@ -12,12 +12,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"llmgate/internal/config"
 	"llmgate/internal/domain/catalog"
 	"llmgate/internal/domain/consumers"
 	llmresultsink "llmgate/internal/domain/llmresult/sink"
 	"llmgate/internal/domain/routing"
 	"llmgate/internal/domain/telemetry"
+	"llmgate/internal/platform/config"
 	"llmgate/internal/platform/http/server"
 	promtelemetry "llmgate/internal/platform/telemetry/prometheus"
 	slogtelemetry "llmgate/internal/platform/telemetry/slog"

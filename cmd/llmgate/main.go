@@ -11,7 +11,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"llmgate/internal/app/gateway"
-	"llmgate/internal/config"
+	"llmgate/internal/platform/config"
 )
 
 // version is set by the linker at build time via

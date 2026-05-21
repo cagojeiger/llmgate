@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"llmgate/internal/config"
+	"llmgate/internal/platform/config"
 )
 
 func newTestServer(t *testing.T, probe *ProbeState) (*httptest.Server, func()) {

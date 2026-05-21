@@ -14,11 +14,11 @@ import (
 	"strings"
 	"testing"
 
-	"llmgate/internal/config"
 	"llmgate/internal/domain/consumers"
 	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/routing"
 	"llmgate/internal/domain/telemetry"
+	"llmgate/internal/platform/config"
 )
 
 // recordingRecorder captures every emitted audit event so tests can

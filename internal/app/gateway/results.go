@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	"llmgate/internal/config"
 	llmresultsink "llmgate/internal/domain/llmresult/sink"
+	"llmgate/internal/platform/config"
 	natsllmresult "llmgate/internal/platform/nats/llmresult"
 )
 

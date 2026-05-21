@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"llmgate/internal/config"
+	"llmgate/internal/platform/config"
 )
 
 func TestNew_ReadTimeoutFollowsRequestTimeout(t *testing.T) {

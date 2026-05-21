@@ -8,8 +8,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 
-	"llmgate/internal/config"
 	"llmgate/internal/domain/consumers"
+	"llmgate/internal/platform/config"
 )
 
 type ServerOptions struct {

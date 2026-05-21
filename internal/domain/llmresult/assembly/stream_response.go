@@ -59,6 +59,10 @@ func (b *StreamResponseBuilder) Response() *llmtypes.Response {
 	if b == nil {
 		return nil
 	}
+	// b.extra was already populated by mergeRaw at Add() time, which
+	// copies every RawMessage out of the caller's event. We own those
+	// bytes, so the response can adopt the map directly — re-cloning at
+	// terminal time would be pure work.
 	resp := &llmtypes.Response{
 		ID:                b.id,
 		Object:            "chat.completion",
@@ -66,7 +70,7 @@ func (b *StreamResponseBuilder) Response() *llmtypes.Response {
 		Model:             b.model,
 		SystemFingerprint: b.systemFingerprint,
 		Usage:             b.usage.Clone(),
-		Extra:             cloneRawMap(b.extra),
+		Extra:             nilIfEmpty(b.extra),
 	}
 	indexes := make([]int, 0, len(b.choices))
 	for index := range b.choices {
@@ -126,17 +130,21 @@ func (c *streamChoice) add(choice llmtypes.ChoiceDelta) {
 
 func (c *streamChoice) choice() llmtypes.Choice {
 	c.finishToolCalls()
+	// Same ownership rationale as Response().Extra above: msgExtra,
+	// choiceRaw, and logprobs are slices/maps we built ourselves by
+	// copying out of the per-delta event, so the terminal value adopts
+	// them directly.
 	return llmtypes.Choice{
 		Index: c.index,
 		Message: llmtypes.Message{
 			Role:             c.role,
 			Content:          c.content.String(),
 			ReasoningContent: c.reasoningContent.String(),
-			Extra:            cloneRawMap(c.msgExtra),
+			Extra:            nilIfEmpty(c.msgExtra),
 		},
 		FinishReason: c.finishReason,
-		Logprobs:     append(json.RawMessage(nil), c.logprobs...),
-		Extra:        cloneRawMap(c.choiceRaw),
+		Logprobs:     c.logprobs,
+		Extra:        nilIfEmpty(c.choiceRaw),
 	}
 }
 
@@ -154,17 +162,21 @@ func (c *streamChoice) addDeltaExtra(extra map[string]json.RawMessage) {
 	}
 }
 
+// mergeRaw copies every src entry into dst with a fresh []byte. The
+// copy is defensive: dst lives for the whole stream response, while
+// src belongs to a transient event whose bytes the caller may reuse.
 func mergeRaw(dst, src map[string]json.RawMessage) {
 	for key, raw := range src {
 		dst[key] = append(json.RawMessage(nil), raw...)
 	}
 }
 
-func cloneRawMap(in map[string]json.RawMessage) map[string]json.RawMessage {
-	if len(in) == 0 {
+// nilIfEmpty returns nil for empty maps so the assembled wire shape
+// keeps the "no extra fields" idiom (a nil map, not an empty object)
+// that downstream JSON encoders rely on.
+func nilIfEmpty(m map[string]json.RawMessage) map[string]json.RawMessage {
+	if len(m) == 0 {
 		return nil
 	}
-	out := make(map[string]json.RawMessage, len(in))
-	mergeRaw(out, in)
-	return out
+	return m
 }

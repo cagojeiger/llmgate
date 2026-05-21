@@ -113,27 +113,6 @@ func TestFirstBytes_NilSafe(t *testing.T) {
 	}
 }
 
-func TestCopyHeaders_DeepCopy(t *testing.T) {
-	in := map[string]string{"X-A": "1", "X-B": "2"}
-	out := CopyHeaders(in)
-	if len(out) != len(in) {
-		t.Fatalf("len = %d, want %d", len(out), len(in))
-	}
-	out["X-A"] = "mutated"
-	if in["X-A"] != "1" {
-		t.Errorf("CopyHeaders did not deep-copy: in[X-A] = %q", in["X-A"])
-	}
-}
-
-func TestCopyHeaders_EmptyReturnsNil(t *testing.T) {
-	if got := CopyHeaders(nil); got != nil {
-		t.Errorf("CopyHeaders(nil) = %v, want nil", got)
-	}
-	if got := CopyHeaders(map[string]string{}); got != nil {
-		t.Errorf("CopyHeaders({}) = %v, want nil", got)
-	}
-}
-
 func TestDefaultClient_TuningPreservedAcrossCalls(t *testing.T) {
 	c := DefaultClient()
 	if c == nil {

@@ -17,14 +17,13 @@ import (
 const defaultUserAgent = "llmgate/0.1"
 
 type Config struct {
-	BaseURL      string
-	APIKey       string
-	AuthScheme   string
-	UserAgent    string
-	HTTPClient   *http.Client
-	ExtraHeaders map[string]string
-	Name         string
-	ExtraBody    map[string]any // default extra parameters to include in request body
+	BaseURL    string
+	APIKey     string
+	AuthScheme string
+	UserAgent  string
+	HTTPClient *http.Client
+	Name       string
+	ExtraBody  map[string]any // default extra parameters to include in request body
 }
 
 type Client struct {
@@ -53,7 +52,6 @@ func New(cfg Config) (*Client, error) {
 	if cfg.Name == "" {
 		cfg.Name = "openai"
 	}
-	cfg.ExtraHeaders = upstream.CopyHeaders(cfg.ExtraHeaders)
 	httpClient := cfg.HTTPClient
 	if httpClient == nil {
 		httpClient = upstream.DefaultClient()
@@ -108,9 +106,6 @@ func (c *Client) newRequest(ctx context.Context, accept string, body []byte) (*h
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", accept)
 	httpReq.Header.Set("User-Agent", c.cfg.UserAgent)
-	for k, v := range c.cfg.ExtraHeaders {
-		httpReq.Header.Set(k, v)
-	}
 	switch c.cfg.AuthScheme {
 	case "bearer":
 		httpReq.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)

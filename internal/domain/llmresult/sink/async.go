@@ -14,12 +14,25 @@ const (
 	defaultAsyncQueueSize     = 1000
 	defaultAsyncBatchSize     = 100
 	defaultAsyncFlushInterval = time.Second
+	// defaultAsyncEmitTimeout bounds one downstream Emit (e.g. NATS
+	// Publish) so a stuck broker cannot freeze the drain loop.
+	defaultAsyncEmitTimeout = 10 * time.Second
+	// defaultAsyncCloseTimeout bounds Close() waiting on the worker.
+	// It fits inside the post-drain headroom operators are expected to
+	// leave under ShutdownDrainTimeout — k8s
+	// terminationGracePeriodSeconds should be ≥ drain + close + α.
+	defaultAsyncCloseTimeout = 60 * time.Second
 )
 
 type AsyncConfig struct {
 	QueueSize     int
 	BatchSize     int
 	FlushInterval time.Duration
+	// EmitTimeout caps one downstream Emit call. 0 → default. Set negative
+	// to disable (not recommended outside tests).
+	EmitTimeout time.Duration
+	// CloseTimeout caps Close()'s wait on the worker goroutine. 0 → default.
+	CloseTimeout time.Duration
 }
 
 // AsyncSink decouples result-event production from remote transports. Emit is
@@ -34,6 +47,8 @@ type AsyncSink struct {
 	done          chan struct{}
 	batchSize     int
 	flushInterval time.Duration
+	emitTimeout   time.Duration
+	closeTimeout  time.Duration
 
 	closeOnce sync.Once
 	closeErr  error
@@ -55,6 +70,8 @@ func NewAsyncSinkWithConfig(next Sink, log *slog.Logger, cfg AsyncConfig) *Async
 		done:          make(chan struct{}),
 		batchSize:     cfg.BatchSize,
 		flushInterval: cfg.FlushInterval,
+		emitTimeout:   cfg.EmitTimeout,
+		closeTimeout:  cfg.CloseTimeout,
 	}
 	go s.run()
 	return s
@@ -69,6 +86,12 @@ func (c AsyncConfig) withDefaults() AsyncConfig {
 	}
 	if c.FlushInterval <= 0 {
 		c.FlushInterval = defaultAsyncFlushInterval
+	}
+	if c.EmitTimeout == 0 {
+		c.EmitTimeout = defaultAsyncEmitTimeout
+	}
+	if c.CloseTimeout == 0 {
+		c.CloseTimeout = defaultAsyncCloseTimeout
 	}
 	return c
 }
@@ -102,7 +125,24 @@ func (s *AsyncSink) Close() error {
 		close(s.queue)
 		s.mu.Unlock()
 
-		<-s.done
+		if s.closeTimeout > 0 {
+			select {
+			case <-s.done:
+			case <-time.After(s.closeTimeout):
+				// Worker is still inside next.Emit (broker hang). We
+				// abandon it: the underlying NATS conn close below will
+				// usually unblock it; if not, the worker goroutine
+				// outlives Close until process exit. Pending in-queue
+				// events are accepted as lost.
+				s.log.LogAttrs(context.Background(), slog.LevelWarn,
+					"llm result async sink close timeout — worker abandoned",
+					slog.Duration("budget", s.closeTimeout),
+					slog.Uint64("dropped_total", s.dropped.Load()),
+				)
+			}
+		} else {
+			<-s.done
+		}
 		s.closeErr = s.next.Close()
 	})
 	return s.closeErr
@@ -174,7 +214,13 @@ func (s *AsyncSink) emitOne(event *llmresult.Event) {
 			)
 		}
 	}()
-	s.next.Emit(context.Background(), event)
+	ctx := context.Background()
+	if s.emitTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.emitTimeout)
+		defer cancel()
+	}
+	s.next.Emit(ctx, event)
 }
 
 func stopTimer(timer *time.Timer) {

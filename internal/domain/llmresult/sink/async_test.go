@@ -106,7 +106,7 @@ func TestAsyncSink_CloseDrainsQueueThenClosesNext(t *testing.T) {
 
 func TestAsyncSink_CloseReturnsNextCloseError(t *testing.T) {
 	want := errors.New("close failed")
-	sink := NewAsyncSink(&closeErrorSink{err: want}, discardLogger(), 1)
+	sink := NewAsyncSinkWithConfig(&closeErrorSink{err: want}, discardLogger(), AsyncConfig{QueueSize: 1})
 
 	if got := sink.Close(); !errors.Is(got, want) {
 		t.Fatalf("Close() error = %v, want %v", got, want)

@@ -50,7 +50,7 @@ type Catalog struct {
 type Model struct {
 	ID         string            `yaml:"id"`
 	Vendor     string            `yaml:"vendor"`
-	Protocol   llmtypes.Protocol `yaml:"protocol"` // see llmtypes.AllProtocols
+	Protocol   llmtypes.Protocol `yaml:"protocol"` // see llmtypes.Protocol consts
 	BaseURL    string            `yaml:"base_url"`
 	AuthEnv    string            `yaml:"auth_env"`             // env var *name*; empty defaults to LLMGATE_<VENDOR>_API_KEY
 	AuthScheme string            `yaml:"auth_scheme"`          // bearer | x-api-key

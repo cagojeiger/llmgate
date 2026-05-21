@@ -91,7 +91,7 @@ func BuildRuntime(ctx context.Context, in RuntimeInput) (*Runtime, error) {
 		in.Logger = slog.Default()
 	}
 
-	models, aliases, err := BuildRouterInputs(in.Catalog)
+	models, aliases, err := buildRouterInputs(in.Catalog, defaultProviderFactories())
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +126,7 @@ func BuildRuntime(ctx context.Context, in RuntimeInput) (*Runtime, error) {
 		metricsRecorder,
 	)
 
-	results, err := BuildResultSink(ctx, in.Config, in.Logger)
+	results, err := buildResultSink(ctx, in.Config, in.Logger)
 	if err != nil {
 		_ = events.Close()
 		return nil, err

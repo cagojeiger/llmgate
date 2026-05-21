@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	DefaultAsyncQueueSize     = 1000
-	DefaultAsyncBatchSize     = 100
-	DefaultAsyncFlushInterval = time.Second
+	defaultAsyncQueueSize     = 1000
+	defaultAsyncBatchSize     = 100
+	defaultAsyncFlushInterval = time.Second
 )
 
 type AsyncConfig struct {
@@ -40,10 +40,6 @@ type AsyncSink struct {
 	dropped   atomic.Uint64
 }
 
-func NewAsyncSink(next Sink, log *slog.Logger, queueSize int) *AsyncSink {
-	return NewAsyncSinkWithConfig(next, log, AsyncConfig{QueueSize: queueSize})
-}
-
 func NewAsyncSinkWithConfig(next Sink, log *slog.Logger, cfg AsyncConfig) *AsyncSink {
 	if next == nil {
 		next = NopSink{}
@@ -66,13 +62,13 @@ func NewAsyncSinkWithConfig(next Sink, log *slog.Logger, cfg AsyncConfig) *Async
 
 func (c AsyncConfig) withDefaults() AsyncConfig {
 	if c.QueueSize <= 0 {
-		c.QueueSize = DefaultAsyncQueueSize
+		c.QueueSize = defaultAsyncQueueSize
 	}
 	if c.BatchSize <= 0 {
-		c.BatchSize = DefaultAsyncBatchSize
+		c.BatchSize = defaultAsyncBatchSize
 	}
 	if c.FlushInterval <= 0 {
-		c.FlushInterval = DefaultAsyncFlushInterval
+		c.FlushInterval = defaultAsyncFlushInterval
 	}
 	return c
 }

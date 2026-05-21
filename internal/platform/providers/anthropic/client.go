@@ -20,7 +20,6 @@ type Config struct {
 	AuthScheme       string
 	UserAgent        string
 	HTTPClient       *http.Client
-	ExtraHeaders     map[string]string
 	Name             string
 	DefaultMaxTokens int
 }
@@ -65,7 +64,6 @@ func New(cfg Config) (*Client, error) {
 	cfg.BaseURL = baseURL
 	cfg.AuthScheme = authScheme
 	cfg.UserAgent = userAgent
-	cfg.ExtraHeaders = upstream.CopyHeaders(cfg.ExtraHeaders)
 	cfg.Name = name
 	cfg.DefaultMaxTokens = defaultMaxTokens
 
@@ -82,9 +80,6 @@ func (c *Client) newRequest(ctx context.Context, accept string, body []byte) (*h
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", accept)
 	httpReq.Header.Set("User-Agent", c.cfg.UserAgent)
-	for k, v := range c.cfg.ExtraHeaders {
-		httpReq.Header.Set(k, v)
-	}
 	switch c.cfg.AuthScheme {
 	case "bearer":
 		httpReq.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)

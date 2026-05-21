@@ -1,11 +1,11 @@
 // Package upstream holds the transport-level boilerplate every LLM
 // provider adapter (openai, anthropic, future Gemini/Bedrock/...) needs
 // when calling its upstream vendor: a hardened *http.Client default,
-// defensive header copy, uniform low-level / bad-request error
-// wrapping, Retry-After parsing, and a body-trimming helper for audit
-// Raw bytes. Vendor-specific classification (status → ErrorKind, envelope
-// shape) stays in the adapter package — this layer only handles
-// wire-protocol mechanics shared across vendors.
+// uniform low-level / bad-request error wrapping, Retry-After parsing,
+// and a body-trimming helper for audit Raw bytes. Vendor-specific
+// classification (status → ErrorKind, envelope shape) stays in the
+// adapter package — this layer only handles wire-protocol mechanics
+// shared across vendors.
 package upstream
 
 import (
@@ -46,20 +46,6 @@ func DefaultClient() *http.Client {
 			ExpectContinueTimeout: 1 * time.Second,
 		},
 	}
-}
-
-// CopyHeaders returns a defensive copy of in so the caller can mutate
-// the result (or the input) without leaking changes across goroutines
-// or requests. Returns nil for empty input.
-func CopyHeaders(in map[string]string) map[string]string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
 }
 
 // ParseRetryAfter decodes an HTTP Retry-After header into a duration,

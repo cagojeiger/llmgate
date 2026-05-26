@@ -49,11 +49,7 @@ func NewPublisher(ctx context.Context, cfg Config, log *slog.Logger) (*Publisher
 	if log == nil {
 		log = slog.Default()
 	}
-	opts := []natsgo.Option{natsgo.Name("llmgate llmresult publisher")}
-	if cfg.User != "" {
-		opts = append(opts, natsgo.UserInfo(cfg.User, cfg.Password))
-	}
-	nc, err := natsgo.Connect(cfg.URL, opts...)
+	nc, err := natsgo.Connect(cfg.URL, connectOptions(cfg)...)
 	if err != nil {
 		return nil, fmt.Errorf("connect nats: %w", err)
 	}
@@ -63,6 +59,17 @@ func NewPublisher(ctx context.Context, cfg Config, log *slog.Logger) (*Publisher
 		return nil, fmt.Errorf("create jetstream context: %w", err)
 	}
 	return &Publisher{nc: nc, js: js, subject: cfg.Subject, log: log}, nil
+}
+
+// connectOptions builds the nats.Option set in a way unit tests can
+// inspect without standing up a broker. UserInfo is only attached when
+// a user is configured so anonymous brokers stay backwards-compatible.
+func connectOptions(cfg Config) []natsgo.Option {
+	opts := []natsgo.Option{natsgo.Name("llmgate llmresult publisher")}
+	if cfg.User != "" {
+		opts = append(opts, natsgo.UserInfo(cfg.User, cfg.Password))
+	}
+	return opts
 }
 
 func (c Config) withDefaults() Config {

@@ -67,3 +67,43 @@ func (f *fakeJetStream) PublishMsg(m *natsgo.Msg, _ ...natsgo.PubOpt) (*natsgo.P
 	f.published = append(f.published, m)
 	return &natsgo.PubAck{}, nil
 }
+
+// Apply nats.Option callbacks to a fresh Options struct and inspect the
+// resulting User/Password fields — the same fields nats.Connect would
+// read. Avoids needing a live broker to assert the auth wiring.
+func applyOptions(t *testing.T, opts []natsgo.Option) natsgo.Options {
+	t.Helper()
+	var o natsgo.Options
+	for _, opt := range opts {
+		if err := opt(&o); err != nil {
+			t.Fatalf("apply option: %v", err)
+		}
+	}
+	return o
+}
+
+func TestConnectOptions_AnonymousWhenUserEmpty(t *testing.T) {
+	got := applyOptions(t, connectOptions(Config{}))
+	if got.User != "" || got.Password != "" {
+		t.Fatalf("anonymous config attached creds: user=%q password=%q", got.User, got.Password)
+	}
+}
+
+func TestConnectOptions_AttachesUserInfoWhenUserSet(t *testing.T) {
+	got := applyOptions(t, connectOptions(Config{User: "llmgate", Password: "s3cret"}))
+	if got.User != "llmgate" {
+		t.Errorf("User = %q, want llmgate", got.User)
+	}
+	if got.Password != "s3cret" {
+		t.Errorf("Password = %q, want s3cret", got.Password)
+	}
+}
+
+func TestConnectOptions_IgnoresPasswordWithoutUser(t *testing.T) {
+	// Password alone is meaningless to nats.UserInfo, so the option
+	// should not be added (User stays empty → anonymous connect).
+	got := applyOptions(t, connectOptions(Config{Password: "stray"}))
+	if got.User != "" || got.Password != "" {
+		t.Fatalf("password-only config attached creds: user=%q password=%q", got.User, got.Password)
+	}
+}

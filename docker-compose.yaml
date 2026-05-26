@@ -9,7 +9,10 @@ services:
     build: .
     image: llmgate:dev
     depends_on:
-      - nats
+      nats:
+        condition: service_started
+      nats-init:
+        condition: service_completed_successfully
     ports:
       - "8080:8080"
     environment:
@@ -19,7 +22,6 @@ services:
       LLMGATE_CONSUMERS: /etc/llmgate/consumers
       LLMGATE_LOG_LEVEL: info
       LLMGATE_LLMRESULT_NATS_URL: ${LLMGATE_LLMRESULT_NATS_URL:-nats://nats:4222}
-      LLMGATE_LLMRESULT_NATS_STREAM: ${LLMGATE_LLMRESULT_NATS_STREAM:-LLMRESULT}
       LLMGATE_LLMRESULT_NATS_SUBJECT: ${LLMGATE_LLMRESULT_NATS_SUBJECT:-llmgate.llmresult.finalized}
       LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE: ${LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE:-1000}
       LLMGATE_LLMRESULT_ASYNC_BATCH_SIZE: ${LLMGATE_LLMRESULT_ASYNC_BATCH_SIZE:-100}
@@ -39,6 +41,26 @@ services:
       - "${LLMGATE_NATS_PORT:-4222}:4222"
       - "${LLMGATE_NATS_MONITOR_PORT:-8222}:8222"
     restart: "no"
+
+  # Mirrors what NACK provisions in prod (see multi-cluster-gitops
+  # platform/nats/manifests/oci-prod-osaka/stream.yaml). llmgate no
+  # longer creates streams itself, so local stacks need this one-shot.
+  nats-init:
+    image: natsio/nats-box:0.18.0
+    depends_on:
+      - nats
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        until nats --server nats://nats:4222 server check connection; do sleep 1; done &&
+        nats --server nats://nats:4222 stream add LLMRESULT
+        --subjects 'llmgate.llmresult.finalized'
+        --storage file --retention limits --discard old
+        --max-bytes=1073741824 --max-age=2160h --dupe-window=2m
+        --max-msgs=-1 --max-msgs-per-subject=-1 --max-msg-size=-1
+        --max-consumers=-1 --replicas 1 --no-allow-rollup --no-deny-delete --no-deny-purge --defaults
+        || nats --server nats://nats:4222 stream info LLMRESULT
 
   prometheus:
     image: prom/prometheus:v3.7.3

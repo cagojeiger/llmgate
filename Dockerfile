@@ -2,7 +2,7 @@
 # for the runtime image. The binary is fully static (CGO_ENABLED=0)
 # so distroless/static is sufficient — no libc needed.
 
-FROM golang:1.23-alpine AS builder
+FROM golang:1.25-alpine AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

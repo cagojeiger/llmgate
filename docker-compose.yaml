@@ -57,7 +57,7 @@ services:
         nats --server nats://nats:4222 stream add LLMRESULT
         --subjects 'llmgate.llmresult.finalized'
         --storage file --retention limits --discard old
-        --max-bytes=1073741824 --max-age=2160h --dupe-window=2m
+        --max-bytes=10737418240 --max-age=2160h --dupe-window=2m
         --max-msgs=-1 --max-msgs-per-subject=-1 --max-msg-size=-1
         --max-consumers=-1 --replicas 1 --no-allow-rollup --no-deny-delete --no-deny-purge --defaults
         || nats --server nats://nats:4222 stream info LLMRESULT

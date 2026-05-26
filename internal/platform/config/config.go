@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -169,14 +170,14 @@ func validateSecurityDefaults(cfg *Server) error {
 		return nil
 	}
 	if cfg.LLMResultNATSUser == "" || cfg.LLMResultNATSPassword == "" {
-		return fmt.Errorf("LLMGATE_LLMRESULT_NATS_USER and LLMGATE_LLMRESULT_NATS_PASSWORD are required when remote llmresult publishing is enabled outside local")
+		return errors.New("LLMGATE_LLMRESULT_NATS_USER and LLMGATE_LLMRESULT_NATS_PASSWORD are required when remote llmresult publishing is enabled outside local")
 	}
 	u, err := url.Parse(cfg.LLMResultNATSURL)
 	if err != nil {
 		return fmt.Errorf("LLMGATE_LLMRESULT_NATS_URL must be a valid URL: %w", err)
 	}
 	if !strings.EqualFold(u.Scheme, "tls") {
-		return fmt.Errorf("LLMGATE_LLMRESULT_NATS_URL must use tls:// outside local")
+		return errors.New("LLMGATE_LLMRESULT_NATS_URL must use tls:// outside local")
 	}
 	return nil
 }

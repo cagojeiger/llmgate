@@ -16,7 +16,6 @@ func buildResultSink(ctx context.Context, cfg *config.Server, log *slog.Logger) 
 	}
 	publisher, err := natsllmresult.NewPublisher(ctx, natsllmresult.Config{
 		URL:     cfg.LLMResultNATSURL,
-		Stream:  cfg.LLMResultNATSStream,
 		Subject: cfg.LLMResultNATSSubject,
 	}, log)
 	if err != nil {

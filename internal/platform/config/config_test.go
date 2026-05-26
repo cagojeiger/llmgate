@@ -28,7 +28,6 @@ func resetEnv(t *testing.T) {
 		"LLMGATE_COMPLETE_TIMEOUT",
 		"LLMGATE_STREAM_IDLE_TIMEOUT",
 		"LLMGATE_LLMRESULT_NATS_URL",
-		"LLMGATE_LLMRESULT_NATS_STREAM",
 		"LLMGATE_LLMRESULT_NATS_SUBJECT",
 		"LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE",
 		"LLMGATE_LLMRESULT_ASYNC_BATCH_SIZE",
@@ -83,9 +82,6 @@ func TestLoadServer_Defaults(t *testing.T) {
 	}
 	if cfg.LLMResultNATSURL != "" {
 		t.Errorf("LLMResultNATSURL = %q, want disabled empty default", cfg.LLMResultNATSURL)
-	}
-	if cfg.LLMResultNATSStream != "LLMRESULT" {
-		t.Errorf("LLMResultNATSStream = %q, want LLMRESULT", cfg.LLMResultNATSStream)
 	}
 	if cfg.LLMResultNATSSubject != "llmgate.llmresult.finalized" {
 		t.Errorf("LLMResultNATSSubject = %q, want llmgate.llmresult.finalized", cfg.LLMResultNATSSubject)
@@ -200,7 +196,6 @@ func TestLoadServer_StreamIdleTimeoutOverride(t *testing.T) {
 func TestLoadServer_LLMResultNATSOverrides(t *testing.T) {
 	resetEnv(t)
 	t.Setenv("LLMGATE_LLMRESULT_NATS_URL", "nats://localhost:4222")
-	t.Setenv("LLMGATE_LLMRESULT_NATS_STREAM", "RESULTS")
 	t.Setenv("LLMGATE_LLMRESULT_NATS_SUBJECT", "results.finalized")
 	t.Setenv("LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE", "25")
 	t.Setenv("LLMGATE_LLMRESULT_ASYNC_BATCH_SIZE", "5")
@@ -212,9 +207,6 @@ func TestLoadServer_LLMResultNATSOverrides(t *testing.T) {
 	}
 	if cfg.LLMResultNATSURL != "nats://localhost:4222" {
 		t.Errorf("LLMResultNATSURL = %q", cfg.LLMResultNATSURL)
-	}
-	if cfg.LLMResultNATSStream != "RESULTS" {
-		t.Errorf("LLMResultNATSStream = %q", cfg.LLMResultNATSStream)
 	}
 	if cfg.LLMResultNATSSubject != "results.finalized" {
 		t.Errorf("LLMResultNATSSubject = %q", cfg.LLMResultNATSSubject)

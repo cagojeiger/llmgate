@@ -14,7 +14,6 @@ import (
 )
 
 const (
-	DefaultStream  = "LLMRESULT"
 	DefaultSubject = "llmgate.llmresult.finalized"
 
 	contentTypeJSON     = "application/json"
@@ -26,22 +25,18 @@ const (
 
 type Config struct {
 	URL     string
-	Stream  string
 	Subject string
 }
 
 type Publisher struct {
 	nc      *natsgo.Conn
 	js      jetStream
-	stream  string
 	subject string
 	log     *slog.Logger
 }
 
 type jetStream interface {
 	PublishMsg(m *natsgo.Msg, opts ...natsgo.PubOpt) (*natsgo.PubAck, error)
-	StreamInfo(stream string, opts ...natsgo.JSOpt) (*natsgo.StreamInfo, error)
-	AddStream(cfg *natsgo.StreamConfig, opts ...natsgo.JSOpt) (*natsgo.StreamInfo, error)
 }
 
 func NewPublisher(ctx context.Context, cfg Config, log *slog.Logger) (*Publisher, error) {
@@ -61,27 +56,19 @@ func NewPublisher(ctx context.Context, cfg Config, log *slog.Logger) (*Publisher
 		nc.Close()
 		return nil, fmt.Errorf("create jetstream context: %w", err)
 	}
-	p := &Publisher{nc: nc, js: js, stream: cfg.Stream, subject: cfg.Subject, log: log}
-	if err := p.ensureStream(ctx); err != nil {
-		nc.Close()
-		return nil, err
-	}
-	return p, nil
+	return &Publisher{nc: nc, js: js, subject: cfg.Subject, log: log}, nil
 }
 
 func (c Config) withDefaults() Config {
-	if c.Stream == "" {
-		c.Stream = DefaultStream
-	}
 	if c.Subject == "" {
 		c.Subject = DefaultSubject
 	}
 	return c
 }
 
-func newPublisher(js jetStream, stream, subject string) *Publisher {
-	cfg := Config{Stream: stream, Subject: subject}.withDefaults()
-	return &Publisher{js: js, stream: cfg.Stream, subject: cfg.Subject, log: slog.Default()}
+func newPublisher(js jetStream, subject string) *Publisher {
+	cfg := Config{Subject: subject}.withDefaults()
+	return &Publisher{js: js, subject: cfg.Subject, log: slog.Default()}
 }
 
 func (p *Publisher) Emit(ctx context.Context, event *result.Event) {
@@ -133,30 +120,6 @@ func (p *Publisher) Close() error {
 		return nil
 	}
 	p.nc.Close()
-	return nil
-}
-
-func (p *Publisher) ensureStream(ctx context.Context) error {
-	if p == nil || p.js == nil {
-		return errors.New("nats publisher is not initialized")
-	}
-	_, err := p.js.StreamInfo(p.stream, natsgo.Context(ctx))
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, natsgo.ErrStreamNotFound) {
-		return fmt.Errorf("inspect jetstream stream %q: %w", p.stream, err)
-	}
-	_, err = p.js.AddStream(&natsgo.StreamConfig{
-		Name:      p.stream,
-		Subjects:  []string{p.subject},
-		Retention: natsgo.LimitsPolicy,
-		Storage:   natsgo.FileStorage,
-		Discard:   natsgo.DiscardOld,
-	}, natsgo.Context(ctx))
-	if err != nil {
-		return fmt.Errorf("create jetstream stream %q: %w", p.stream, err)
-	}
 	return nil
 }
 

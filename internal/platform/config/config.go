@@ -33,8 +33,9 @@ type Server struct {
 	// publishing; the server still builds result events and drops them through
 	// the no-op sink.
 	LLMResultNATSURL        string
-	LLMResultNATSStream     string
 	LLMResultNATSSubject    string
+	LLMResultNATSUser       string
+	LLMResultNATSPassword   string
 	LLMResultAsyncQueueSize int
 	LLMResultAsyncBatchSize int
 	LLMResultAsyncFlush     time.Duration
@@ -119,8 +120,9 @@ func LoadServer() (*Server, error) {
 		CompleteTimeout:            completeTimeout,
 		StreamIdleTimeout:          streamIdleTimeout,
 		LLMResultNATSURL:           orDefault("LLMGATE_LLMRESULT_NATS_URL", ""),
-		LLMResultNATSStream:        orDefault("LLMGATE_LLMRESULT_NATS_STREAM", "LLMRESULT"),
 		LLMResultNATSSubject:       orDefault("LLMGATE_LLMRESULT_NATS_SUBJECT", "llmgate.llmresult.finalized"),
+		LLMResultNATSUser:          orDefault("LLMGATE_LLMRESULT_NATS_USER", ""),
+		LLMResultNATSPassword:      orDefault("LLMGATE_LLMRESULT_NATS_PASSWORD", ""),
 		LLMResultAsyncQueueSize:    llmResultQueueSize,
 		LLMResultAsyncBatchSize:    llmResultBatchSize,
 		LLMResultAsyncFlush:        llmResultFlush,

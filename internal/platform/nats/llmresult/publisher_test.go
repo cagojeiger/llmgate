@@ -3,7 +3,6 @@ package llmresult
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"testing"
 
 	natsgo "github.com/nats-io/nats.go"
@@ -13,7 +12,7 @@ import (
 
 func TestPublisher_PublishWritesSubjectHeadersAndPayload(t *testing.T) {
 	js := &fakeJetStream{}
-	p := newPublisher(js, "RESULTS", "results.finalized")
+	p := newPublisher(js, "results.finalized")
 
 	err := p.Publish(context.Background(), &result.Event{
 		SchemaVersion:  result.SchemaVersion,
@@ -53,58 +52,15 @@ func TestPublisher_PublishWritesSubjectHeadersAndPayload(t *testing.T) {
 }
 
 func TestPublisher_RejectsNilEvent(t *testing.T) {
-	p := newPublisher(&fakeJetStream{}, "RESULTS", "results.finalized")
+	p := newPublisher(&fakeJetStream{}, "results.finalized")
 
 	if err := p.Publish(context.Background(), nil); err == nil {
 		t.Fatal("Publish(nil) error = nil, want error")
 	}
 }
 
-func TestPublisher_EnsureStreamCreatesMissingStream(t *testing.T) {
-	js := &fakeJetStream{streamInfoErr: natsgo.ErrStreamNotFound}
-	p := newPublisher(js, "RESULTS", "results.finalized")
-
-	if err := p.ensureStream(context.Background()); err != nil {
-		t.Fatalf("ensureStream() error = %v", err)
-	}
-	if js.added == nil {
-		t.Fatal("AddStream was not called")
-	}
-	if js.added.Name != "RESULTS" {
-		t.Fatalf("stream name = %q, want RESULTS", js.added.Name)
-	}
-	if len(js.added.Subjects) != 1 || js.added.Subjects[0] != "results.finalized" {
-		t.Fatalf("subjects = %v", js.added.Subjects)
-	}
-}
-
-func TestPublisher_EnsureStreamKeepsExistingStream(t *testing.T) {
-	js := &fakeJetStream{}
-	p := newPublisher(js, "RESULTS", "results.finalized")
-
-	if err := p.ensureStream(context.Background()); err != nil {
-		t.Fatalf("ensureStream() error = %v", err)
-	}
-	if js.added != nil {
-		t.Fatalf("AddStream called for existing stream: %+v", js.added)
-	}
-}
-
-func TestPublisher_EnsureStreamReturnsInspectError(t *testing.T) {
-	want := errors.New("inspect failed")
-	js := &fakeJetStream{streamInfoErr: want}
-	p := newPublisher(js, "RESULTS", "results.finalized")
-
-	if err := p.ensureStream(context.Background()); !errors.Is(err, want) {
-		t.Fatalf("ensureStream() error = %v, want %v", err, want)
-	}
-}
-
 type fakeJetStream struct {
-	published     []*natsgo.Msg
-	streamInfoErr error
-	addErr        error
-	added         *natsgo.StreamConfig
+	published []*natsgo.Msg
 }
 
 func (f *fakeJetStream) PublishMsg(m *natsgo.Msg, _ ...natsgo.PubOpt) (*natsgo.PubAck, error) {
@@ -112,17 +68,42 @@ func (f *fakeJetStream) PublishMsg(m *natsgo.Msg, _ ...natsgo.PubOpt) (*natsgo.P
 	return &natsgo.PubAck{}, nil
 }
 
-func (f *fakeJetStream) StreamInfo(stream string, _ ...natsgo.JSOpt) (*natsgo.StreamInfo, error) {
-	if f.streamInfoErr != nil {
-		return nil, f.streamInfoErr
+// Apply nats.Option callbacks to a fresh Options struct and inspect the
+// resulting User/Password fields — the same fields nats.Connect would
+// read. Avoids needing a live broker to assert the auth wiring.
+func applyOptions(t *testing.T, opts []natsgo.Option) natsgo.Options {
+	t.Helper()
+	var o natsgo.Options
+	for _, opt := range opts {
+		if err := opt(&o); err != nil {
+			t.Fatalf("apply option: %v", err)
+		}
 	}
-	return &natsgo.StreamInfo{Config: natsgo.StreamConfig{Name: stream}}, nil
+	return o
 }
 
-func (f *fakeJetStream) AddStream(cfg *natsgo.StreamConfig, _ ...natsgo.JSOpt) (*natsgo.StreamInfo, error) {
-	if f.addErr != nil {
-		return nil, f.addErr
+func TestConnectOptions_AnonymousWhenUserEmpty(t *testing.T) {
+	got := applyOptions(t, connectOptions(Config{}))
+	if got.User != "" || got.Password != "" {
+		t.Fatalf("anonymous config attached creds: user=%q password=%q", got.User, got.Password)
 	}
-	f.added = cfg
-	return &natsgo.StreamInfo{Config: *cfg}, nil
+}
+
+func TestConnectOptions_AttachesUserInfoWhenUserSet(t *testing.T) {
+	got := applyOptions(t, connectOptions(Config{User: "llmgate", Password: "s3cret"}))
+	if got.User != "llmgate" {
+		t.Errorf("User = %q, want llmgate", got.User)
+	}
+	if got.Password != "s3cret" {
+		t.Errorf("Password = %q, want s3cret", got.Password)
+	}
+}
+
+func TestConnectOptions_IgnoresPasswordWithoutUser(t *testing.T) {
+	// Password alone is meaningless to nats.UserInfo, so the option
+	// should not be added (User stays empty → anonymous connect).
+	got := applyOptions(t, connectOptions(Config{Password: "stray"}))
+	if got.User != "" || got.Password != "" {
+		t.Fatalf("password-only config attached creds: user=%q password=%q", got.User, got.Password)
+	}
 }

@@ -28,8 +28,9 @@ func resetEnv(t *testing.T) {
 		"LLMGATE_COMPLETE_TIMEOUT",
 		"LLMGATE_STREAM_IDLE_TIMEOUT",
 		"LLMGATE_LLMRESULT_NATS_URL",
-		"LLMGATE_LLMRESULT_NATS_STREAM",
 		"LLMGATE_LLMRESULT_NATS_SUBJECT",
+		"LLMGATE_LLMRESULT_NATS_USER",
+		"LLMGATE_LLMRESULT_NATS_PASSWORD",
 		"LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE",
 		"LLMGATE_LLMRESULT_ASYNC_BATCH_SIZE",
 		"LLMGATE_LLMRESULT_ASYNC_FLUSH_INTERVAL",
@@ -84,11 +85,14 @@ func TestLoadServer_Defaults(t *testing.T) {
 	if cfg.LLMResultNATSURL != "" {
 		t.Errorf("LLMResultNATSURL = %q, want disabled empty default", cfg.LLMResultNATSURL)
 	}
-	if cfg.LLMResultNATSStream != "LLMRESULT" {
-		t.Errorf("LLMResultNATSStream = %q, want LLMRESULT", cfg.LLMResultNATSStream)
-	}
 	if cfg.LLMResultNATSSubject != "llmgate.llmresult.finalized" {
 		t.Errorf("LLMResultNATSSubject = %q, want llmgate.llmresult.finalized", cfg.LLMResultNATSSubject)
+	}
+	if cfg.LLMResultNATSUser != "" {
+		t.Errorf("LLMResultNATSUser = %q, want empty (anonymous)", cfg.LLMResultNATSUser)
+	}
+	if cfg.LLMResultNATSPassword != "" {
+		t.Errorf("LLMResultNATSPassword = %q, want empty", cfg.LLMResultNATSPassword)
 	}
 	if cfg.LLMResultAsyncQueueSize != 1000 {
 		t.Errorf("LLMResultAsyncQueueSize = %d, want 1000", cfg.LLMResultAsyncQueueSize)
@@ -200,8 +204,9 @@ func TestLoadServer_StreamIdleTimeoutOverride(t *testing.T) {
 func TestLoadServer_LLMResultNATSOverrides(t *testing.T) {
 	resetEnv(t)
 	t.Setenv("LLMGATE_LLMRESULT_NATS_URL", "nats://localhost:4222")
-	t.Setenv("LLMGATE_LLMRESULT_NATS_STREAM", "RESULTS")
 	t.Setenv("LLMGATE_LLMRESULT_NATS_SUBJECT", "results.finalized")
+	t.Setenv("LLMGATE_LLMRESULT_NATS_USER", "llmgate")
+	t.Setenv("LLMGATE_LLMRESULT_NATS_PASSWORD", "s3cret")
 	t.Setenv("LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE", "25")
 	t.Setenv("LLMGATE_LLMRESULT_ASYNC_BATCH_SIZE", "5")
 	t.Setenv("LLMGATE_LLMRESULT_ASYNC_FLUSH_INTERVAL", "250ms")
@@ -213,11 +218,14 @@ func TestLoadServer_LLMResultNATSOverrides(t *testing.T) {
 	if cfg.LLMResultNATSURL != "nats://localhost:4222" {
 		t.Errorf("LLMResultNATSURL = %q", cfg.LLMResultNATSURL)
 	}
-	if cfg.LLMResultNATSStream != "RESULTS" {
-		t.Errorf("LLMResultNATSStream = %q", cfg.LLMResultNATSStream)
-	}
 	if cfg.LLMResultNATSSubject != "results.finalized" {
 		t.Errorf("LLMResultNATSSubject = %q", cfg.LLMResultNATSSubject)
+	}
+	if cfg.LLMResultNATSUser != "llmgate" {
+		t.Errorf("LLMResultNATSUser = %q, want llmgate", cfg.LLMResultNATSUser)
+	}
+	if cfg.LLMResultNATSPassword != "s3cret" {
+		t.Errorf("LLMResultNATSPassword = %q, want s3cret", cfg.LLMResultNATSPassword)
 	}
 	if cfg.LLMResultAsyncQueueSize != 25 {
 		t.Errorf("LLMResultAsyncQueueSize = %d, want 25", cfg.LLMResultAsyncQueueSize)

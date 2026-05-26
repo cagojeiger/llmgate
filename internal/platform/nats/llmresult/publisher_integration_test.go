@@ -24,26 +24,35 @@ func TestPublisher_IntegrationJetStream(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	nc, err := natsgo.Connect(url)
+	if err != nil {
+		t.Fatalf("connect for setup/verification: %v", err)
+	}
+	defer nc.Close()
+	js, err := nc.JetStream()
+	if err != nil {
+		t.Fatalf("setup JetStream: %v", err)
+	}
+	if _, err := js.AddStream(&natsgo.StreamConfig{
+		Name:      stream,
+		Subjects:  []string{subject},
+		Retention: natsgo.LimitsPolicy,
+		Storage:   natsgo.FileStorage,
+		Discard:   natsgo.DiscardOld,
+		MaxBytes:  1024 * 1024,
+	}, natsgo.Context(ctx)); err != nil {
+		t.Fatalf("AddStream() error = %v", err)
+	}
+	defer js.DeleteStream(stream)
+
 	publisher, err := NewPublisher(ctx, Config{
 		URL:     url,
-		Stream:  stream,
 		Subject: subject,
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewPublisher() error = %v", err)
 	}
 	defer publisher.Close()
-
-	nc, err := natsgo.Connect(url)
-	if err != nil {
-		t.Fatalf("connect for verification: %v", err)
-	}
-	defer nc.Close()
-	js, err := nc.JetStream()
-	if err != nil {
-		t.Fatalf("verification JetStream: %v", err)
-	}
-	defer js.DeleteStream(stream)
 
 	if err := publisher.Publish(ctx, &result.Event{
 		SchemaVersion: result.SchemaVersion,

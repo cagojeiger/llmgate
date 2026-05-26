@@ -9,7 +9,10 @@ services:
     build: .
     image: llmgate:dev
     depends_on:
-      - nats
+      nats:
+        condition: service_started
+      nats-init:
+        condition: service_completed_successfully
     ports:
       - "8080:8080"
     environment:
@@ -19,8 +22,11 @@ services:
       LLMGATE_CONSUMERS: /etc/llmgate/consumers
       LLMGATE_LOG_LEVEL: info
       LLMGATE_LLMRESULT_NATS_URL: ${LLMGATE_LLMRESULT_NATS_URL:-nats://nats:4222}
-      LLMGATE_LLMRESULT_NATS_STREAM: ${LLMGATE_LLMRESULT_NATS_STREAM:-LLMRESULT}
       LLMGATE_LLMRESULT_NATS_SUBJECT: ${LLMGATE_LLMRESULT_NATS_SUBJECT:-llmgate.llmresult.finalized}
+      # Defaults match monitoring/nats/nats.conf accounts.APP.users.
+      # Prod wires these from the nats-auth Secret via ExternalSecret.
+      LLMGATE_LLMRESULT_NATS_USER: ${LLMGATE_LLMRESULT_NATS_USER:-llmgate}
+      LLMGATE_LLMRESULT_NATS_PASSWORD: ${LLMGATE_LLMRESULT_NATS_PASSWORD:-llmgate-local}
       LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE: ${LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE:-1000}
       LLMGATE_LLMRESULT_ASYNC_BATCH_SIZE: ${LLMGATE_LLMRESULT_ASYNC_BATCH_SIZE:-100}
       LLMGATE_LLMRESULT_ASYNC_FLUSH_INTERVAL: ${LLMGATE_LLMRESULT_ASYNC_FLUSH_INTERVAL:-1s}
@@ -32,13 +38,40 @@ services:
   nats:
     image: nats:2-alpine
     command:
-      - "-js"
+      - "-c"
+      - "/etc/nats/nats.conf"
       - "-m"
       - "8222"
     ports:
       - "${LLMGATE_NATS_PORT:-4222}:4222"
       - "${LLMGATE_NATS_MONITOR_PORT:-8222}:8222"
+    volumes:
+      - ./monitoring/nats/nats.conf:/etc/nats/nats.conf:ro
     restart: "no"
+
+  # Mirrors what NACK provisions in prod (see multi-cluster-gitops
+  # platform/nats/manifests/oci-prod-osaka/stream.yaml). llmgate no
+  # longer creates streams itself, so local stacks need this one-shot.
+  # Uses the nack user from monitoring/nats/nats.conf — that account
+  # has the broad publish permission needed to talk to $JS.API.STREAM.*.
+  nats-init:
+    image: natsio/nats-box:0.18.0
+    depends_on:
+      - nats
+    restart: "no"
+    environment:
+      NATS_URL: "nats://nack:nack-local@nats:4222"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        until nats server check connection; do sleep 1; done &&
+        nats stream add LLMRESULT
+        --subjects 'llmgate.llmresult.finalized'
+        --storage file --retention limits --discard old
+        --max-bytes=10737418240 --max-age=2160h --dupe-window=2m
+        --max-msgs=-1 --max-msgs-per-subject=-1 --max-msg-size=-1
+        --max-consumers=-1 --replicas 1 --no-allow-rollup --no-deny-delete --no-deny-purge --defaults
+        || nats stream info LLMRESULT
 
   prometheus:
     image: prom/prometheus:v3.7.3

@@ -4,7 +4,6 @@ import (
 	"context"
 	"strconv"
 
-	llmresult "llmgate/internal/domain/llmresult/schema"
 	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/telemetry"
 )
@@ -19,20 +18,6 @@ func (r *Recorder) Emit(_ context.Context, event telemetry.Event) {
 	case *telemetry.CallEvent:
 		r.emitCall(rec)
 	}
-}
-
-func (r *Recorder) ObserveLLMResultDropped(event *llmresult.Event, reason string) {
-	if r == nil {
-		return
-	}
-	r.llmResultDroppedTotal.WithLabelValues(labelValue(reason, "unknown"), resultPayloadMode(event)).Inc()
-}
-
-func (r *Recorder) ObserveLLMResultPublishFailed(event *llmresult.Event, reason string) {
-	if r == nil {
-		return
-	}
-	r.llmResultPublishFailed.WithLabelValues(labelValue(reason, "unknown"), resultPayloadMode(event)).Inc()
 }
 
 func (r *Recorder) emitAudit(rec *telemetry.AuditEvent) {
@@ -129,11 +114,4 @@ func labelValue(v, fallback string) string {
 		return fallback
 	}
 	return v
-}
-
-func resultPayloadMode(event *llmresult.Event) string {
-	if event == nil || event.PayloadMode == "" {
-		return "unknown"
-	}
-	return event.PayloadMode
 }

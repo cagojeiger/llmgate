@@ -34,12 +34,10 @@ func TestAsyncSink_EmitDoesNotWaitForTransport(t *testing.T) {
 
 func TestAsyncSink_DropsWhenQueueFull(t *testing.T) {
 	next := newBlockingResultSink()
-	observer := &captureDropObserver{}
 	sink := NewAsyncSinkWithConfig(next, discardLogger(), AsyncConfig{
 		QueueSize:     1,
 		BatchSize:     1,
 		FlushInterval: time.Hour,
-		Observer:      observer,
 	})
 	defer sink.Close()
 	defer next.release()
@@ -51,9 +49,6 @@ func TestAsyncSink_DropsWhenQueueFull(t *testing.T) {
 
 	if got := sink.Dropped(); got != 1 {
 		t.Fatalf("Dropped = %d, want 1", got)
-	}
-	if observer.reason != "queue_full" || observer.payloadMode != "metadata_only" {
-		t.Fatalf("drop observer = reason:%q payload:%q", observer.reason, observer.payloadMode)
 	}
 }
 
@@ -168,18 +163,6 @@ type blockingResultSink struct {
 	started  chan struct{}
 	releasec chan struct{}
 	once     sync.Once
-}
-
-type captureDropObserver struct {
-	reason      string
-	payloadMode string
-}
-
-func (o *captureDropObserver) ObserveLLMResultDropped(event *llmresult.Event, reason string) {
-	o.reason = reason
-	if event != nil {
-		o.payloadMode = event.PayloadMode
-	}
 }
 
 func newBlockingResultSink() *blockingResultSink {

@@ -33,19 +33,13 @@ type AsyncConfig struct {
 	EmitTimeout time.Duration
 	// CloseTimeout caps Close()'s wait on the worker goroutine. 0 → default.
 	CloseTimeout time.Duration
-	Observer     Observer
-}
-
-type Observer interface {
-	ObserveLLMResultDropped(event *llmresult.Event, reason string)
 }
 
 // AsyncSink decouples result-event production from remote transports. Emit is
 // non-blocking: when the bounded queue is full, the event is dropped.
 type AsyncSink struct {
-	next     Sink
-	log      *slog.Logger
-	observer Observer
+	next Sink
+	log  *slog.Logger
 
 	mu            sync.RWMutex
 	closed        bool
@@ -78,7 +72,6 @@ func NewAsyncSinkWithConfig(next Sink, log *slog.Logger, cfg AsyncConfig) *Async
 		flushInterval: cfg.FlushInterval,
 		emitTimeout:   cfg.EmitTimeout,
 		closeTimeout:  cfg.CloseTimeout,
-		observer:      cfg.Observer,
 	}
 	go s.run()
 	return s
@@ -253,9 +246,6 @@ func stopTimer(timer *time.Timer) {
 
 func (s *AsyncSink) recordDrop(ctx context.Context, event *llmresult.Event, reason string) {
 	dropped := s.dropped.Add(1)
-	if s.observer != nil {
-		s.observer.ObserveLLMResultDropped(event, reason)
-	}
 	s.log.LogAttrs(ctx, slog.LevelWarn, "llm result event dropped",
 		slog.String("event_type", eventTypeOf(event)),
 		slog.String("request_id", eventRequestID(event)),

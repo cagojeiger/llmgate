@@ -25,8 +25,6 @@ vendor
 model
 direction
 mode
-reason
-payload_mode
 ```
 
 다음 값은 metric label 로 쓰지 않는다.
@@ -50,7 +48,6 @@ gateway metric 은 크게 네 입력에서 나온다.
 - `AuditEvent`: gateway RED
 - `CallEvent`: upstream LLM RED / routing / token usage
 - `LifecycleObserver`: in-flight saturation
-- `llm.result.finalized` sink observer: result event drop / publish failure
 - Go / process collector: runtime resource
 
 Grafana dashboard 는 Prometheus 에 저장된 metric 을 읽는 운영 화면일 뿐, metric 계약을 새로

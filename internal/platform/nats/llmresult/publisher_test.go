@@ -3,8 +3,6 @@ package llmresult
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"log/slog"
 	"testing"
 
 	natsgo "github.com/nats-io/nats.go"
@@ -61,52 +59,13 @@ func TestPublisher_RejectsNilEvent(t *testing.T) {
 	}
 }
 
-func TestPublisher_EmitObservesPublishFailure(t *testing.T) {
-	observer := &captureObserver{}
-	p := &Publisher{
-		js:       &fakeJetStream{err: errors.New("down")},
-		subject:  "results.finalized",
-		log:      slog.Default(),
-		observer: observer,
-	}
-	p.Emit(context.Background(), &result.Event{
-		SchemaVersion: result.SchemaVersion,
-		EventType:     result.EventType,
-		RequestID:     "req-1",
-		PayloadMode:   "metadata_only",
-	})
-
-	if observer.reason != "publish_failed" {
-		t.Fatalf("observer reason = %q, want publish_failed", observer.reason)
-	}
-	if observer.requestID != "req-1" {
-		t.Fatalf("observer request = %q, want req-1", observer.requestID)
-	}
-}
-
 type fakeJetStream struct {
 	published []*natsgo.Msg
-	err       error
 }
 
 func (f *fakeJetStream) PublishMsg(m *natsgo.Msg, _ ...natsgo.PubOpt) (*natsgo.PubAck, error) {
-	if f.err != nil {
-		return nil, f.err
-	}
 	f.published = append(f.published, m)
 	return &natsgo.PubAck{}, nil
-}
-
-type captureObserver struct {
-	requestID string
-	reason    string
-}
-
-func (o *captureObserver) ObserveLLMResultPublishFailed(event *result.Event, reason string) {
-	o.reason = reason
-	if event != nil {
-		o.requestID = event.RequestID
-	}
 }
 
 // Apply nats.Option callbacks to a fresh Options struct and inspect the

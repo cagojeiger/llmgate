@@ -10,12 +10,7 @@ import (
 	natsllmresult "llmgate/internal/platform/nats/llmresult"
 )
 
-type resultObserver interface {
-	llmresultsink.Observer
-	natsllmresult.Observer
-}
-
-func buildResultSink(ctx context.Context, cfg *config.Server, log *slog.Logger, observer resultObserver) (llmresultsink.Sink, error) {
+func buildResultSink(ctx context.Context, cfg *config.Server, log *slog.Logger) (llmresultsink.Sink, error) {
 	if cfg == nil || cfg.LLMResultNATSURL == "" {
 		return llmresultsink.NopSink{}, nil
 	}
@@ -24,7 +19,6 @@ func buildResultSink(ctx context.Context, cfg *config.Server, log *slog.Logger, 
 		Subject:  cfg.LLMResultNATSSubject,
 		User:     cfg.LLMResultNATSUser,
 		Password: cfg.LLMResultNATSPassword,
-		Observer: observer,
 	}, log)
 	if err != nil {
 		return nil, fmt.Errorf("build llm result nats publisher: %w", err)
@@ -35,6 +29,5 @@ func buildResultSink(ctx context.Context, cfg *config.Server, log *slog.Logger, 
 		FlushInterval: cfg.LLMResultAsyncFlush,
 		EmitTimeout:   cfg.LLMResultAsyncEmitTimeout,
 		CloseTimeout:  cfg.LLMResultAsyncCloseTimeout,
-		Observer:      observer,
 	}), nil
 }

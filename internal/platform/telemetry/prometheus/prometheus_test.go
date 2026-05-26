@@ -8,7 +8,6 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	llmresult "llmgate/internal/domain/llmresult/schema"
 	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/telemetry"
 )
@@ -331,42 +330,6 @@ func TestPrometheusRecorder_RecordNil(t *testing.T) {
 		if len(mf.GetMetric()) != 0 {
 			t.Fatalf("%s has %d metrics after nil audit record, want 0", mf.GetName(), len(mf.GetMetric()))
 		}
-	}
-}
-
-func TestPrometheusRecorder_RecordLLMResultDrop(t *testing.T) {
-	reg := prometheus.NewRegistry()
-	r, err := NewRecorder(reg)
-	if err != nil {
-		t.Fatalf("NewRecorder: %v", err)
-	}
-
-	r.ObserveLLMResultDropped(&llmresult.Event{PayloadMode: "metadata_only"}, "queue_full")
-
-	got := findCounterValue(t, reg, "llmgate_llmresult_events_dropped_total", map[string]string{
-		"reason":       "queue_full",
-		"payload_mode": "metadata_only",
-	})
-	if got != 1 {
-		t.Fatalf("drop counter = %v, want 1", got)
-	}
-}
-
-func TestPrometheusRecorder_RecordLLMResultPublishFailure(t *testing.T) {
-	reg := prometheus.NewRegistry()
-	r, err := NewRecorder(reg)
-	if err != nil {
-		t.Fatalf("NewRecorder: %v", err)
-	}
-
-	r.ObserveLLMResultPublishFailed(&llmresult.Event{PayloadMode: "full"}, "publish_failed")
-
-	got := findCounterValue(t, reg, "llmgate_llmresult_events_publish_failed_total", map[string]string{
-		"reason":       "publish_failed",
-		"payload_mode": "full",
-	})
-	if got != 1 {
-		t.Fatalf("publish failure counter = %v, want 1", got)
 	}
 }
 

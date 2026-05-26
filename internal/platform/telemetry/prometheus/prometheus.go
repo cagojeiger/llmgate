@@ -38,8 +38,6 @@ type Recorder struct {
 	llmOutputTokensPerSecond *prometheus.HistogramVec
 	llmStreamFirstByte       *prometheus.HistogramVec
 	llmStreamChunksTotal     *prometheus.CounterVec
-	llmResultDroppedTotal    *prometheus.CounterVec
-	llmResultPublishFailed   *prometheus.CounterVec
 	inflightRequests         prometheus.Gauge
 	inflightStreams          prometheus.Gauge
 }
@@ -154,20 +152,6 @@ func NewRecorder(reg prometheus.Registerer) (*Recorder, error) {
 			},
 			[]string{"operation", "vendor", "model"},
 		),
-		llmResultDroppedTotal: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "llmgate_llmresult_events_dropped_total",
-				Help: "Total finalized LLM result events dropped before remote publish by reason and payload mode.",
-			},
-			[]string{"reason", "payload_mode"},
-		),
-		llmResultPublishFailed: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "llmgate_llmresult_events_publish_failed_total",
-				Help: "Total finalized LLM result events that failed remote publish by reason and payload mode.",
-			},
-			[]string{"reason", "payload_mode"},
-		),
 		inflightRequests: prometheus.NewGauge(
 			prometheus.GaugeOpts{
 				Name: "llmgate_inflight_requests",
@@ -196,8 +180,6 @@ func NewRecorder(reg prometheus.Registerer) (*Recorder, error) {
 		r.llmOutputTokensPerSecond,
 		r.llmStreamFirstByte,
 		r.llmStreamChunksTotal,
-		r.llmResultDroppedTotal,
-		r.llmResultPublishFailed,
 		r.inflightRequests,
 		r.inflightStreams,
 	}

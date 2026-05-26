@@ -127,7 +127,7 @@ func BuildRuntime(ctx context.Context, in RuntimeInput) (*Runtime, error) {
 		metricsRecorder,
 	)
 
-	results, err := buildResultSink(ctx, in.Config, in.Logger, metricsRecorder)
+	results, err := buildResultSink(ctx, in.Config, in.Logger)
 	if err != nil {
 		_ = events.Close()
 		return nil, err

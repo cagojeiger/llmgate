@@ -25,7 +25,7 @@ const (
 func ParsePayloadMode(raw string) (PayloadMode, error) {
 	switch PayloadMode(strings.TrimSpace(raw)) {
 	case "":
-		return PayloadModeMetadataOnly, nil
+		return PayloadModeFull, nil
 	case PayloadModeMetadataOnly:
 		return PayloadModeMetadataOnly, nil
 	case PayloadModeRedacted:

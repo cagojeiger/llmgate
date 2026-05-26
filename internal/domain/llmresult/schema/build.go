@@ -21,7 +21,7 @@ func FromTelemetry(in BuildInput) (*Event, bool) {
 	}
 	payloadMode, err := ParsePayloadMode(string(in.PayloadMode))
 	if err != nil {
-		payloadMode = PayloadModeMetadataOnly
+		payloadMode = PayloadModeFull
 	}
 	call := in.Call
 	audit := in.Audit

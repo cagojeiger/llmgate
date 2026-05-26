@@ -117,7 +117,7 @@ func LoadServer() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	llmResultPayloadMode, err := llmResultPayloadMode("LLMGATE_LLMRESULT_PAYLOAD_MODE", "metadata_only")
+	llmResultPayloadMode, err := llmResultPayloadMode("LLMGATE_LLMRESULT_PAYLOAD_MODE", "full")
 	if err != nil {
 		return nil, err
 	}

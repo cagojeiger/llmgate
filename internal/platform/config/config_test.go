@@ -101,8 +101,8 @@ func TestLoadServer_Defaults(t *testing.T) {
 	if cfg.LLMResultNATSPassword != "" {
 		t.Errorf("LLMResultNATSPassword = %q, want empty", cfg.LLMResultNATSPassword)
 	}
-	if cfg.LLMResultPayloadMode != "metadata_only" {
-		t.Errorf("LLMResultPayloadMode = %q, want metadata_only", cfg.LLMResultPayloadMode)
+	if cfg.LLMResultPayloadMode != "full" {
+		t.Errorf("LLMResultPayloadMode = %q, want full", cfg.LLMResultPayloadMode)
 	}
 	if cfg.LLMResultAsyncQueueSize != 1000 {
 		t.Errorf("LLMResultAsyncQueueSize = %d, want 1000", cfg.LLMResultAsyncQueueSize)

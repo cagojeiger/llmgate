@@ -25,7 +25,7 @@
 | LLM response body | client response, optional result event | prompt와 동일하게 개인정보/기밀정보 가능 |
 | audit/call log | stdout JSON, external log sink | 운영 감사기록. 원문 key/body 배제 원칙 필요 |
 | metrics | Prometheus `/metrics` | 낮은 cardinality 운영 신호. 식별자/본문 label 금지 |
-| `llm.result.finalized` | NATS JetStream | 기본은 metadata-only. `redacted`/`full` 선택 시 고위험 저장/전송 경계 |
+| `llm.result.finalized` | NATS JetStream | 기본은 원문 request/response 포함. `metadata_only`/`redacted`로 축소 가능 |
 
 핵심 판단:
 

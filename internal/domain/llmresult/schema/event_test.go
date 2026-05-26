@@ -51,7 +51,7 @@ func TestFromTelemetry_BuildsFinalizedResultEvent(t *testing.T) {
 		}},
 	}
 
-	got, ok := FromTelemetry(BuildInput{Audit: audit, Call: call, Request: req, Response: resp, PayloadMode: PayloadModeFull})
+	got, ok := FromTelemetry(BuildInput{Audit: audit, Call: call, Request: req, Response: resp})
 	if !ok {
 		t.Fatal("FromTelemetry ok = false, want true")
 	}
@@ -98,7 +98,7 @@ func TestFromTelemetry_ClonesRequestAndResponse(t *testing.T) {
 	req := &llmtypes.Request{Messages: []llmtypes.Message{{Role: "user", Content: "before"}}}
 	resp := &llmtypes.Response{Choices: []llmtypes.Choice{{Message: llmtypes.Message{Content: "before"}}}}
 
-	got, ok := FromTelemetry(BuildInput{Audit: audit, Call: call, Request: req, Response: resp, PayloadMode: PayloadModeFull})
+	got, ok := FromTelemetry(BuildInput{Audit: audit, Call: call, Request: req, Response: resp})
 	if !ok {
 		t.Fatal("FromTelemetry ok = false, want true")
 	}

@@ -25,15 +25,15 @@ type Server struct {
 	LogLevel             slog.Level
 
 	// Routing fallback, breaker, and timeout settings.
-	FallbackOn         []string
-	CircuitFailures    int
-	CircuitOpen        time.Duration
-	CircuitMaxOpen     time.Duration
-	CircuitJitter      float64
-	RequestTimeout     time.Duration
-	CompleteTimeout    time.Duration
-	StreamIdleTimeout  time.Duration
-	MetricsBearerToken string
+	FallbackOn        []string
+	CircuitFailures   int
+	CircuitOpen       time.Duration
+	CircuitMaxOpen    time.Duration
+	CircuitJitter     float64
+	RequestTimeout    time.Duration
+	CompleteTimeout   time.Duration
+	StreamIdleTimeout time.Duration
+	MetricsEnabled    bool
 
 	// Finalized LLM result event publishing. Empty NATS URL disables remote
 	// publishing; the server still builds result events and drops them through
@@ -92,6 +92,10 @@ func LoadServer() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	metricsEnabled, err := boolValue("LLMGATE_METRICS_ENABLED", "false")
+	if err != nil {
+		return nil, err
+	}
 	llmResultQueueSize, err := nonNegativeInt("LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE", "1000")
 	if err != nil {
 		return nil, err
@@ -130,7 +134,7 @@ func LoadServer() (*Server, error) {
 		RequestTimeout:             requestTimeout,
 		CompleteTimeout:            completeTimeout,
 		StreamIdleTimeout:          streamIdleTimeout,
-		MetricsBearerToken:         orDefault("LLMGATE_METRICS_BEARER_TOKEN", ""),
+		MetricsEnabled:             metricsEnabled,
 		LLMResultNATSURL:           orDefault("LLMGATE_LLMRESULT_NATS_URL", ""),
 		LLMResultNATSSubject:       orDefault("LLMGATE_LLMRESULT_NATS_SUBJECT", "llmgate.llmresult.finalized"),
 		LLMResultNATSUser:          orDefault("LLMGATE_LLMRESULT_NATS_USER", ""),
@@ -160,9 +164,6 @@ func llmResultPayloadMode(key, def string) (llmresultschema.PayloadMode, error) 
 func validateSecurityDefaults(cfg *Server) error {
 	if cfg == nil || strings.EqualFold(cfg.Environment, "local") {
 		return nil
-	}
-	if cfg.MetricsBearerToken == "" {
-		return fmt.Errorf("LLMGATE_METRICS_BEARER_TOKEN is required when LLMGATE_ENVIRONMENT is not local")
 	}
 	if cfg.LLMResultNATSURL == "" {
 		return nil

@@ -1,10 +1,8 @@
 package server
 
 import (
-	"crypto/subtle"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -62,7 +60,7 @@ func NewWithOptions(opts ServerOptions) *http.Server {
 	r.Get("/healthz/live", httpprobe.Live)
 	r.Get("/healthz/ready", readyHandler)
 	if opts.MetricsHandler != nil {
-		r.Handle("/metrics", metricsAuth(opts.MetricsHandler, cfg.MetricsBearerToken))
+		r.Handle("/metrics", opts.MetricsHandler)
 	}
 
 	// Business traffic carries the full middleware chain. Order is
@@ -90,20 +88,4 @@ func NewWithOptions(opts ServerOptions) *http.Server {
 		IdleTimeout:       60 * time.Second,
 		WriteTimeout:      0,
 	}
-}
-
-func metricsAuth(next http.Handler, token string) http.Handler {
-	if token == "" {
-		return next
-	}
-	want := "Bearer " + token
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got := strings.TrimSpace(r.Header.Get("Authorization"))
-		if subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="llmgate-metrics"`)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }

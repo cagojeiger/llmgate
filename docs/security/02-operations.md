@@ -18,7 +18,7 @@ ISMS-P 인증, 조직 보안정책을 대체하지 않고 `llmgate` 운영자가
 
 ## Management Surface
 
-- `LLMGATE_ENVIRONMENT != local`이면 `LLMGATE_METRICS_BEARER_TOKEN`은 필수다.
+- `/metrics`는 `LLMGATE_METRICS_ENABLED=true`일 때만 열린다. 기본값은 disabled 다.
 - `LLMGATE_ENVIRONMENT != local`에서 result event 원격 publish를 켜면 `LLMGATE_LLMRESULT_NATS_URL`은 `tls://`만 허용한다.
 - 같은 조건에서 `LLMGATE_LLMRESULT_NATS_USER`와 `LLMGATE_LLMRESULT_NATS_PASSWORD`도 필수다.
 - `/metrics`, NATS client port, NATS monitoring port, Prometheus, Grafana는 public internet ingress에 직접 노출하지 않는다.
@@ -48,4 +48,4 @@ ISMS-P 인증, 조직 보안정책을 대체하지 않고 `llmgate` 운영자가
 
 - `catalog/` 변경은 어떤 alias/model/vendor가 추가·삭제·변경되었는지 리뷰 증거를 남긴다.
 - `consumers/` 변경은 호출 앱, owner, 목적, 허용 alias, unrestricted 여부, 발급/회전/폐기 일자를 남긴다.
-- `LLMGATE_LLMRESULT_PAYLOAD_MODE=full`, metrics token 변경, NATS credential 변경은 보안 변경으로 취급한다.
+- `LLMGATE_LLMRESULT_PAYLOAD_MODE=full`, metrics exposure 변경, NATS credential 변경은 보안 변경으로 취급한다.

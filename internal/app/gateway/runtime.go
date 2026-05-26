@@ -143,16 +143,20 @@ func BuildRuntime(ctx context.Context, in RuntimeInput) (*Runtime, error) {
 		ResultPayloadMode: in.Config.LLMResultPayloadMode,
 	})
 	probe := httpprobe.NewState()
-	srv := server.NewWithOptions(server.ServerOptions{
-		Config:    in.Config,
-		Log:       in.Logger.With(slog.String("log", "access")),
-		Handler:   handler,
-		Consumers: in.Consumers,
-		Probe:     probe,
-		MetricsHandler: promhttp.HandlerFor(metricsRegistry, promhttp.HandlerOpts{
+	var metricsHandler http.Handler
+	if in.Config.MetricsEnabled {
+		metricsHandler = promhttp.HandlerFor(metricsRegistry, promhttp.HandlerOpts{
 			MaxRequestsInFlight: 5,
 			Timeout:             5 * time.Second,
-		}),
+		})
+	}
+	srv := server.NewWithOptions(server.ServerOptions{
+		Config:         in.Config,
+		Log:            in.Logger.With(slog.String("log", "access")),
+		Handler:        handler,
+		Consumers:      in.Consumers,
+		Probe:          probe,
+		MetricsHandler: metricsHandler,
 	})
 
 	return &Runtime{

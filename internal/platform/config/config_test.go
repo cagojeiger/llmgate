@@ -27,7 +27,7 @@ func resetEnv(t *testing.T) {
 		"LLMGATE_REQUEST_TIMEOUT",
 		"LLMGATE_COMPLETE_TIMEOUT",
 		"LLMGATE_STREAM_IDLE_TIMEOUT",
-		"LLMGATE_METRICS_BEARER_TOKEN",
+		"LLMGATE_METRICS_ENABLED",
 		"LLMGATE_LLMRESULT_NATS_URL",
 		"LLMGATE_LLMRESULT_NATS_SUBJECT",
 		"LLMGATE_LLMRESULT_NATS_USER",
@@ -86,8 +86,8 @@ func TestLoadServer_Defaults(t *testing.T) {
 	if cfg.StreamIdleTimeout != time.Minute {
 		t.Errorf("StreamIdleTimeout = %v, want 1m", cfg.StreamIdleTimeout)
 	}
-	if cfg.MetricsBearerToken != "" {
-		t.Errorf("MetricsBearerToken = %q, want empty local default", cfg.MetricsBearerToken)
+	if cfg.MetricsEnabled {
+		t.Error("MetricsEnabled = true, want false default")
 	}
 	if cfg.LLMResultNATSURL != "" {
 		t.Errorf("LLMResultNATSURL = %q, want disabled empty default", cfg.LLMResultNATSURL)
@@ -304,23 +304,35 @@ func TestLoadServer_RejectsInvalidLLMResultPayloadMode(t *testing.T) {
 	}
 }
 
-func TestLoadServer_RequiresMetricsTokenOutsideLocal(t *testing.T) {
+func TestLoadServer_MetricsEnabledOverride(t *testing.T) {
 	resetEnv(t)
-	t.Setenv("LLMGATE_ENVIRONMENT", "prod")
+	t.Setenv("LLMGATE_METRICS_ENABLED", "true")
+
+	cfg, err := LoadServer()
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if !cfg.MetricsEnabled {
+		t.Fatal("MetricsEnabled = false, want true")
+	}
+}
+
+func TestLoadServer_RejectsInvalidMetricsEnabled(t *testing.T) {
+	resetEnv(t)
+	t.Setenv("LLMGATE_METRICS_ENABLED", "sometimes")
 
 	_, err := LoadServer()
 	if err == nil {
-		t.Fatal("LoadServer: want error when prod metrics token is missing")
+		t.Fatal("LoadServer: want error for invalid LLMGATE_METRICS_ENABLED")
 	}
-	if !strings.Contains(err.Error(), "LLMGATE_METRICS_BEARER_TOKEN") {
-		t.Errorf("err = %v, want metrics token requirement", err)
+	if !strings.Contains(err.Error(), "LLMGATE_METRICS_ENABLED") {
+		t.Errorf("err = %v, want metrics enabled key", err)
 	}
 }
 
 func TestLoadServer_RequiresSecureNATSOutsideLocal(t *testing.T) {
 	resetEnv(t)
 	t.Setenv("LLMGATE_ENVIRONMENT", "prod")
-	t.Setenv("LLMGATE_METRICS_BEARER_TOKEN", "metrics-secret")
 	t.Setenv("LLMGATE_LLMRESULT_NATS_URL", "nats://nats:4222")
 	t.Setenv("LLMGATE_LLMRESULT_NATS_USER", "llmgate")
 	t.Setenv("LLMGATE_LLMRESULT_NATS_PASSWORD", "s3cret")
@@ -337,7 +349,6 @@ func TestLoadServer_RequiresSecureNATSOutsideLocal(t *testing.T) {
 func TestLoadServer_AllowsSecureNATSOutsideLocal(t *testing.T) {
 	resetEnv(t)
 	t.Setenv("LLMGATE_ENVIRONMENT", "prod")
-	t.Setenv("LLMGATE_METRICS_BEARER_TOKEN", "metrics-secret")
 	t.Setenv("LLMGATE_LLMRESULT_NATS_URL", "tls://nats:4222")
 	t.Setenv("LLMGATE_LLMRESULT_NATS_USER", "llmgate")
 	t.Setenv("LLMGATE_LLMRESULT_NATS_PASSWORD", "s3cret")
@@ -370,7 +381,7 @@ func TestLoadServer_OverrideFromEnv(t *testing.T) {
 	t.Setenv("LLMGATE_ENVIRONMENT", "prod")
 	t.Setenv("LLMGATE_SHUTDOWN_DRAIN_TIMEOUT", "12s")
 	t.Setenv("LLMGATE_LOG_LEVEL", "debug")
-	t.Setenv("LLMGATE_METRICS_BEARER_TOKEN", "metrics-secret")
+	t.Setenv("LLMGATE_METRICS_ENABLED", "true")
 
 	cfg, err := LoadServer()
 	if err != nil {
@@ -388,8 +399,8 @@ func TestLoadServer_OverrideFromEnv(t *testing.T) {
 	if cfg.LogLevel != slog.LevelDebug {
 		t.Errorf("LogLevel = %v, want debug", cfg.LogLevel)
 	}
-	if cfg.MetricsBearerToken != "metrics-secret" {
-		t.Errorf("MetricsBearerToken = %q, want override", cfg.MetricsBearerToken)
+	if !cfg.MetricsEnabled {
+		t.Error("MetricsEnabled = false, want override")
 	}
 }
 

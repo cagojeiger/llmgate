@@ -24,8 +24,10 @@ const (
 )
 
 type Config struct {
-	URL     string
-	Subject string
+	URL      string
+	Subject  string
+	User     string
+	Password string
 }
 
 type Publisher struct {
@@ -47,7 +49,11 @@ func NewPublisher(ctx context.Context, cfg Config, log *slog.Logger) (*Publisher
 	if log == nil {
 		log = slog.Default()
 	}
-	nc, err := natsgo.Connect(cfg.URL, natsgo.Name("llmgate llmresult publisher"))
+	opts := []natsgo.Option{natsgo.Name("llmgate llmresult publisher")}
+	if cfg.User != "" {
+		opts = append(opts, natsgo.UserInfo(cfg.User, cfg.Password))
+	}
+	nc, err := natsgo.Connect(cfg.URL, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("connect nats: %w", err)
 	}

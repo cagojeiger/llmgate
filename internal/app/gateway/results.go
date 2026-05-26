@@ -15,8 +15,10 @@ func buildResultSink(ctx context.Context, cfg *config.Server, log *slog.Logger) 
 		return llmresultsink.NopSink{}, nil
 	}
 	publisher, err := natsllmresult.NewPublisher(ctx, natsllmresult.Config{
-		URL:     cfg.LLMResultNATSURL,
-		Subject: cfg.LLMResultNATSSubject,
+		URL:      cfg.LLMResultNATSURL,
+		Subject:  cfg.LLMResultNATSSubject,
+		User:     cfg.LLMResultNATSUser,
+		Password: cfg.LLMResultNATSPassword,
 	}, log)
 	if err != nil {
 		return nil, fmt.Errorf("build llm result nats publisher: %w", err)

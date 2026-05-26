@@ -34,6 +34,8 @@ type Server struct {
 	// the no-op sink.
 	LLMResultNATSURL        string
 	LLMResultNATSSubject    string
+	LLMResultNATSUser       string
+	LLMResultNATSPassword   string
 	LLMResultAsyncQueueSize int
 	LLMResultAsyncBatchSize int
 	LLMResultAsyncFlush     time.Duration
@@ -119,6 +121,8 @@ func LoadServer() (*Server, error) {
 		StreamIdleTimeout:          streamIdleTimeout,
 		LLMResultNATSURL:           orDefault("LLMGATE_LLMRESULT_NATS_URL", ""),
 		LLMResultNATSSubject:       orDefault("LLMGATE_LLMRESULT_NATS_SUBJECT", "llmgate.llmresult.finalized"),
+		LLMResultNATSUser:          orDefault("LLMGATE_LLMRESULT_NATS_USER", ""),
+		LLMResultNATSPassword:      orDefault("LLMGATE_LLMRESULT_NATS_PASSWORD", ""),
 		LLMResultAsyncQueueSize:    llmResultQueueSize,
 		LLMResultAsyncBatchSize:    llmResultBatchSize,
 		LLMResultAsyncFlush:        llmResultFlush,

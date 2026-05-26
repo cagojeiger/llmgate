@@ -49,6 +49,8 @@ func AccessLog(log *slog.Logger) func(http.Handler) http.Handler {
 				slog.Int64("bytes_out", cw.Bytes()),
 				slog.String("request_id", requestid.FromContext(r.Context())),
 				slog.String("consumer_name", consumer.Name),
+				slog.String("remote_addr", r.RemoteAddr),
+				slog.String("user_agent", r.UserAgent()),
 			}
 			if consumer.AuthError != "" {
 				// Surface the auth-failure mode (missing / format / unknown)

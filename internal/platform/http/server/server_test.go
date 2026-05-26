@@ -55,3 +55,44 @@ func TestNewWithOptions_MetricsMountedOutsideMiddleware(t *testing.T) {
 		t.Fatalf("X-Request-Id = %q, want empty because metrics bypasses middleware", got)
 	}
 }
+
+func TestNewWithOptions_MetricsBearerToken(t *testing.T) {
+	metrics := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("metrics-ok"))
+	})
+	srv := NewWithOptions(ServerOptions{
+		Config:         &config.Server{Addr: ":0", MetricsBearerToken: "metrics-secret"},
+		Handler:        http.NotFoundHandler(),
+		MetricsHandler: metrics,
+	})
+	ts := httptest.NewServer(srv.Handler)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/metrics")
+	if err != nil {
+		t.Fatalf("Get /metrics without token: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status without token = %d, want 401", resp.StatusCode)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/metrics", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer metrics-secret")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Get /metrics with token: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status with token = %d, want 200", resp.StatusCode)
+	}
+	if string(body) != "metrics-ok" {
+		t.Fatalf("body = %q, want metrics-ok", string(body))
+	}
+}

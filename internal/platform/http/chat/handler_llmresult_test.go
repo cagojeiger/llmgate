@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	llmresultschema "llmgate/internal/domain/llmresult/schema"
 	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/llmtypes/fake"
 	"llmgate/internal/domain/routing"
@@ -13,7 +14,7 @@ import (
 func TestHandler_LLMResult_NonStreamFinalized(t *testing.T) {
 	results, resultSink := newCaptureResultSink()
 	r := okFakeService()
-	h := newHandlerHarness(r, HandlerConfig{ResultSink: resultSink})
+	h := newHandlerHarness(r, HandlerConfig{ResultSink: resultSink, ResultPayloadMode: llmresultschema.PayloadModeFull})
 
 	w := h.serve(chatBody)
 
@@ -79,7 +80,7 @@ func TestHandler_LLMResult_StreamAssemblesFinalResponse(t *testing.T) {
 			return streamRouteResult(req, streamObj), nil
 		},
 	}
-	h := newHandlerHarness(r, HandlerConfig{ResultSink: resultSink})
+	h := newHandlerHarness(r, HandlerConfig{ResultSink: resultSink, ResultPayloadMode: llmresultschema.PayloadModeFull})
 
 	w := h.serve(streamChatBody)
 
@@ -128,7 +129,7 @@ func TestHandler_LLMResult_StreamErrorOmitsPartialResponse(t *testing.T) {
 			return streamRouteResult(req, streamObj), nil
 		},
 	}
-	h := newHandlerHarness(r, HandlerConfig{ResultSink: resultSink})
+	h := newHandlerHarness(r, HandlerConfig{ResultSink: resultSink, ResultPayloadMode: llmresultschema.PayloadModeFull})
 
 	w := h.serve(streamChatBody)
 

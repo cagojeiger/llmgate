@@ -27,13 +27,17 @@ func resetEnv(t *testing.T) {
 		"LLMGATE_REQUEST_TIMEOUT",
 		"LLMGATE_COMPLETE_TIMEOUT",
 		"LLMGATE_STREAM_IDLE_TIMEOUT",
+		"LLMGATE_METRICS_BEARER_TOKEN",
 		"LLMGATE_LLMRESULT_NATS_URL",
 		"LLMGATE_LLMRESULT_NATS_SUBJECT",
 		"LLMGATE_LLMRESULT_NATS_USER",
 		"LLMGATE_LLMRESULT_NATS_PASSWORD",
+		"LLMGATE_LLMRESULT_PAYLOAD_MODE",
 		"LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE",
 		"LLMGATE_LLMRESULT_ASYNC_BATCH_SIZE",
 		"LLMGATE_LLMRESULT_ASYNC_FLUSH_INTERVAL",
+		"LLMGATE_LLMRESULT_ASYNC_EMIT_TIMEOUT",
+		"LLMGATE_LLMRESULT_ASYNC_CLOSE_TIMEOUT",
 	} {
 		t.Setenv(k, "")
 	}
@@ -82,6 +86,9 @@ func TestLoadServer_Defaults(t *testing.T) {
 	if cfg.StreamIdleTimeout != time.Minute {
 		t.Errorf("StreamIdleTimeout = %v, want 1m", cfg.StreamIdleTimeout)
 	}
+	if cfg.MetricsBearerToken != "" {
+		t.Errorf("MetricsBearerToken = %q, want empty local default", cfg.MetricsBearerToken)
+	}
 	if cfg.LLMResultNATSURL != "" {
 		t.Errorf("LLMResultNATSURL = %q, want disabled empty default", cfg.LLMResultNATSURL)
 	}
@@ -93,6 +100,9 @@ func TestLoadServer_Defaults(t *testing.T) {
 	}
 	if cfg.LLMResultNATSPassword != "" {
 		t.Errorf("LLMResultNATSPassword = %q, want empty", cfg.LLMResultNATSPassword)
+	}
+	if cfg.LLMResultPayloadMode != "metadata_only" {
+		t.Errorf("LLMResultPayloadMode = %q, want metadata_only", cfg.LLMResultPayloadMode)
 	}
 	if cfg.LLMResultAsyncQueueSize != 1000 {
 		t.Errorf("LLMResultAsyncQueueSize = %d, want 1000", cfg.LLMResultAsyncQueueSize)
@@ -207,6 +217,7 @@ func TestLoadServer_LLMResultNATSOverrides(t *testing.T) {
 	t.Setenv("LLMGATE_LLMRESULT_NATS_SUBJECT", "results.finalized")
 	t.Setenv("LLMGATE_LLMRESULT_NATS_USER", "llmgate")
 	t.Setenv("LLMGATE_LLMRESULT_NATS_PASSWORD", "s3cret")
+	t.Setenv("LLMGATE_LLMRESULT_PAYLOAD_MODE", "redacted")
 	t.Setenv("LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE", "25")
 	t.Setenv("LLMGATE_LLMRESULT_ASYNC_BATCH_SIZE", "5")
 	t.Setenv("LLMGATE_LLMRESULT_ASYNC_FLUSH_INTERVAL", "250ms")
@@ -226,6 +237,9 @@ func TestLoadServer_LLMResultNATSOverrides(t *testing.T) {
 	}
 	if cfg.LLMResultNATSPassword != "s3cret" {
 		t.Errorf("LLMResultNATSPassword = %q, want s3cret", cfg.LLMResultNATSPassword)
+	}
+	if cfg.LLMResultPayloadMode != "redacted" {
+		t.Errorf("LLMResultPayloadMode = %q, want redacted", cfg.LLMResultPayloadMode)
 	}
 	if cfg.LLMResultAsyncQueueSize != 25 {
 		t.Errorf("LLMResultAsyncQueueSize = %d, want 25", cfg.LLMResultAsyncQueueSize)
@@ -277,6 +291,66 @@ func TestLoadServer_RejectsNegativeLLMResultFlushInterval(t *testing.T) {
 	}
 }
 
+func TestLoadServer_RejectsInvalidLLMResultPayloadMode(t *testing.T) {
+	resetEnv(t)
+	t.Setenv("LLMGATE_LLMRESULT_PAYLOAD_MODE", "raw")
+
+	_, err := LoadServer()
+	if err == nil {
+		t.Fatal("LoadServer: want error for invalid LLMGATE_LLMRESULT_PAYLOAD_MODE")
+	}
+	if !strings.Contains(err.Error(), "LLMGATE_LLMRESULT_PAYLOAD_MODE") {
+		t.Errorf("err = %v, want mention of failing key", err)
+	}
+}
+
+func TestLoadServer_RequiresMetricsTokenOutsideLocal(t *testing.T) {
+	resetEnv(t)
+	t.Setenv("LLMGATE_ENVIRONMENT", "prod")
+
+	_, err := LoadServer()
+	if err == nil {
+		t.Fatal("LoadServer: want error when prod metrics token is missing")
+	}
+	if !strings.Contains(err.Error(), "LLMGATE_METRICS_BEARER_TOKEN") {
+		t.Errorf("err = %v, want metrics token requirement", err)
+	}
+}
+
+func TestLoadServer_RequiresSecureNATSOutsideLocal(t *testing.T) {
+	resetEnv(t)
+	t.Setenv("LLMGATE_ENVIRONMENT", "prod")
+	t.Setenv("LLMGATE_METRICS_BEARER_TOKEN", "metrics-secret")
+	t.Setenv("LLMGATE_LLMRESULT_NATS_URL", "nats://nats:4222")
+	t.Setenv("LLMGATE_LLMRESULT_NATS_USER", "llmgate")
+	t.Setenv("LLMGATE_LLMRESULT_NATS_PASSWORD", "s3cret")
+
+	_, err := LoadServer()
+	if err == nil {
+		t.Fatal("LoadServer: want error for plaintext NATS outside local")
+	}
+	if !strings.Contains(err.Error(), "tls://") {
+		t.Errorf("err = %v, want tls scheme requirement", err)
+	}
+}
+
+func TestLoadServer_AllowsSecureNATSOutsideLocal(t *testing.T) {
+	resetEnv(t)
+	t.Setenv("LLMGATE_ENVIRONMENT", "prod")
+	t.Setenv("LLMGATE_METRICS_BEARER_TOKEN", "metrics-secret")
+	t.Setenv("LLMGATE_LLMRESULT_NATS_URL", "tls://nats:4222")
+	t.Setenv("LLMGATE_LLMRESULT_NATS_USER", "llmgate")
+	t.Setenv("LLMGATE_LLMRESULT_NATS_PASSWORD", "s3cret")
+
+	cfg, err := LoadServer()
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if cfg.LLMResultNATSURL != "tls://nats:4222" {
+		t.Errorf("LLMResultNATSURL = %q", cfg.LLMResultNATSURL)
+	}
+}
+
 func TestLoadServer_RejectsInvalidCircuitJitter(t *testing.T) {
 	resetEnv(t)
 	t.Setenv("LLMGATE_CIRCUIT_JITTER", "1.5")
@@ -296,6 +370,7 @@ func TestLoadServer_OverrideFromEnv(t *testing.T) {
 	t.Setenv("LLMGATE_ENVIRONMENT", "prod")
 	t.Setenv("LLMGATE_SHUTDOWN_DRAIN_TIMEOUT", "12s")
 	t.Setenv("LLMGATE_LOG_LEVEL", "debug")
+	t.Setenv("LLMGATE_METRICS_BEARER_TOKEN", "metrics-secret")
 
 	cfg, err := LoadServer()
 	if err != nil {
@@ -312,6 +387,9 @@ func TestLoadServer_OverrideFromEnv(t *testing.T) {
 	}
 	if cfg.LogLevel != slog.LevelDebug {
 		t.Errorf("LogLevel = %v, want debug", cfg.LogLevel)
+	}
+	if cfg.MetricsBearerToken != "metrics-secret" {
+		t.Errorf("MetricsBearerToken = %q, want override", cfg.MetricsBearerToken)
 	}
 }
 

@@ -6,6 +6,7 @@
 정확한 필드 목록은 코드가 source of truth 다.
 
 - `access`: HTTP 전송 사실. probes 와 `/metrics` 는 business traffic 이 아니므로 제외한다.
+  접속기록 보조 필드로 `remote_addr`, `user_agent`, `request_id`를 남긴다.
 - `audit`: 운영 / 보안 사실. chat 요청은 인증 실패를 포함해 한 줄을 남긴다.
 - `call`: upstream LLM 호출 사실. vendor 호출이 시도된 요청에만 남긴다.
 
@@ -40,6 +41,9 @@ raw error message that may contain upstream internals
 
 호출자 식별은 이름과 짧은 key id 로 충분하다. 원문 키와 요청 / 응답 본문은 로그가 아니라
 보안 통제된 별도 저장소나 추적 계층이 필요할 때만 다룬다.
+
+`remote_addr`와 `user_agent`는 접속기록 점검을 위한 운영 필드다. trusted proxy 경계와 보관기간은
+[security operations baseline](security/02-operations.md)에 맞춘다.
 
 ## Source Of Truth
 

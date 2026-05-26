@@ -3,6 +3,7 @@ package schema
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"llmgate/internal/domain/llmtypes"
@@ -13,12 +14,36 @@ const (
 	EventType     = "llm.result.finalized"
 )
 
+type PayloadMode string
+
+const (
+	PayloadModeMetadataOnly PayloadMode = "metadata_only"
+	PayloadModeRedacted     PayloadMode = "redacted"
+	PayloadModeFull         PayloadMode = "full"
+)
+
+func ParsePayloadMode(raw string) (PayloadMode, error) {
+	switch PayloadMode(strings.TrimSpace(raw)) {
+	case "":
+		return PayloadModeMetadataOnly, nil
+	case PayloadModeMetadataOnly:
+		return PayloadModeMetadataOnly, nil
+	case PayloadModeRedacted:
+		return PayloadModeRedacted, nil
+	case PayloadModeFull:
+		return PayloadModeFull, nil
+	default:
+		return "", fmt.Errorf("must be one of %q, %q, %q", PayloadModeMetadataOnly, PayloadModeRedacted, PayloadModeFull)
+	}
+}
+
 // Event is the durable analytics/training-data boundary for one finalized LLM
 // request. It is separate from telemetry.CallEvent so operational metrics can
 // stay small while downstream data pipelines receive the prompt/response body.
 type Event struct {
 	SchemaVersion int    `json:"schema_version"`
 	EventType     string `json:"event_type"`
+	PayloadMode   string `json:"payload_mode"`
 
 	Timestamp time.Time `json:"timestamp"`
 	RequestID string    `json:"request_id"`

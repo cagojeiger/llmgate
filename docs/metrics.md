@@ -1,8 +1,12 @@
 # Metrics
 
-Prometheus endpoint 는 `GET /metrics`. `/healthz/*` 와 같이 auth / access-log / request-id
-middleware 밖에 둔다. scrape traffic 이 app request metric 과 로그를 오염시키지 않게 하기
-위해서다. 외부 노출 제어는 ServiceMonitor / 네트워크 정책 / ingress 책임이다.
+Prometheus endpoint 는 `GET /metrics`. `/healthz/*` 와 같이 business auth / access-log /
+request-id middleware 밖에 둔다. scrape traffic 이 app request metric 과 로그를 오염시키지
+않게 하기 위해서다.
+
+`LLMGATE_METRICS_BEARER_TOKEN` 이 설정되면 `/metrics`는 `Authorization: Bearer <token>`을
+요구한다. `LLMGATE_ENVIRONMENT != local`이면 이 값은 fail-fast 필수 설정이다. ServiceMonitor /
+네트워크 정책 / ingress 통제는 이 앱 내부 토큰 위에 겹쳐 적용한다.
 
 정확한 metric 이름, label, bucket, error kind 값은 코드와 dashboard 가 source of truth 다.
 
@@ -21,6 +25,8 @@ vendor
 model
 direction
 mode
+reason
+payload_mode
 ```
 
 다음 값은 metric label 로 쓰지 않는다.
@@ -44,6 +50,7 @@ gateway metric 은 크게 네 입력에서 나온다.
 - `AuditEvent`: gateway RED
 - `CallEvent`: upstream LLM RED / routing / token usage
 - `LifecycleObserver`: in-flight saturation
+- `llm.result.finalized` sink observer: result event drop / publish failure
 - Go / process collector: runtime resource
 
 Grafana dashboard 는 Prometheus 에 저장된 metric 을 읽는 운영 화면일 뿐, metric 계약을 새로

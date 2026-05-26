@@ -82,6 +82,8 @@ the timeout model that drives the call-event timing.
   contract.
 - [`docs/logs.md`](docs/logs.md),
   [`docs/metrics.md`](docs/metrics.md) — observability policy.
+- [`docs/security/`](docs/security/) — service security standards,
+  current-state gap analysis, and follow-up security work.
 
 ## Contributing
 

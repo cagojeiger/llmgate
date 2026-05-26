@@ -28,13 +28,19 @@ type Config struct {
 	Subject  string
 	User     string
 	Password string
+	Observer Observer
+}
+
+type Observer interface {
+	ObserveLLMResultPublishFailed(event *result.Event, reason string)
 }
 
 type Publisher struct {
-	nc      *natsgo.Conn
-	js      jetStream
-	subject string
-	log     *slog.Logger
+	nc       *natsgo.Conn
+	js       jetStream
+	subject  string
+	log      *slog.Logger
+	observer Observer
 }
 
 type jetStream interface {
@@ -58,7 +64,7 @@ func NewPublisher(ctx context.Context, cfg Config, log *slog.Logger) (*Publisher
 		nc.Close()
 		return nil, fmt.Errorf("create jetstream context: %w", err)
 	}
-	return &Publisher{nc: nc, js: js, subject: cfg.Subject, log: log}, nil
+	return &Publisher{nc: nc, js: js, subject: cfg.Subject, log: log, observer: cfg.Observer}, nil
 }
 
 // connectOptions builds the nats.Option set in a way unit tests can
@@ -89,6 +95,9 @@ func (p *Publisher) Emit(ctx context.Context, event *result.Event) {
 		return
 	}
 	if err := p.Publish(ctx, event); err != nil {
+		if p.observer != nil {
+			p.observer.ObserveLLMResultPublishFailed(event, "publish_failed")
+		}
 		p.log.LogAttrs(ctx, slog.LevelWarn, "publish llm result event failed",
 			slog.String("event_type", eventTypeOf(event)),
 			slog.String("request_id", event.RequestID),

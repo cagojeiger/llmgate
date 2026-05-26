@@ -127,7 +127,7 @@ func BuildRuntime(ctx context.Context, in RuntimeInput) (*Runtime, error) {
 		metricsRecorder,
 	)
 
-	results, err := buildResultSink(ctx, in.Config, in.Logger)
+	results, err := buildResultSink(ctx, in.Config, in.Logger, metricsRecorder)
 	if err != nil {
 		_ = events.Close()
 		return nil, err
@@ -140,6 +140,7 @@ func BuildRuntime(ctx context.Context, in RuntimeInput) (*Runtime, error) {
 		Environment:       in.Config.Environment,
 		LifecycleObserver: metricsRecorder,
 		ResultSink:        results,
+		ResultPayloadMode: in.Config.LLMResultPayloadMode,
 	})
 	probe := httpprobe.NewState()
 	srv := server.NewWithOptions(server.ServerOptions{

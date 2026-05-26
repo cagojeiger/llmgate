@@ -57,4 +57,4 @@
 - 카탈로그 변경은 hot-reload하지 않고 재시작으로 적용한다.
 - 비용·quota·capability 판단은 게이트웨이 밖에서 한다.
 - 외부 SaaS 시나리오는 디폴트 거절.
-- 다른 ADR이 모두 이 정체성을 부모로 둔다 — [컴포넌트 분할](001-component-boundaries.md), [카탈로그 형태](002-catalog-shape.md), [호출자 인증](003-consumers.md), [폴백 정책](004-fallback-policy.md), [시간 한도](005-timeout-authority.md), [e2e 전략](006-cassette-e2e.md).
+- 다른 ADR이 모두 이 정체성을 부모로 둔다 — [컴포넌트 분할](001-component-boundaries.md), [카탈로그 형태](002-catalog-shape.md), [호출자 인증](003-consumers.md), [폴백 정책](004-fallback-policy.md), [시간 한도](005-timeout-authority.md), [e2e 전략](006-cassette-e2e.md), [보안 기준](007-security-standards.md).

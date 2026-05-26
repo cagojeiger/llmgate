@@ -1,8 +1,13 @@
 package config
 
 import (
+	"fmt"
 	"log/slog"
+	"net/url"
+	"strings"
 	"time"
+
+	llmresultschema "llmgate/internal/domain/llmresult/schema"
 )
 
 type Server struct {
@@ -20,14 +25,15 @@ type Server struct {
 	LogLevel             slog.Level
 
 	// Routing fallback, breaker, and timeout settings.
-	FallbackOn        []string
-	CircuitFailures   int
-	CircuitOpen       time.Duration
-	CircuitMaxOpen    time.Duration
-	CircuitJitter     float64
-	RequestTimeout    time.Duration
-	CompleteTimeout   time.Duration
-	StreamIdleTimeout time.Duration
+	FallbackOn         []string
+	CircuitFailures    int
+	CircuitOpen        time.Duration
+	CircuitMaxOpen     time.Duration
+	CircuitJitter      float64
+	RequestTimeout     time.Duration
+	CompleteTimeout    time.Duration
+	StreamIdleTimeout  time.Duration
+	MetricsBearerToken string
 
 	// Finalized LLM result event publishing. Empty NATS URL disables remote
 	// publishing; the server still builds result events and drops them through
@@ -36,6 +42,7 @@ type Server struct {
 	LLMResultNATSSubject    string
 	LLMResultNATSUser       string
 	LLMResultNATSPassword   string
+	LLMResultPayloadMode    llmresultschema.PayloadMode
 	LLMResultAsyncQueueSize int
 	LLMResultAsyncBatchSize int
 	LLMResultAsyncFlush     time.Duration
@@ -105,8 +112,12 @@ func LoadServer() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	llmResultPayloadMode, err := llmResultPayloadMode("LLMGATE_LLMRESULT_PAYLOAD_MODE", "metadata_only")
+	if err != nil {
+		return nil, err
+	}
 
-	return &Server{
+	cfg := &Server{
 		Addr:                       orDefault("LLMGATE_ADDR", ":8080"),
 		Environment:                orDefault("LLMGATE_ENVIRONMENT", "local"),
 		ShutdownDrainTimeout:       drainTimeout,
@@ -119,14 +130,52 @@ func LoadServer() (*Server, error) {
 		RequestTimeout:             requestTimeout,
 		CompleteTimeout:            completeTimeout,
 		StreamIdleTimeout:          streamIdleTimeout,
+		MetricsBearerToken:         orDefault("LLMGATE_METRICS_BEARER_TOKEN", ""),
 		LLMResultNATSURL:           orDefault("LLMGATE_LLMRESULT_NATS_URL", ""),
 		LLMResultNATSSubject:       orDefault("LLMGATE_LLMRESULT_NATS_SUBJECT", "llmgate.llmresult.finalized"),
 		LLMResultNATSUser:          orDefault("LLMGATE_LLMRESULT_NATS_USER", ""),
 		LLMResultNATSPassword:      orDefault("LLMGATE_LLMRESULT_NATS_PASSWORD", ""),
+		LLMResultPayloadMode:       llmResultPayloadMode,
 		LLMResultAsyncQueueSize:    llmResultQueueSize,
 		LLMResultAsyncBatchSize:    llmResultBatchSize,
 		LLMResultAsyncFlush:        llmResultFlush,
 		LLMResultAsyncEmitTimeout:  llmResultEmitTimeout,
 		LLMResultAsyncCloseTimeout: llmResultCloseTimeout,
-	}, nil
+	}
+	if err := validateSecurityDefaults(cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+func llmResultPayloadMode(key, def string) (llmresultschema.PayloadMode, error) {
+	raw := orDefault(key, def)
+	mode, err := llmresultschema.ParsePayloadMode(raw)
+	if err != nil {
+		return "", fmt.Errorf("%s %w", key, err)
+	}
+	return mode, nil
+}
+
+func validateSecurityDefaults(cfg *Server) error {
+	if cfg == nil || strings.EqualFold(cfg.Environment, "local") {
+		return nil
+	}
+	if cfg.MetricsBearerToken == "" {
+		return fmt.Errorf("LLMGATE_METRICS_BEARER_TOKEN is required when LLMGATE_ENVIRONMENT is not local")
+	}
+	if cfg.LLMResultNATSURL == "" {
+		return nil
+	}
+	if cfg.LLMResultNATSUser == "" || cfg.LLMResultNATSPassword == "" {
+		return fmt.Errorf("LLMGATE_LLMRESULT_NATS_USER and LLMGATE_LLMRESULT_NATS_PASSWORD are required when remote llmresult publishing is enabled outside local")
+	}
+	u, err := url.Parse(cfg.LLMResultNATSURL)
+	if err != nil {
+		return fmt.Errorf("LLMGATE_LLMRESULT_NATS_URL must be a valid URL: %w", err)
+	}
+	if !strings.EqualFold(u.Scheme, "tls") {
+		return fmt.Errorf("LLMGATE_LLMRESULT_NATS_URL must use tls:// outside local")
+	}
+	return nil
 }

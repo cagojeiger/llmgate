@@ -51,7 +51,7 @@ func TestFromTelemetry_BuildsFinalizedResultEvent(t *testing.T) {
 		}},
 	}
 
-	got, ok := FromTelemetry(BuildInput{Audit: audit, Call: call, Request: req, Response: resp})
+	got, ok := FromTelemetry(BuildInput{Audit: audit, Call: call, Request: req, Response: resp, PayloadMode: PayloadModeFull})
 	if !ok {
 		t.Fatal("FromTelemetry ok = false, want true")
 	}
@@ -98,7 +98,7 @@ func TestFromTelemetry_ClonesRequestAndResponse(t *testing.T) {
 	req := &llmtypes.Request{Messages: []llmtypes.Message{{Role: "user", Content: "before"}}}
 	resp := &llmtypes.Response{Choices: []llmtypes.Choice{{Message: llmtypes.Message{Content: "before"}}}}
 
-	got, ok := FromTelemetry(BuildInput{Audit: audit, Call: call, Request: req, Response: resp})
+	got, ok := FromTelemetry(BuildInput{Audit: audit, Call: call, Request: req, Response: resp, PayloadMode: PayloadModeFull})
 	if !ok {
 		t.Fatal("FromTelemetry ok = false, want true")
 	}
@@ -118,5 +118,89 @@ func TestFromTelemetry_ClonesRequestAndResponse(t *testing.T) {
 	}
 	if got.Attempts[0].Usage.TotalTokens != 1 {
 		t.Errorf("cloned attempt usage total = %d, want 1", got.Attempts[0].Usage.TotalTokens)
+	}
+}
+
+func TestFromTelemetry_MetadataOnlyOmitsRequestAndResponse(t *testing.T) {
+	audit := &telemetry.AuditEvent{EventCommon: telemetry.EventCommon{RequestID: "req-1"}}
+	call := &telemetry.CallEvent{
+		Usage:    &llmtypes.Usage{TotalTokens: 1},
+		Attempts: []llmtypes.Attempt{{Vendor: "v"}},
+	}
+
+	got, ok := FromTelemetry(BuildInput{
+		Audit:       audit,
+		Call:        call,
+		Request:     &llmtypes.Request{Messages: []llmtypes.Message{{Role: "user", Content: "secret"}}},
+		Response:    &llmtypes.Response{Choices: []llmtypes.Choice{{Message: llmtypes.Message{Content: "answer"}}}},
+		PayloadMode: PayloadModeMetadataOnly,
+	})
+	if !ok {
+		t.Fatal("FromTelemetry ok = false, want true")
+	}
+	if got.PayloadMode != string(PayloadModeMetadataOnly) {
+		t.Errorf("PayloadMode = %q, want metadata_only", got.PayloadMode)
+	}
+	if got.Request != nil || got.Response != nil {
+		t.Fatalf("payload = request:%+v response:%+v, want both omitted", got.Request, got.Response)
+	}
+	if got.Usage.TotalTokens != 1 || len(got.Attempts) != 1 {
+		t.Fatalf("metadata dropped = usage:%+v attempts:%d", got.Usage, len(got.Attempts))
+	}
+}
+
+func TestFromTelemetry_RedactedKeepsShapeAndDropsSensitiveBodies(t *testing.T) {
+	audit := &telemetry.AuditEvent{EventCommon: telemetry.EventCommon{RequestID: "req-1"}}
+	call := &telemetry.CallEvent{Usage: &llmtypes.Usage{TotalTokens: 1}, Attempts: []llmtypes.Attempt{{Vendor: "v"}}}
+	stream := true
+	req := &llmtypes.Request{
+		Model:    "smart",
+		User:     "alice@example.test",
+		Stream:   &stream,
+		Stop:     []string{"private-stop"},
+		Messages: []llmtypes.Message{{Role: "user", Content: "secret", ReasoningContent: "private"}},
+	}
+	resp := &llmtypes.Response{
+		ID:    "chatcmpl-1",
+		Model: "model-1",
+		Choices: []llmtypes.Choice{{
+			Index:        0,
+			Message:      llmtypes.Message{Role: "assistant", Content: "answer"},
+			FinishReason: "stop",
+			Logprobs:     []byte(`{"token":"secret"}`),
+		}},
+		Usage: &llmtypes.Usage{TotalTokens: 1},
+	}
+
+	got, ok := FromTelemetry(BuildInput{
+		Audit:       audit,
+		Call:        call,
+		Request:     req,
+		Response:    resp,
+		PayloadMode: PayloadModeRedacted,
+	})
+	if !ok {
+		t.Fatal("FromTelemetry ok = false, want true")
+	}
+	if got.PayloadMode != string(PayloadModeRedacted) {
+		t.Errorf("PayloadMode = %q, want redacted", got.PayloadMode)
+	}
+	if got.Request.Model != "smart" || got.Request.User != redactedString {
+		t.Fatalf("redacted request = %+v", got.Request)
+	}
+	if got.Request.Messages[0].Content != redactedString || got.Request.Messages[0].ReasoningContent != redactedString {
+		t.Fatalf("redacted message = %+v", got.Request.Messages[0])
+	}
+	if len(got.Request.Stop) != 0 {
+		t.Fatalf("Stop = %v, want omitted", got.Request.Stop)
+	}
+	if got.Response.ID != "chatcmpl-1" || got.Response.Choices[0].FinishReason != "stop" {
+		t.Fatalf("redacted response metadata = %+v", got.Response)
+	}
+	if got.Response.Choices[0].Message.Content != redactedString {
+		t.Fatalf("redacted response message = %+v", got.Response.Choices[0].Message)
+	}
+	if got.Response.Choices[0].Logprobs != nil {
+		t.Fatalf("Logprobs = %s, want omitted", got.Response.Choices[0].Logprobs)
 	}
 }

@@ -10,7 +10,9 @@ ISMS-P 인증, 조직 보안정책을 대체하지 않고 `llmgate` 운영자가
 
 ## Result Event
 
-- result event는 원문 prompt/response를 durable event로 내보내므로 NATS stream 보관/파기 기준이 확정된 환경에서만 쓴다.
+- `llmgate` 자체는 DB나 앱 소유 영속 저장소에 prompt/response를 저장하지 않는다.
+- result event는 `LLMGATE_LLMRESULT_NATS_URL`을 설정한 경우에만 원문 prompt/response를 외부 NATS/JetStream durable event로 내보내므로, NATS stream 보관/파기 기준이 확정된 환경에서만 쓴다.
+- result event payload 자체의 앱 레벨 암호화는 현재 제공하지 않는다. 운영 환경은 NATS TLS, 계정/subject 권한, stream 저장소 암호화, downstream consumer 접근통제로 보호한다.
 - result event 원격 publish를 켜는 변경은 운영 change ticket, 데이터 목적, 보관기간, downstream consumer, 파기 방법을 남긴다.
 - `llm.result.finalized` stream 보관기간은 stdout audit/call log보다 길게 잡지 않는다. 원문 export 목적이 끝나면 stream purge 또는 subject-level delete 절차를 실행한다.
 
@@ -26,6 +28,7 @@ ISMS-P 인증, 조직 보안정책을 대체하지 않고 `llmgate` 운영자가
 
 - `audit`는 인증 실패, 정책 거부, vendor 호출 성공/실패를 request 단위로 남긴다.
 - `access`는 HTTP 전송 사실과 함께 `remote_addr`, `user_agent`, `request_id`를 남긴다.
+- `llmgate`는 로그를 DB에 저장하지 않고 stdout으로 내보낸다. 실제 보관과 검색은 외부 로그 수집기 책임이다.
 - prompt, response, tool payload, raw Authorization header, raw API key, raw upstream error body는 stdout 로그에 남기지 않는다.
 - 법정 개인정보처리시스템 접속기록 충족 여부는 운영 환경에서 별도 판단한다. `llmgate`의 audit/access log는 그 판단에 사용할 수 있는 보조 증적이다.
 - audit/access log를 접속기록 보조 증적으로 사용하는 운영 환경은 최소 1년 보관을 기본값으로 둔다.

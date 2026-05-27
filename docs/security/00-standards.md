@@ -15,22 +15,25 @@
 
 `llmgate`는 OpenAI wire-compatible LLM router다. 호출자는 `Authorization: Bearer <key>`와 chat completion payload를 보내고, 게이트웨이는 alias/fallback chain에 따라 upstream LLM vendor를 호출한다.
 
+`llmgate` 자체는 DB, Redis, object storage 같은 앱 소유 영속 저장소를 사용하지 않는다. 요청/응답은 요청 처리 중 메모리에서 다루고, stdout 로그는 외부 로그 수집기가 보관할 수 있는 운영 기록으로 취급한다. 호출 결과 원문은 `LLMGATE_LLMRESULT_NATS_URL`이 설정된 경우에만 외부 NATS/JetStream event stream으로 발행된다.
+
 보안 기준이 적용되는 주요 데이터는 다음과 같다.
 
 | 데이터 | 저장/전송 위치 | 기준상 취급 |
 |---|---|---|
-| 호출자 bearer key | 요청 헤더, 런타임 메모리 | 인증정보/비밀정보. 원문 저장 금지, 회전/폐기/접근통제 필요 |
+| 호출자 bearer key | 요청 헤더, 런타임 메모리 | 인증정보/비밀정보. 앱 소유 저장소에 원문 저장 금지, 회전/폐기/접근통제 필요 |
 | vendor API key | 환경변수, upstream 요청 헤더 | 비밀정보. secret manager/KMS, 최소권한, 노출 감사 필요 |
-| prompt/message/tool payload | inbound request body, upstream request | 개인정보/기밀정보가 포함될 수 있음 |
-| LLM response body | client response, optional result event | prompt와 동일하게 개인정보/기밀정보 가능 |
-| audit/call log | stdout JSON, external log sink | 운영 감사기록. 원문 key/body 배제 원칙 필요 |
+| prompt/message/tool payload | inbound request body, upstream request | 앱 내부 영속 저장은 없지만 개인정보/기밀정보가 포함될 수 있음 |
+| LLM response body | client response, optional result event | 앱 내부 영속 저장은 없지만 prompt와 동일하게 개인정보/기밀정보 가능 |
+| audit/call log | stdout JSON, external log sink | 앱 DB 저장은 아니지만 외부 수집기가 보관할 수 있는 운영 감사기록. 원문 key/body 배제 원칙 필요 |
 | metrics | Prometheus `/metrics` | 낮은 cardinality 운영 신호. 식별자/본문 label 금지 |
-| `llm.result.finalized` | NATS JetStream | 원문 request/response를 포함할 수 있는 고위험 export 경계 |
+| `llm.result.finalized` | optional NATS JetStream | 원문 request/response를 포함할 수 있는 선택적 외부 export 경계 |
 
 핵심 판단:
 
 - stdout audit/call log는 운영 감사기록 기준에 가깝다.
-- `llm.result.finalized`는 원문 request/response를 durable event로 내보낼 수 있으므로, 운영자가 이 기능을 켜면 NATS/JetStream, downstream consumer, 보관기간, 재처리 파이프라인까지 개인정보/기밀정보 통제 범위에 포함한다.
+- `llm.result.finalized`는 `LLMGATE_LLMRESULT_NATS_URL`을 설정한 경우에만 원문 request/response를 외부 durable event로 내보낸다. 운영자가 이 기능을 켜면 NATS/JetStream, downstream consumer, 보관기간, 재처리 파이프라인까지 개인정보/기밀정보 통제 범위에 포함한다.
+- 현재 result event payload는 앱 레벨에서 별도 암호화하지 않는다. local 외 환경에서는 NATS 전송 TLS와 NATS/JetStream 저장소 및 접근통제를 운영 보안 경계로 둔다.
 - 내부용 gateway라도 프롬프트에 개인정보가 들어갈 수 있는 구조이므로 “개인정보 필드를 만들지 않는다”만으로 개인정보 보호법령 적용 가능성을 배제하지 않는다.
 
 ## Standards decision
@@ -46,11 +49,11 @@
 ### 개인정보 보호법령 / 안전성 확보조치
 
 - 개인정보 처리 여부 판단: `messages`, `user`, tool payload, upstream response, `llm.result.finalized.request/response`에 개인정보가 포함될 수 있음을 전제로 데이터 분류를 한다.
-- 리포가 직접 강제하는 항목: bearer 인증, consumer별 model allowlist, raw key 미저장, 원문 prompt/response stdout 로그 금지, 낮은 cardinality metrics label, result event 원격 publish fail-fast 설정.
+- 리포가 직접 강제하는 항목: 앱 소유 영속 저장소 없음, bearer 인증, consumer별 model allowlist, raw key 미저장, 원문 prompt/response stdout 로그 금지, 낮은 cardinality metrics label, result event 원격 publish fail-fast 설정.
 - 운영 조직이 별도 증적으로 남겨야 하는 항목: 개인정보 보호 조직/책임자, 개인정보취급자 교육, 내부관리계획, 정기 권한검토, 악성프로그램 방지, 취약점 점검, 사고대응, 위험관리, 수탁자 관리.
 - 접근권한 관리: `consumers/`, provider secret, NATS subject/stream, log sink, metrics endpoint, deployment secret에 대해 최소권한과 계정 회전을 적용한다. 정기 리뷰 증적은 운영 책임이다.
 - 접근통제: `/v1/chat/completions`는 bearer key 필수, `allowed_aliases`로 모델 접근을 제한한다. `/metrics`, NATS monitoring, Grafana는 별도 네트워크/인증 통제로 막아야 한다.
-- 암호화: client-to-gateway, gateway-to-vendor, gateway-to-NATS, 로그/JetStream 저장소의 전송 및 저장 암호화를 운영 기준으로 둔다. local compose의 `nats://`와 placeholder password는 local-only로만 허용한다.
+- 암호화: client-to-gateway, gateway-to-vendor, gateway-to-NATS, 로그/JetStream 저장소의 전송 및 저장 암호화를 운영 기준으로 둔다. result event payload 자체의 앱 레벨 암호화는 현재 제공하지 않는다. local compose의 `nats://`와 placeholder password는 local-only로만 허용한다.
 - 접속기록 보조 증적: auth success/failure, policy denial, upstream attempt, result sink publish/drop/failure를 `request_id`로 조인 가능하게 보관한다. 이 로그가 법정 개인정보처리시스템 접속기록을 단독 충족하는지는 운영 환경에서 별도 판단한다. 원문 prompt/response 로그 금지 정책은 유지한다.
 - 보관/파기: audit/call log와 `llm.result.finalized`는 보관 목적, 기간, 파기 방식을 분리한다. 특히 result event는 원문을 포함하므로 로그보다 짧은 보관기간 또는 별도 승인을 둔다.
 - 위탁/제3자 제공/국외 이전: upstream LLM vendor로 prompt/response가 전송된다. vendor별 처리 목적, 국가, 재위탁, 보관, 학습 사용 여부를 운영자가 문서화해야 한다.

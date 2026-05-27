@@ -25,12 +25,12 @@
 | LLM response body | client response, optional result event | prompt와 동일하게 개인정보/기밀정보 가능 |
 | audit/call log | stdout JSON, external log sink | 운영 감사기록. 원문 key/body 배제 원칙 필요 |
 | metrics | Prometheus `/metrics` | 낮은 cardinality 운영 신호. 식별자/본문 label 금지 |
-| `llm.result.finalized` | NATS JetStream | 기본은 원문 request/response 포함. `metadata_only`/`redacted`로 축소 가능 |
+| `llm.result.finalized` | NATS JetStream | 원문 request/response를 포함할 수 있는 고위험 export 경계 |
 
 핵심 판단:
 
 - stdout audit/call log는 운영 감사기록 기준에 가깝다.
-- `llm.result.finalized`는 `full` mode에서 원문 request/response를 durable event로 내보낼 수 있으므로, 운영자가 이 기능을 켜면 NATS/JetStream, downstream consumer, 보관기간, 재처리 파이프라인까지 개인정보/기밀정보 통제 범위에 포함한다.
+- `llm.result.finalized`는 원문 request/response를 durable event로 내보낼 수 있으므로, 운영자가 이 기능을 켜면 NATS/JetStream, downstream consumer, 보관기간, 재처리 파이프라인까지 개인정보/기밀정보 통제 범위에 포함한다.
 - 내부용 gateway라도 프롬프트에 개인정보가 들어갈 수 있는 구조이므로 “개인정보 필드를 만들지 않는다”만으로 개인정보 보호법령 적용 가능성을 배제하지 않는다.
 
 ## Standards decision

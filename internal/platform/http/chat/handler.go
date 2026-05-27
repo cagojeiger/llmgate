@@ -34,7 +34,6 @@ type Handler struct {
 	serviceVersion string
 	environment    string
 	requestTimeout time.Duration
-	resultMode     llmresultschema.PayloadMode
 	stream         *httpstream.Relay
 }
 
@@ -45,7 +44,6 @@ type HandlerConfig struct {
 	Environment       string
 	LifecycleObserver telemetry.LifecycleObserver
 	ResultSink        llmresultsink.Sink
-	ResultPayloadMode llmresultschema.PayloadMode
 }
 
 func NewHandler(service ChatService, log *slog.Logger, events telemetry.EventSink, cfg HandlerConfig) *Handler {
@@ -79,7 +77,6 @@ func NewHandler(service ChatService, log *slog.Logger, events telemetry.EventSin
 		serviceVersion: serviceVersion,
 		environment:    environment,
 		requestTimeout: cfg.RequestTimeout,
-		resultMode:     cfg.ResultPayloadMode,
 		stream:         httpstream.NewRelay(log, cfg.StreamIdleTimeout),
 	}
 }
@@ -116,11 +113,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if h.results != nil {
 			if ev, ok := llmresultschema.FromTelemetry(llmresultschema.BuildInput{
-				Audit:       rec,
-				Call:        call,
-				Request:     req,
-				Response:    resultResp,
-				PayloadMode: h.resultMode,
+				Audit:    rec,
+				Call:     call,
+				Request:  req,
+				Response: resultResp,
 			}); ok {
 				h.results.Emit(ctx, ev)
 			}

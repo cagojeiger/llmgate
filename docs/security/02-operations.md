@@ -10,10 +10,8 @@ ISMS-P 인증, 조직 보안정책을 대체하지 않고 `llmgate` 운영자가
 
 ## Result Event
 
-- 기본값은 기존 result event 동작과 맞춰 `LLMGATE_LLMRESULT_PAYLOAD_MODE=full`이다.
-- `redacted`는 message content, reasoning content, user, stop sequence, logprobs, extra payload를 제거한다.
-- `full`은 원문 prompt/response를 durable event로 내보내므로 NATS stream 보관/파기 기준이 확정된 환경에서만 쓴다.
-- `full`을 켜는 변경은 운영 change ticket, 데이터 목적, 보관기간, downstream consumer, 파기 방법을 남긴다.
+- result event는 원문 prompt/response를 durable event로 내보내므로 NATS stream 보관/파기 기준이 확정된 환경에서만 쓴다.
+- result event 원격 publish를 켜는 변경은 운영 change ticket, 데이터 목적, 보관기간, downstream consumer, 파기 방법을 남긴다.
 - `llm.result.finalized` stream 보관기간은 stdout audit/call log보다 길게 잡지 않는다. 원문 export 목적이 끝나면 stream purge 또는 subject-level delete 절차를 실행한다.
 
 ## Management Surface
@@ -48,4 +46,4 @@ ISMS-P 인증, 조직 보안정책을 대체하지 않고 `llmgate` 운영자가
 
 - `catalog/` 변경은 어떤 alias/model/vendor가 추가·삭제·변경되었는지 리뷰 증거를 남긴다.
 - `consumers/` 변경은 호출 앱, owner, 목적, 허용 alias, unrestricted 여부, 발급/회전/폐기 일자를 남긴다.
-- `LLMGATE_LLMRESULT_PAYLOAD_MODE=full`, metrics exposure 변경, NATS credential 변경은 보안 변경으로 취급한다.
+- result event 원격 publish, metrics exposure 변경, NATS credential 변경은 보안 변경으로 취급한다.

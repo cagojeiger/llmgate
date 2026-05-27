@@ -45,7 +45,7 @@ func TestAsyncSink_DropsWhenQueueFull(t *testing.T) {
 	sink.Emit(context.Background(), &llmresult.Event{RequestID: "req-1"})
 	next.waitStarted(t)
 	sink.Emit(context.Background(), &llmresult.Event{RequestID: "req-2"})
-	sink.Emit(context.Background(), &llmresult.Event{RequestID: "req-3", PayloadMode: "metadata_only"})
+	sink.Emit(context.Background(), &llmresult.Event{RequestID: "req-3"})
 
 	if got := sink.Dropped(); got != 1 {
 		t.Fatalf("Dropped = %d, want 1", got)

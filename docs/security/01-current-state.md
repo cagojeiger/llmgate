@@ -14,7 +14,7 @@
 | 모델 접근제어 | `allowed_aliases`로 consumer별 모델 제한 가능 | 빈 allowlist가 unrestricted라 운영 승인 기준 필요 |
 | 감사 로그 | auth 실패 포함 audit-always, 원문 key/body 배제, access source field 기록 | 접속기록 점검 주기와 trusted proxy 정책 필요 |
 | 메트릭 | 낮은 cardinality label 정책 + 명시적 `/metrics` enable 옵션 | 기본 disabled. enable 시 네트워크 통제는 운영 증적 필요 |
-| result event | `full` 기본값, `redacted`/`metadata_only` 축소 선택 | 원문 export 승인과 retention/파기 증적 필요 |
+| result event | NATS publish 활성화 시 원문 request/response 포함 | 원문 export 승인과 retention/파기 증적 필요 |
 | upstream vendor | catalog 기반 vendor endpoint/API key 사용 | vendor별 개인정보 처리/국외이전/학습 사용 정책 문서 필요 |
 | 공급망 | `govulncheck`, Dependabot, distroless nonroot image | image scan, SBOM, signing/provenance 보강 필요 |
 
@@ -81,7 +81,7 @@
 
 ### 1. `llm.result.finalized` 원문 데이터 통제
 
-현재 result event 기본값은 기존 동작과 맞춰 `full`이며 원문 request/response를 포함한다. 원문 export를 줄이려면 운영자가 `LLMGATE_LLMRESULT_PAYLOAD_MODE=metadata_only` 또는 `redacted`를 명시한다. 이는 stdout 로그보다 훨씬 강한 개인정보/기밀정보 통제 대상이다.
+현재 result event는 기존 동작과 맞춰 원문 request/response를 포함한다. 이는 stdout 로그보다 훨씬 강한 개인정보/기밀정보 통제 대상이다.
 
 비어 있는 것:
 
@@ -90,9 +90,9 @@
 
 근거:
 
-- `internal/domain/llmresult/schema/event.go`: `PayloadMode`, `Request`, `Response` 필드가 durable event에 있음.
-- `internal/domain/llmresult/schema/build.go`: `metadata_only`, `redacted`, `full` payload mode를 적용함.
-- `internal/platform/config/config.go`: `LLMGATE_LLMRESULT_PAYLOAD_MODE` 기본값은 `full`.
+- `internal/domain/llmresult/schema/event.go`: `Request`, `Response` 필드가 durable event에 있음.
+- `internal/domain/llmresult/schema/build.go`: request/response를 result event에 복제함.
+- `internal/platform/config/config.go`: `LLMGATE_LLMRESULT_NATS_URL`이 비어 있으면 원격 publish 비활성.
 - `internal/domain/llmresult/sink/async.go`: queue full/closed 시 warning log와 dropped count를 남김.
 - `internal/platform/nats/llmresult/publisher.go`: publish 실패 시 warning log를 남김.
 

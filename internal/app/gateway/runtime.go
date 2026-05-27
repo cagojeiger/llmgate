@@ -140,7 +140,6 @@ func BuildRuntime(ctx context.Context, in RuntimeInput) (*Runtime, error) {
 		Environment:       in.Config.Environment,
 		LifecycleObserver: metricsRecorder,
 		ResultSink:        results,
-		ResultPayloadMode: in.Config.LLMResultPayloadMode,
 	})
 	probe := httpprobe.NewState()
 	var metricsHandler http.Handler

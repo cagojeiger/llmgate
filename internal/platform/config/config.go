@@ -7,8 +7,6 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
-	llmresultschema "llmgate/internal/domain/llmresult/schema"
 )
 
 type Server struct {
@@ -43,7 +41,6 @@ type Server struct {
 	LLMResultNATSSubject    string
 	LLMResultNATSUser       string
 	LLMResultNATSPassword   string
-	LLMResultPayloadMode    llmresultschema.PayloadMode
 	LLMResultAsyncQueueSize int
 	LLMResultAsyncBatchSize int
 	LLMResultAsyncFlush     time.Duration
@@ -117,10 +114,6 @@ func LoadServer() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	llmResultPayloadMode, err := llmResultPayloadMode("LLMGATE_LLMRESULT_PAYLOAD_MODE", "full")
-	if err != nil {
-		return nil, err
-	}
 
 	cfg := &Server{
 		Addr:                       orDefault("LLMGATE_ADDR", ":8080"),
@@ -140,7 +133,6 @@ func LoadServer() (*Server, error) {
 		LLMResultNATSSubject:       orDefault("LLMGATE_LLMRESULT_NATS_SUBJECT", "llmgate.llmresult.finalized"),
 		LLMResultNATSUser:          orDefault("LLMGATE_LLMRESULT_NATS_USER", ""),
 		LLMResultNATSPassword:      orDefault("LLMGATE_LLMRESULT_NATS_PASSWORD", ""),
-		LLMResultPayloadMode:       llmResultPayloadMode,
 		LLMResultAsyncQueueSize:    llmResultQueueSize,
 		LLMResultAsyncBatchSize:    llmResultBatchSize,
 		LLMResultAsyncFlush:        llmResultFlush,
@@ -151,15 +143,6 @@ func LoadServer() (*Server, error) {
 		return nil, err
 	}
 	return cfg, nil
-}
-
-func llmResultPayloadMode(key, def string) (llmresultschema.PayloadMode, error) {
-	raw := orDefault(key, def)
-	mode, err := llmresultschema.ParsePayloadMode(raw)
-	if err != nil {
-		return "", fmt.Errorf("%s %w", key, err)
-	}
-	return mode, nil
 }
 
 func validateSecurityDefaults(cfg *Server) error {

@@ -22,7 +22,6 @@
 | `LLMGATE_LLMRESULT_NATS_SUBJECT` | `llmgate.llmresult.finalized` | llmresult 이벤트 publish subject. stream 생성/retention은 NATS 운영 설정 책임 |
 | `LLMGATE_LLMRESULT_NATS_USER` | — | NATS user. local 외 환경에서 원격 publish를 켜면 필수 |
 | `LLMGATE_LLMRESULT_NATS_PASSWORD` | — | NATS password. local 외 환경에서 원격 publish를 켜면 필수 |
-| `LLMGATE_LLMRESULT_PAYLOAD_MODE` | `full` | result event payload 수준. `full`, `redacted`, `metadata_only` 중 하나 |
 | `LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE` | `1000` | 요청 경로와 NATS publish 사이 bounded queue 크기 |
 | `LLMGATE_LLMRESULT_ASYNC_BATCH_SIZE` | `100` | worker 가 즉시 flush 하는 이벤트 개수 |
 | `LLMGATE_LLMRESULT_ASYNC_FLUSH_INTERVAL` | `1s` | batch 가 가득 차지 않아도 flush 하는 최대 대기 시간 |

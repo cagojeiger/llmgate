@@ -32,7 +32,6 @@ func resetEnv(t *testing.T) {
 		"LLMGATE_LLMRESULT_NATS_SUBJECT",
 		"LLMGATE_LLMRESULT_NATS_USER",
 		"LLMGATE_LLMRESULT_NATS_PASSWORD",
-		"LLMGATE_LLMRESULT_PAYLOAD_MODE",
 		"LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE",
 		"LLMGATE_LLMRESULT_ASYNC_BATCH_SIZE",
 		"LLMGATE_LLMRESULT_ASYNC_FLUSH_INTERVAL",
@@ -100,9 +99,6 @@ func TestLoadServer_Defaults(t *testing.T) {
 	}
 	if cfg.LLMResultNATSPassword != "" {
 		t.Errorf("LLMResultNATSPassword = %q, want empty", cfg.LLMResultNATSPassword)
-	}
-	if cfg.LLMResultPayloadMode != "full" {
-		t.Errorf("LLMResultPayloadMode = %q, want full", cfg.LLMResultPayloadMode)
 	}
 	if cfg.LLMResultAsyncQueueSize != 1000 {
 		t.Errorf("LLMResultAsyncQueueSize = %d, want 1000", cfg.LLMResultAsyncQueueSize)
@@ -217,7 +213,6 @@ func TestLoadServer_LLMResultNATSOverrides(t *testing.T) {
 	t.Setenv("LLMGATE_LLMRESULT_NATS_SUBJECT", "results.finalized")
 	t.Setenv("LLMGATE_LLMRESULT_NATS_USER", "llmgate")
 	t.Setenv("LLMGATE_LLMRESULT_NATS_PASSWORD", "s3cret")
-	t.Setenv("LLMGATE_LLMRESULT_PAYLOAD_MODE", "redacted")
 	t.Setenv("LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE", "25")
 	t.Setenv("LLMGATE_LLMRESULT_ASYNC_BATCH_SIZE", "5")
 	t.Setenv("LLMGATE_LLMRESULT_ASYNC_FLUSH_INTERVAL", "250ms")
@@ -237,9 +232,6 @@ func TestLoadServer_LLMResultNATSOverrides(t *testing.T) {
 	}
 	if cfg.LLMResultNATSPassword != "s3cret" {
 		t.Errorf("LLMResultNATSPassword = %q, want s3cret", cfg.LLMResultNATSPassword)
-	}
-	if cfg.LLMResultPayloadMode != "redacted" {
-		t.Errorf("LLMResultPayloadMode = %q, want redacted", cfg.LLMResultPayloadMode)
 	}
 	if cfg.LLMResultAsyncQueueSize != 25 {
 		t.Errorf("LLMResultAsyncQueueSize = %d, want 25", cfg.LLMResultAsyncQueueSize)
@@ -287,19 +279,6 @@ func TestLoadServer_RejectsNegativeLLMResultFlushInterval(t *testing.T) {
 		t.Fatal("LoadServer: want error for negative LLMGATE_LLMRESULT_ASYNC_FLUSH_INTERVAL")
 	}
 	if !strings.Contains(err.Error(), "LLMGATE_LLMRESULT_ASYNC_FLUSH_INTERVAL") {
-		t.Errorf("err = %v, want mention of failing key", err)
-	}
-}
-
-func TestLoadServer_RejectsInvalidLLMResultPayloadMode(t *testing.T) {
-	resetEnv(t)
-	t.Setenv("LLMGATE_LLMRESULT_PAYLOAD_MODE", "raw")
-
-	_, err := LoadServer()
-	if err == nil {
-		t.Fatal("LoadServer: want error for invalid LLMGATE_LLMRESULT_PAYLOAD_MODE")
-	}
-	if !strings.Contains(err.Error(), "LLMGATE_LLMRESULT_PAYLOAD_MODE") {
 		t.Errorf("err = %v, want mention of failing key", err)
 	}
 }

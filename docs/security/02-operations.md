@@ -27,9 +27,10 @@ ISMS-P 인증, 조직 보안정책을 대체하지 않고 `llmgate` 운영자가
 - `audit`는 인증 실패, 정책 거부, vendor 호출 성공/실패를 request 단위로 남긴다.
 - `access`는 HTTP 전송 사실과 함께 `remote_addr`, `user_agent`, `request_id`를 남긴다.
 - prompt, response, tool payload, raw Authorization header, raw API key, raw upstream error body는 stdout 로그에 남기지 않는다.
-- 개인정보처리시스템 접속기록으로 사용하는 운영 환경은 audit/access log를 최소 1년 보관한다.
+- 법정 개인정보처리시스템 접속기록 충족 여부는 운영 환경에서 별도 판단한다. `llmgate`의 audit/access log는 그 판단에 사용할 수 있는 보조 증적이다.
+- audit/access log를 접속기록 보조 증적으로 사용하는 운영 환경은 최소 1년 보관을 기본값으로 둔다.
 - 5만명 이상 정보주체, 고유식별정보/민감정보 처리, 기간통신사업자 등 강화 조건에 해당하면 최소 2년 보관 기준을 적용한다.
-- 운영자는 접속기록 점검 주기, 점검 방법, 이상 징후 사후조치 절차를 내부 관리계획에 남긴다.
+- 운영자는 점검 주기, 점검 방법, 이상 징후 사후조치 절차를 내부 관리계획에 남긴다.
 
 ## Vendor Registry
 

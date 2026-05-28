@@ -309,23 +309,23 @@ func TestLoadServer_RejectsInvalidMetricsEnabled(t *testing.T) {
 	}
 }
 
-func TestLoadServer_RequiresSecureNATSOutsideLocal(t *testing.T) {
+func TestLoadServer_AllowsInternalNATSOutsideLocal(t *testing.T) {
 	resetEnv(t)
 	t.Setenv("LLMGATE_ENVIRONMENT", "prod")
 	t.Setenv("LLMGATE_LLMRESULT_NATS_URL", "nats://nats:4222")
 	t.Setenv("LLMGATE_LLMRESULT_NATS_USER", "llmgate")
 	t.Setenv("LLMGATE_LLMRESULT_NATS_PASSWORD", "s3cret")
 
-	_, err := LoadServer()
-	if err == nil {
-		t.Fatal("LoadServer: want error for plaintext NATS outside local")
+	cfg, err := LoadServer()
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
 	}
-	if !strings.Contains(err.Error(), "tls://") {
-		t.Errorf("err = %v, want tls scheme requirement", err)
+	if cfg.LLMResultNATSURL != "nats://nats:4222" {
+		t.Errorf("LLMResultNATSURL = %q", cfg.LLMResultNATSURL)
 	}
 }
 
-func TestLoadServer_AllowsSecureNATSOutsideLocal(t *testing.T) {
+func TestLoadServer_AllowsTLSNATSOutsideLocal(t *testing.T) {
 	resetEnv(t)
 	t.Setenv("LLMGATE_ENVIRONMENT", "prod")
 	t.Setenv("LLMGATE_LLMRESULT_NATS_URL", "tls://nats:4222")
@@ -338,6 +338,36 @@ func TestLoadServer_AllowsSecureNATSOutsideLocal(t *testing.T) {
 	}
 	if cfg.LLMResultNATSURL != "tls://nats:4222" {
 		t.Errorf("LLMResultNATSURL = %q", cfg.LLMResultNATSURL)
+	}
+}
+
+func TestLoadServer_RequiresNATSCredentialsOutsideLocal(t *testing.T) {
+	resetEnv(t)
+	t.Setenv("LLMGATE_ENVIRONMENT", "prod")
+	t.Setenv("LLMGATE_LLMRESULT_NATS_URL", "nats://nats:4222")
+
+	_, err := LoadServer()
+	if err == nil {
+		t.Fatal("LoadServer: want error for missing NATS credentials outside local")
+	}
+	if !strings.Contains(err.Error(), "LLMGATE_LLMRESULT_NATS_USER") {
+		t.Errorf("err = %v, want credentials requirement", err)
+	}
+}
+
+func TestLoadServer_RejectsUnsupportedNATSScheme(t *testing.T) {
+	resetEnv(t)
+	t.Setenv("LLMGATE_ENVIRONMENT", "prod")
+	t.Setenv("LLMGATE_LLMRESULT_NATS_URL", "http://nats:4222")
+	t.Setenv("LLMGATE_LLMRESULT_NATS_USER", "llmgate")
+	t.Setenv("LLMGATE_LLMRESULT_NATS_PASSWORD", "s3cret")
+
+	_, err := LoadServer()
+	if err == nil {
+		t.Fatal("LoadServer: want error for unsupported NATS URL scheme")
+	}
+	if !strings.Contains(err.Error(), "nats:// or tls://") {
+		t.Errorf("err = %v, want supported scheme requirement", err)
 	}
 }
 

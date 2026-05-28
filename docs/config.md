@@ -18,7 +18,7 @@
 | `LLMGATE_COMPLETE_TIMEOUT` | `1m` | non-stream 시도당 |
 | `LLMGATE_STREAM_IDLE_TIMEOUT` | `1m` | 스트림 이벤트 사이 idle |
 | `LLMGATE_METRICS_ENABLED` | `false` | `true`이면 `/metrics` endpoint 를 mount. 외부 노출 제어는 네트워크/ingress 책임 |
-| `LLMGATE_LLMRESULT_NATS_URL` | — | 비어 있으면 llmresult 원격 publish 비활성. local 외 환경에서는 `tls://host:4222`만 허용 |
+| `LLMGATE_LLMRESULT_NATS_URL` | — | 비어 있으면 llmresult 원격 publish 비활성. `nats://host:4222` 또는 `tls://host:4222` |
 | `LLMGATE_LLMRESULT_NATS_SUBJECT` | `llmgate.llmresult.finalized` | llmresult 이벤트 publish subject. stream 생성/retention은 NATS 운영 설정 책임 |
 | `LLMGATE_LLMRESULT_NATS_USER` | — | NATS user. local 외 환경에서 원격 publish를 켜면 필수 |
 | `LLMGATE_LLMRESULT_NATS_PASSWORD` | — | NATS password. local 외 환경에서 원격 publish를 켜면 필수 |

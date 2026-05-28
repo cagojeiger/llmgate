@@ -159,8 +159,8 @@ func validateSecurityDefaults(cfg *Server) error {
 	if err != nil {
 		return fmt.Errorf("LLMGATE_LLMRESULT_NATS_URL must be a valid URL: %w", err)
 	}
-	if !strings.EqualFold(u.Scheme, "tls") {
-		return errors.New("LLMGATE_LLMRESULT_NATS_URL must use tls:// outside local")
+	if !strings.EqualFold(u.Scheme, "nats") && !strings.EqualFold(u.Scheme, "tls") {
+		return errors.New("LLMGATE_LLMRESULT_NATS_URL must use nats:// or tls://")
 	}
 	return nil
 }

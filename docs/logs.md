@@ -42,8 +42,8 @@ raw error message that may contain upstream internals
 호출자 식별은 이름과 짧은 key id 로 충분하다. 원문 키와 요청 / 응답 본문은 로그가 아니라
 보안 통제된 별도 저장소나 추적 계층이 필요할 때만 다룬다.
 
-`remote_addr`와 `user_agent`는 접속기록 보조 증적에 쓸 수 있는 운영 필드다. trusted proxy 경계와 보관기간은
-[security operations baseline](security/02-operations.md)에 맞춘다.
+`remote_addr`와 `user_agent`는 운영자가 접속 사실을 추적할 때 쓸 수 있는 보조 필드다.
+trusted proxy 경계와 로그 보관기간은 배포 환경의 로그 수집기 설정에서 정한다.
 
 ## Source Of Truth
 

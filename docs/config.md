@@ -17,9 +17,11 @@
 | `LLMGATE_REQUEST_TIMEOUT` | `5m` | 요청 1 회 총 wall-clock |
 | `LLMGATE_COMPLETE_TIMEOUT` | `1m` | non-stream 시도당 |
 | `LLMGATE_STREAM_IDLE_TIMEOUT` | `1m` | 스트림 이벤트 사이 idle |
-| `LLMGATE_LLMRESULT_NATS_URL` | — | 비어 있으면 llmresult 원격 publish 비활성. 설정하면 NATS JetStream URL (`nats://host:4222`) |
-| `LLMGATE_LLMRESULT_NATS_STREAM` | `LLMRESULT` | llmresult 이벤트를 저장할 JetStream stream 이름 |
-| `LLMGATE_LLMRESULT_NATS_SUBJECT` | `llmgate.llmresult.finalized` | llmresult 이벤트 publish subject |
+| `LLMGATE_METRICS_ENABLED` | `false` | `true`이면 `/metrics` endpoint 를 mount. 외부 노출 제어는 네트워크/ingress 책임 |
+| `LLMGATE_LLMRESULT_NATS_URL` | — | 비어 있으면 llmresult 원격 publish 비활성. `nats://host:4222` 또는 `tls://host:4222` |
+| `LLMGATE_LLMRESULT_NATS_SUBJECT` | `llmgate.llmresult.finalized` | llmresult 이벤트 publish subject. stream 생성/retention은 NATS 운영 설정 책임 |
+| `LLMGATE_LLMRESULT_NATS_USER` | — | NATS user. local 외 환경에서 원격 publish를 켜면 필수 |
+| `LLMGATE_LLMRESULT_NATS_PASSWORD` | — | NATS password. local 외 환경에서 원격 publish를 켜면 필수 |
 | `LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE` | `1000` | 요청 경로와 NATS publish 사이 bounded queue 크기 |
 | `LLMGATE_LLMRESULT_ASYNC_BATCH_SIZE` | `100` | worker 가 즉시 flush 하는 이벤트 개수 |
 | `LLMGATE_LLMRESULT_ASYNC_FLUSH_INTERVAL` | `1s` | batch 가 가득 차지 않아도 flush 하는 최대 대기 시간 |

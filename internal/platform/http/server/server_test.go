@@ -55,3 +55,21 @@ func TestNewWithOptions_MetricsMountedOutsideMiddleware(t *testing.T) {
 		t.Fatalf("X-Request-Id = %q, want empty because metrics bypasses middleware", got)
 	}
 }
+
+func TestNewWithOptions_MetricsNotMountedWhenHandlerNil(t *testing.T) {
+	srv := NewWithOptions(ServerOptions{
+		Config:  &config.Server{Addr: ":0"},
+		Handler: http.NotFoundHandler(),
+	})
+	ts := httptest.NewServer(srv.Handler)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/metrics")
+	if err != nil {
+		t.Fatalf("Get /metrics: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+}

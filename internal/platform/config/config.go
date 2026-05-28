@@ -1,7 +1,11 @@
 package config
 
 import (
+	"errors"
+	"fmt"
 	"log/slog"
+	"net/url"
+	"strings"
 	"time"
 )
 
@@ -28,6 +32,7 @@ type Server struct {
 	RequestTimeout    time.Duration
 	CompleteTimeout   time.Duration
 	StreamIdleTimeout time.Duration
+	MetricsEnabled    bool
 
 	// Finalized LLM result event publishing. Empty NATS URL disables remote
 	// publishing; the server still builds result events and drops them through
@@ -85,6 +90,10 @@ func LoadServer() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	metricsEnabled, err := boolValue("LLMGATE_METRICS_ENABLED", "false")
+	if err != nil {
+		return nil, err
+	}
 	llmResultQueueSize, err := nonNegativeInt("LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE", "1000")
 	if err != nil {
 		return nil, err
@@ -106,7 +115,7 @@ func LoadServer() (*Server, error) {
 		return nil, err
 	}
 
-	return &Server{
+	cfg := &Server{
 		Addr:                       orDefault("LLMGATE_ADDR", ":8080"),
 		Environment:                orDefault("LLMGATE_ENVIRONMENT", "local"),
 		ShutdownDrainTimeout:       drainTimeout,
@@ -119,6 +128,7 @@ func LoadServer() (*Server, error) {
 		RequestTimeout:             requestTimeout,
 		CompleteTimeout:            completeTimeout,
 		StreamIdleTimeout:          streamIdleTimeout,
+		MetricsEnabled:             metricsEnabled,
 		LLMResultNATSURL:           orDefault("LLMGATE_LLMRESULT_NATS_URL", ""),
 		LLMResultNATSSubject:       orDefault("LLMGATE_LLMRESULT_NATS_SUBJECT", "llmgate.llmresult.finalized"),
 		LLMResultNATSUser:          orDefault("LLMGATE_LLMRESULT_NATS_USER", ""),
@@ -128,5 +138,29 @@ func LoadServer() (*Server, error) {
 		LLMResultAsyncFlush:        llmResultFlush,
 		LLMResultAsyncEmitTimeout:  llmResultEmitTimeout,
 		LLMResultAsyncCloseTimeout: llmResultCloseTimeout,
-	}, nil
+	}
+	if err := validateSecurityDefaults(cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+func validateSecurityDefaults(cfg *Server) error {
+	if cfg == nil || strings.EqualFold(cfg.Environment, "local") {
+		return nil
+	}
+	if cfg.LLMResultNATSURL == "" {
+		return nil
+	}
+	if cfg.LLMResultNATSUser == "" || cfg.LLMResultNATSPassword == "" {
+		return errors.New("LLMGATE_LLMRESULT_NATS_USER and LLMGATE_LLMRESULT_NATS_PASSWORD are required when remote llmresult publishing is enabled outside local")
+	}
+	u, err := url.Parse(cfg.LLMResultNATSURL)
+	if err != nil {
+		return fmt.Errorf("LLMGATE_LLMRESULT_NATS_URL must be a valid URL: %w", err)
+	}
+	if !strings.EqualFold(u.Scheme, "nats") && !strings.EqualFold(u.Scheme, "tls") {
+		return errors.New("LLMGATE_LLMRESULT_NATS_URL must use nats:// or tls://")
+	}
+	return nil
 }

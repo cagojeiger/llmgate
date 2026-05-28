@@ -1,8 +1,12 @@
 # Metrics
 
-Prometheus endpoint 는 `GET /metrics`. `/healthz/*` 와 같이 auth / access-log / request-id
+Prometheus endpoint 는 `LLMGATE_METRICS_ENABLED=true`일 때만 `GET /metrics`로 열린다.
+기본값은 disabled 다. `/healthz/*` 와 같이 business auth / access-log / request-id
 middleware 밖에 둔다. scrape traffic 이 app request metric 과 로그를 오염시키지 않게 하기
-위해서다. 외부 노출 제어는 ServiceMonitor / 네트워크 정책 / ingress 책임이다.
+위해서다.
+
+`/metrics`는 앱 내부 bearer 인증을 제공하지 않는다. 운영 환경에서는 ServiceMonitor,
+네트워크 정책, ingress 정책으로 Prometheus만 접근하게 제한한다.
 
 정확한 metric 이름, label, bucket, error kind 값은 코드와 dashboard 가 source of truth 다.
 

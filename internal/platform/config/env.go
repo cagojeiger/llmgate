@@ -59,6 +59,15 @@ func ratio(key, def string) (float64, error) {
 	return v, nil
 }
 
+func boolValue(key, def string) (bool, error) {
+	raw := orDefault(key, def)
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, fmt.Errorf("%s must be a boolean, got %q: %w", key, raw, err)
+	}
+	return v, nil
+}
+
 func parseLogLevel(key, def string) (slog.Level, error) {
 	raw := orDefault(key, def)
 	var level slog.Level

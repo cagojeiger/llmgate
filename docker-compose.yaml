@@ -21,6 +21,7 @@ services:
       LLMGATE_CATALOG: /etc/llmgate/catalog
       LLMGATE_CONSUMERS: /etc/llmgate/consumers
       LLMGATE_LOG_LEVEL: info
+      LLMGATE_METRICS_ENABLED: ${LLMGATE_METRICS_ENABLED:-true}
       LLMGATE_LLMRESULT_NATS_URL: ${LLMGATE_LLMRESULT_NATS_URL:-nats://nats:4222}
       LLMGATE_LLMRESULT_NATS_SUBJECT: ${LLMGATE_LLMRESULT_NATS_SUBJECT:-llmgate.llmresult.finalized}
       # Defaults match monitoring/nats/nats.conf accounts.APP.users.

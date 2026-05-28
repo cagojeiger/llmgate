@@ -21,8 +21,9 @@ func TestBuildRuntime_WiresServerAndPublicEndpoints(t *testing.T) {
 	store := testConsumerStore(t)
 	rt, err := BuildRuntime(context.Background(), RuntimeInput{
 		Config: &config.Server{
-			Addr:        ":0",
-			Environment: "test",
+			Addr:           ":0",
+			Environment:    "test",
+			MetricsEnabled: true,
 		},
 		Catalog: &catalog.Catalog{
 			Models: map[string]*catalog.Model{
@@ -65,6 +66,49 @@ func TestBuildRuntime_WiresServerAndPublicEndpoints(t *testing.T) {
 			t.Fatalf("GET %s status = %d, want 200", path, resp.StatusCode)
 		}
 		_ = resp.Body.Close()
+	}
+}
+
+func TestBuildRuntime_DoesNotMountMetricsWhenDisabled(t *testing.T) {
+	t.Setenv("TEST_GATEWAY_OPENAI_KEY", "present")
+
+	rt, err := BuildRuntime(context.Background(), RuntimeInput{
+		Config: &config.Server{
+			Addr:        ":0",
+			Environment: "test",
+		},
+		Catalog: &catalog.Catalog{
+			Models: map[string]*catalog.Model{
+				"openai-test": {
+					ID:         "openai-test",
+					Vendor:     "openai",
+					Protocol:   llmtypes.ProtocolOpenAI,
+					BaseURL:    "https://example.test/v1",
+					AuthEnv:    "TEST_GATEWAY_OPENAI_KEY",
+					AuthScheme: "bearer",
+				},
+			},
+			Aliases: map[string]*catalog.Alias{"smart": {Chain: []string{"openai-test"}}},
+		},
+		Consumers: testConsumerStore(t),
+		Logger:    discardLogger(),
+		Version:   "test",
+	})
+	if err != nil {
+		t.Fatalf("BuildRuntime() error = %v", err)
+	}
+	defer func() { _ = rt.Close() }()
+
+	srv := httptest.NewServer(rt.Server.Handler)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/metrics")
+	if err != nil {
+		t.Fatalf("GET /metrics error = %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("GET /metrics status = %d, want 404", resp.StatusCode)
 	}
 }
 

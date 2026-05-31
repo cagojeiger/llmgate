@@ -1,0 +1,7 @@
+# TODO: describe purpose & how this fits into alias chains
+id: qwen3.7-max
+vendor: opencode
+protocol: anthropic
+base_url: https://opencode.ai/zen/go/v1
+auth_env: LLMGATE_OPENCODE_API_KEY
+auth_scheme: bearer

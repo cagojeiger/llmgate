@@ -4,5 +4,4 @@ alias: cheap
 chain:
   - deepseek-v4-flash
   - minimax-m2.5
-  - qwen3.5-plus
   - minimax-m2.7

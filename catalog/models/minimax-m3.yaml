@@ -1,0 +1,7 @@
+# MiniMax 최신 세대, m2.7 후속 — Anthropic 프로토콜
+id: minimax-m3
+vendor: opencode
+protocol: anthropic
+base_url: https://opencode.ai/zen/go/v1
+auth_env: LLMGATE_OPENCODE_API_KEY
+auth_scheme: x-api-key

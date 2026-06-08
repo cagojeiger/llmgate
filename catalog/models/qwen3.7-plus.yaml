@@ -1,0 +1,7 @@
+# Qwen3.7 Plus — Max 대비 저가/표준 티어, Anthropic 프로토콜
+id: qwen3.7-plus
+vendor: opencode
+protocol: anthropic
+base_url: https://opencode.ai/zen/go/v1
+auth_env: LLMGATE_OPENCODE_API_KEY
+auth_scheme: x-api-key

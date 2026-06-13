@@ -1,0 +1,12 @@
+# 임시(약 1달) 호출자 등록 — deepseek-v4-flash 전용. 사용 후 revert 예정.
+# allowed_aliases는 deepseek-v4-flash로 라우팅되는 두 별명만 허용한다
+# (cheap: chain 선두가 deepseek-v4-flash, tier-1m-fast: 단일 deepseek-v4-flash).
+# 운영 trust boundary 안이므로 example.yaml과 동일하게 raw 키를 주석에 둔다.
+#
+# raw key #1: tmpdsf_7d03470b625f8634f74a789d8fa7e1f3
+name: temp-deepseek-flash
+key_hashes:
+  - sha256:c37314b209cb1184c78283f2b87753a15ffcaf7f92a881668f08d04170da17e2
+allowed_aliases:
+  - cheap
+  - tier-1m-fast

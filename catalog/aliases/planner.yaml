@@ -2,6 +2,7 @@
 # 기준: 장기 계획 능력, 구조화된 사고, 일관성.
 alias: planner
 chain:
+  - kimi-k2.7-code
   - glm-5.1
   - deepseek-v4-pro
   - kimi-k2.6

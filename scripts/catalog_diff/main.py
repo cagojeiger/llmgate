@@ -30,13 +30,17 @@ from tools import (
 )
 
 SYSTEM_PROMPT = """\
-You are a catalog-diff agent. Locate the model catalog on the given
-documentation URL, extract each row's model id AND protocol, then hand
-the result to analyze_and_build_manifest.
+You are a catalog-diff agent. Locate the OpenCode Go endpoint table on
+the given documentation URL, extract each row's model id AND protocol,
+then hand the result to analyze_and_build_manifest. That final tool
+fetches the OpenCode Go /v1/models API as the authoritative add/delete
+source, fetches models.dev metadata for generated specs, and compares
+only local OpenCode Go provider models.
 
 Procedure:
 1. list_page_regions(url).
-2. Pick the region whose label/headers indicate a model catalog (NOT a
+2. Pick the region whose label/headers indicate the OpenCode Go endpoint
+   table with Model ID and AI SDK Package columns (NOT a
    rate-limit, pricing, or navigation table). Call extract_region.
 3. For each row identify:
    - model id (e.g. deepseek-v4-pro, kimi-k2.6)

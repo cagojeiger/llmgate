@@ -2,8 +2,9 @@
 # 기준: 코드 품질, 작성 능력, 실작업 수행력.
 alias: worker
 chain:
+  - kimi-k2.7-code
+  - mimo-v2.5-pro
+  - qwen3.7-plus
   - qwen3.6-plus
-  - minimax-m2.7
   - kimi-k2.6
-  - glm-5
-  - kimi-k2.5
+  - minimax-m3

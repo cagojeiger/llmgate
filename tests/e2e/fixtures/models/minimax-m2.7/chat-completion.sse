@@ -1,5 +1,5 @@
 event: message_start
-data: {"type":"message_start","message":{"id":"066358f126dd96f93498b6974286510d","type":"message","role":"assistant","content":[],"model":"MiniMax-M2.7","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":43,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},"service_tier":"standard"}}
+data: {"type":"message_start","message":{"id":"068c3096694853a7787dc0990e4013c1","type":"message","role":"assistant","content":[],"model":"MiniMax-M2.7","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":53,"output_tokens":0}}}
 
 event: ping
 data: {"type":"ping"}
@@ -8,10 +8,19 @@ event: content_block_start
 data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}
 
 event: content_block_delta
-data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"The user asks: \"Count 1 to 5, one number per line.\"\n\nWe need to output numbers 1 through 5, each on its own line.\n\nSimple.\n\nWe need to ensure format is exactly each number on separate line. There's no extra text. So output:\n\n1\n2\n3\n4\n5\n\nProbably that's it.\n\nLet's consider if any policy issues? No. It's straightforward. Ensure no extra punctuation. Just numbers, one per line. The user wants counting; they didn't ask for formatting like \"1\" etc. So produce:\n\n1\n2\n3\n4\n5\n\nWe'll respond accordingly."}}
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"The user"}}
 
 event: content_block_delta
-data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"141e0f17efe015f8e63e1780fefa599c53e1d81c5b2c87b93ec83134e4d93be9"}}
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" asks: \"Count 1 to 5, one number per line.\" So we need to output numbers 1,2,3,4,5 each on its own line. That's trivial. There's"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" no policy violation. It's a simple request. Provide output exactly like:\n\n1\n2\n3\n4\n5\n\nWe need to follow"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" the guidelines: no extra text, just the numbers. Usually, it's fine. Provide as plain text.\n\nThus answer."}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"c4c9e971225f46cca5e73fe36c100fe3e69b4f1750b45668e91b6636a9744594"}}
 
 event: content_block_stop
 data: {"type":"content_block_stop","index":0}
@@ -20,13 +29,16 @@ event: content_block_start
 data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}
 
 event: content_block_delta
-data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\n\n1\n2\n3\n4\n5"}}
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"1\n2\n"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"3\n4\n5"}}
 
 event: content_block_stop
 data: {"type":"content_block_stop","index":1}
 
 event: message_delta
-data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":23,"output_tokens":140,"cache_creation_input_tokens":0,"cache_read_input_tokens":32}}
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":53,"output_tokens":108}}
 
 event: message_stop
 data: {"type":"message_stop"}

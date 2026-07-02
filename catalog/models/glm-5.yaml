@@ -1,8 +1,0 @@
-# Claude-like 행동, 안정적 (5.1 의 폴백)
-# context: 204,800 tokens / max output: 131,072 tokens
-id: glm-5
-vendor: opencode
-protocol: openai
-base_url: https://opencode.ai/zen/go/v1
-auth_env: LLMGATE_OPENCODE_API_KEY
-auth_scheme: bearer

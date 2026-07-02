@@ -1,8 +1,0 @@
-# Anthropic 프로토콜, thinking 블록으로 reasoning 제공
-# context: 204,800 tokens / max output: 131,072 tokens
-id: minimax-m2.5
-vendor: opencode
-protocol: anthropic
-base_url: https://opencode.ai/zen/go/v1
-auth_env: LLMGATE_OPENCODE_API_KEY
-auth_scheme: x-api-key

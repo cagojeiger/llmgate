@@ -4,6 +4,7 @@ alias: smart
 chain:
   - deepseek-v4-pro
   - kimi-k2.7-code
+  - glm-5.2
   - glm-5.1
   - qwen3.7-max
   - kimi-k2.6

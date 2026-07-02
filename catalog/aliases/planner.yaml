@@ -3,6 +3,7 @@
 alias: planner
 chain:
   - kimi-k2.7-code
+  - glm-5.2
   - glm-5.1
   - deepseek-v4-pro
   - kimi-k2.6

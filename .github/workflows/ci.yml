@@ -89,7 +89,7 @@ jobs:
         with:
           go-version: '1.25.11'
           cache: true
-      - uses: astral-sh/setup-uv@v8.1.0
+      - uses: astral-sh/setup-uv@v8.2.0
       # The cassette upstream is local; no real vendor key needed.
       # conftest sets a dummy LLMGATE_OPENCODE_API_KEY when MODE=cassette.
       - run: make e2e-mock

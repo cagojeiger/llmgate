@@ -1,0 +1,1 @@
+{"id":"068c309a12a4979aa82c91e518d20758","type":"message","role":"assistant","model":"MiniMax-M3","content":[{"text":"1\n2\n3\n4\n5","type":"text"}],"usage":{"input_tokens":61,"output_tokens":9,"cache_creation_input_tokens":0,"cache_read_input_tokens":114,"service_tier":"standard"},"stop_reason":"end_turn","base_resp":{"status_code":0,"status_msg":""},"cost":"0"}

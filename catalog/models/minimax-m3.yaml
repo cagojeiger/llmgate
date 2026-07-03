@@ -1,4 +1,6 @@
 # MiniMax 최신 세대, m2.7 후속 — Anthropic 프로토콜
+# image input: OK — verified by test 2026-07-04, non-stream + stream
+# (needs the anthropic structured-content translation added in that release)
 id: minimax-m3
 vendor: opencode
 protocol: anthropic

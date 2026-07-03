@@ -1,5 +1,6 @@
 # 멀티모달 (text/image)
 # context: 1,000,000 tokens / max output: 128,000 tokens
+# image input: OK — verified by test 2026-07-04 (reads table/text/diagram PNG)
 id: mimo-v2.5
 vendor: opencode
 protocol: openai

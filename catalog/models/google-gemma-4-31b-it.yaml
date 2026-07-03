@@ -1,5 +1,6 @@
 # Google DeepMind dense multimodal (text+image), 256K context, Apache 2.0
 # context: 262,144 tokens / max output: 131,072 tokens
+# image input: OK — verified by test 2026-07-04 (reads table/text/diagram PNG)
 id: google/gemma-4-31b-it
 vendor: openrouter
 protocol: openai

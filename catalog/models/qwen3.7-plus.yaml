@@ -1,4 +1,6 @@
 # Qwen3.7 Plus — Max 대비 저가/표준 티어, Anthropic 프로토콜
+# image input: OK — verified by test 2026-07-04
+# (needs the anthropic structured-content translation added in that release)
 id: qwen3.7-plus
 vendor: opencode
 protocol: anthropic

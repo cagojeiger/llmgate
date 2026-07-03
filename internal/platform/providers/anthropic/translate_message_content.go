@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,13 +33,23 @@ func anthropicMessageFromOpenAI(msg llmtypes.Message) (anthropicMessage, error) 
 }
 
 func buildMessageContent(msg llmtypes.Message) (any, error) {
-	if len(msg.ContentRaw) > 0 {
-		return buildStructuredContent(msg.ContentRaw)
-	}
 	if msg.Role == "tool" {
 		return buildToolResultContent(msg)
 	}
+	// Only a JSON array is OpenAI structured content. A null or omitted
+	// content unmarshals to ContentRaw "null"/empty and must fall through to
+	// the tool_calls/text path — otherwise an assistant tool-call turn
+	// (content:null + tool_calls) silently loses its tool_calls.
+	if isStructuredContentArray(msg.ContentRaw) {
+		return buildStructuredContent(msg.ContentRaw)
+	}
 	return buildAssistantContent(msg)
+}
+
+// isStructuredContentArray reports whether raw is an OpenAI content-parts array.
+func isStructuredContentArray(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	return len(trimmed) > 0 && trimmed[0] == '['
 }
 
 // openAIContentPart is one entry in OpenAI's structured message content array,
@@ -92,13 +103,18 @@ func imageSourceFromURL(url string) (*anthropicImageSource, error) {
 	if !ok {
 		return nil, errors.New("malformed data URI: missing comma")
 	}
-	mediaType, isBase64 := strings.CutSuffix(meta, ";base64")
-	if !isBase64 {
+	// meta is <media-type>[;param=value...][;base64]. Require base64 and keep
+	// only the bare media type — Anthropic rejects a media_type that carries
+	// parameters (e.g. "image/png;charset=utf-8").
+	if !strings.Contains(meta, ";base64") {
 		return nil, errors.New("data URI must be base64-encoded")
 	}
+	mediaType, _, _ := strings.Cut(meta, ";")
 	if mediaType == "" {
 		return nil, errors.New("data URI is missing a media type")
 	}
+	// Some encoders wrap base64 at column 76; Anthropic wants it unbroken.
+	data = strings.NewReplacer("\n", "", "\r", "").Replace(data)
 	return &anthropicImageSource{Type: "base64", MediaType: mediaType, Data: data}, nil
 }
 
@@ -110,11 +126,37 @@ func buildToolResultContent(msg llmtypes.Message) (any, error) {
 	if strings.TrimSpace(toolCallID) == "" {
 		return nil, errors.New("tool message is missing tool_call_id")
 	}
+	content := msg.Content
+	if isStructuredContentArray(msg.ContentRaw) {
+		text, err := flattenTextParts(msg.ContentRaw)
+		if err != nil {
+			return nil, err
+		}
+		content = text
+	}
 	return []anthropicContentBlock{{
 		Type:      "tool_result",
 		ToolUseID: toolCallID,
-		Content:   msg.Content,
+		Content:   content,
 	}}, nil
+}
+
+// flattenTextParts concatenates an OpenAI content-parts array into a string.
+// Tool results are text in practice; a non-text part is rejected rather than
+// silently dropped.
+func flattenTextParts(raw json.RawMessage) (string, error) {
+	var parts []openAIContentPart
+	if err := json.Unmarshal(raw, &parts); err != nil {
+		return "", fmt.Errorf("decode tool result content: %w", err)
+	}
+	var b strings.Builder
+	for i, part := range parts {
+		if part.Type != "text" {
+			return "", fmt.Errorf("tool result part %d: unsupported type %q", i, part.Type)
+		}
+		b.WriteString(part.Text)
+	}
+	return b.String(), nil
 }
 
 func buildAssistantContent(msg llmtypes.Message) (any, error) {

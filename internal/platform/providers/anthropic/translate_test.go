@@ -55,6 +55,67 @@ func TestToAnthropicRequest_StructuredContentWithImage(t *testing.T) {
 	}
 }
 
+func TestToAnthropicRequest_NullContentPreservesToolCalls(t *testing.T) {
+	// Canonical OpenAI assistant tool-call turn: content is null. The message
+	// UnmarshalJSON records that as ContentRaw "null", which must NOT be treated
+	// as structured content or the tool_calls are silently dropped.
+	var m llmtypes.Message
+	if err := json.Unmarshal([]byte(
+		`{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"seoul\"}"}}]}`,
+	), &m); err != nil {
+		t.Fatalf("unmarshal message: %v", err)
+	}
+	got := decodeRequestBody(t, &llmtypes.Request{
+		Model:    "claude-x",
+		Messages: []llmtypes.Message{{Role: "user", Content: "hi"}, m},
+	})
+	blocks := got["messages"].([]any)[1].(map[string]any)["content"].([]any)
+	if len(blocks) != 1 {
+		t.Fatalf("assistant content blocks = %d, want 1", len(blocks))
+	}
+	b := blocks[0].(map[string]any)
+	if b["type"] != "tool_use" || b["name"] != "get_weather" {
+		t.Errorf("block = %v, want tool_use/get_weather", b)
+	}
+}
+
+func TestToAnthropicRequest_ToolRoleArrayContent(t *testing.T) {
+	// A tool-role message whose content is an array of text parts must still
+	// become a tool_result block carrying tool_use_id, not a bare user turn.
+	var m llmtypes.Message
+	if err := json.Unmarshal([]byte(
+		`{"role":"tool","tool_call_id":"call_1","content":[{"type":"text","text":"sunny 25C"}]}`,
+	), &m); err != nil {
+		t.Fatalf("unmarshal message: %v", err)
+	}
+	got := decodeRequestBody(t, &llmtypes.Request{
+		Model:    "claude-x",
+		Messages: []llmtypes.Message{{Role: "user", Content: "hi"}, m},
+	})
+	block := got["messages"].([]any)[1].(map[string]any)["content"].([]any)[0].(map[string]any)
+	if block["type"] != "tool_result" || block["tool_use_id"] != "call_1" || block["content"] != "sunny 25C" {
+		t.Errorf("block = %v, want tool_result/call_1/'sunny 25C'", block)
+	}
+}
+
+func TestToAnthropicRequest_DataURIMediaTypeParams(t *testing.T) {
+	// A data URI with media-type parameters must yield a bare media_type.
+	got := decodeRequestBody(t, &llmtypes.Request{
+		Model: "claude-x",
+		Messages: []llmtypes.Message{{
+			Role:       "user",
+			ContentRaw: json.RawMessage(`[{"type":"image_url","image_url":{"url":"data:image/png;charset=utf-8;base64,iVBOR\nw0KGgo="}}]`),
+		}},
+	})
+	src := got["messages"].([]any)[0].(map[string]any)["content"].([]any)[0].(map[string]any)["source"].(map[string]any)
+	if src["media_type"] != "image/png" {
+		t.Errorf("media_type = %v, want image/png (params stripped)", src["media_type"])
+	}
+	if src["data"] != "iVBORw0KGgo=" {
+		t.Errorf("data = %v, want newline stripped", src["data"])
+	}
+}
+
 func TestToAnthropicRequest_MalformedDataURI(t *testing.T) {
 	_, err := toAnthropicRequest(&llmtypes.Request{
 		Model: "claude-x",

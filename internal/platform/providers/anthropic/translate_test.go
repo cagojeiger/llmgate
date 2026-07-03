@@ -125,6 +125,25 @@ func TestToAnthropicRequest_ArrayContentWithToolCalls(t *testing.T) {
 	}
 }
 
+func TestToAnthropicRequest_ArrayContentEmptyToolCalls(t *testing.T) {
+	// content is an array but tool_calls is an empty []. The empty tool_calls
+	// must not swallow the content — the blocks still have to be emitted.
+	var m llmtypes.Message
+	if err := json.Unmarshal([]byte(
+		`{"role":"assistant","content":[{"type":"text","text":"hello there"}],"tool_calls":[]}`,
+	), &m); err != nil {
+		t.Fatalf("unmarshal message: %v", err)
+	}
+	got := decodeRequestBody(t, &llmtypes.Request{
+		Model:    "claude-x",
+		Messages: []llmtypes.Message{{Role: "user", Content: "hi"}, m},
+	})
+	block := got["messages"].([]any)[1].(map[string]any)["content"].([]any)[0].(map[string]any)
+	if block["type"] != "text" || block["text"] != "hello there" {
+		t.Errorf("block = %v, want text/'hello there'", block)
+	}
+}
+
 func TestToAnthropicRequest_EmptyContentArrayRejected(t *testing.T) {
 	_, err := toAnthropicRequest(&llmtypes.Request{
 		Model: "claude-x",

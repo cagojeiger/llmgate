@@ -36,29 +36,7 @@ func buildMessageContent(msg llmtypes.Message) (any, error) {
 	if msg.Role == "tool" {
 		return buildToolResultContent(msg)
 	}
-	// A turn carrying tool_calls owns the assistant tool_use path even when it
-	// also has structured content — otherwise the tool_calls are silently
-	// dropped. buildAssistantContent prepends any structured/text blocks.
-	if hasToolCalls(msg.Extra) {
-		return buildAssistantContent(msg)
-	}
-	// Only a JSON array is OpenAI structured content. A null or omitted
-	// content unmarshals to ContentRaw "null"/empty and must fall through to
-	// the text path.
-	if isStructuredContentArray(msg.ContentRaw) {
-		return buildStructuredContent(msg.ContentRaw)
-	}
 	return buildAssistantContent(msg)
-}
-
-// hasToolCalls reports whether Extra carries a non-empty tool_calls value.
-func hasToolCalls(extra map[string]json.RawMessage) bool {
-	raw, ok := extra["tool_calls"]
-	if !ok {
-		return false
-	}
-	trimmed := bytes.TrimSpace(raw)
-	return len(trimmed) > 0 && !bytes.Equal(trimmed, []byte("null"))
 }
 
 // isStructuredContentArray reports whether raw is an OpenAI content-parts array.
@@ -188,16 +166,18 @@ func flattenTextParts(raw json.RawMessage) (string, error) {
 	return b.String(), nil
 }
 
+// buildAssistantContent handles user and assistant turns. With no tool_calls it
+// returns structured content blocks (image/text) or the plain string; with
+// tool_calls it emits those leading blocks followed by tool_use blocks.
 func buildAssistantContent(msg llmtypes.Message) (any, error) {
-	rawCalls, hasCalls := msg.Extra["tool_calls"]
-	if !hasCalls || len(rawCalls) == 0 {
-		return msg.Content, nil
-	}
-	var toolCalls []openAIToolCall
-	if err := json.Unmarshal(rawCalls, &toolCalls); err != nil {
-		return nil, fmt.Errorf("decode tool_calls: %w", err)
+	toolCalls, err := toolCallsFromExtra(msg.Extra)
+	if err != nil {
+		return nil, err
 	}
 	if len(toolCalls) == 0 {
+		if isStructuredContentArray(msg.ContentRaw) {
+			return buildStructuredContent(msg.ContentRaw)
+		}
 		return msg.Content, nil
 	}
 
@@ -219,6 +199,20 @@ func buildAssistantContent(msg llmtypes.Message) (any, error) {
 		blocks = append(blocks, block)
 	}
 	return blocks, nil
+}
+
+// toolCallsFromExtra returns the OpenAI tool_calls from Extra, or nil when absent
+// or empty (including tool_calls: []).
+func toolCallsFromExtra(extra map[string]json.RawMessage) ([]openAIToolCall, error) {
+	raw, ok := extra["tool_calls"]
+	if !ok || len(raw) == 0 {
+		return nil, nil
+	}
+	var toolCalls []openAIToolCall
+	if err := json.Unmarshal(raw, &toolCalls); err != nil {
+		return nil, fmt.Errorf("decode tool_calls: %w", err)
+	}
+	return toolCalls, nil
 }
 
 func toolUseBlock(tc openAIToolCall) (anthropicContentBlock, error) {

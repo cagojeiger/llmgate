@@ -33,12 +33,73 @@ func anthropicMessageFromOpenAI(msg llmtypes.Message) (anthropicMessage, error) 
 
 func buildMessageContent(msg llmtypes.Message) (any, error) {
 	if len(msg.ContentRaw) > 0 {
-		return nil, errors.New("anthropic provider does not support OpenAI structured message content")
+		return buildStructuredContent(msg.ContentRaw)
 	}
 	if msg.Role == "tool" {
 		return buildToolResultContent(msg)
 	}
 	return buildAssistantContent(msg)
+}
+
+// openAIContentPart is one entry in OpenAI's structured message content array,
+// e.g. {"type":"text","text":...} or {"type":"image_url","image_url":{"url":...}}.
+type openAIContentPart struct {
+	Type     string `json:"type"`
+	Text     string `json:"text"`
+	ImageURL struct {
+		URL string `json:"url"`
+	} `json:"image_url"`
+}
+
+// buildStructuredContent translates OpenAI's content-parts array into Anthropic
+// content blocks: text parts pass through; image_url parts become image blocks
+// (base64 source from a data: URI, url source otherwise).
+func buildStructuredContent(raw json.RawMessage) (any, error) {
+	var parts []openAIContentPart
+	if err := json.Unmarshal(raw, &parts); err != nil {
+		return nil, fmt.Errorf("decode structured message content: %w", err)
+	}
+	blocks := make([]anthropicContentBlock, 0, len(parts))
+	for i, part := range parts {
+		switch part.Type {
+		case "text":
+			blocks = append(blocks, anthropicContentBlock{Type: "text", Text: part.Text})
+		case "image_url":
+			source, err := imageSourceFromURL(part.ImageURL.URL)
+			if err != nil {
+				return nil, fmt.Errorf("content part %d: %w", i, err)
+			}
+			blocks = append(blocks, anthropicContentBlock{Type: "image", Source: source})
+		default:
+			return nil, fmt.Errorf("content part %d: unsupported type %q", i, part.Type)
+		}
+	}
+	return blocks, nil
+}
+
+// imageSourceFromURL maps an OpenAI image_url.url to an Anthropic image source.
+// A data: URI (data:<media_type>;base64,<data>) becomes a base64 source; any
+// other URL is passed through as a url source for Anthropic to fetch.
+func imageSourceFromURL(url string) (*anthropicImageSource, error) {
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return nil, errors.New("image_url.url is empty")
+	}
+	if !strings.HasPrefix(url, "data:") {
+		return &anthropicImageSource{Type: "url", URL: url}, nil
+	}
+	meta, data, ok := strings.Cut(strings.TrimPrefix(url, "data:"), ",")
+	if !ok {
+		return nil, errors.New("malformed data URI: missing comma")
+	}
+	mediaType, isBase64 := strings.CutSuffix(meta, ";base64")
+	if !isBase64 {
+		return nil, errors.New("data URI must be base64-encoded")
+	}
+	if mediaType == "" {
+		return nil, errors.New("data URI is missing a media type")
+	}
+	return &anthropicImageSource{Type: "base64", MediaType: mediaType, Data: data}, nil
 }
 
 func buildToolResultContent(msg llmtypes.Message) (any, error) {

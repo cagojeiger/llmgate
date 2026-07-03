@@ -28,13 +28,24 @@ type anthropicMessage struct {
 // relevant to the block Type are populated); omitempty keeps the wire
 // minimal for the common text-only case.
 type anthropicContentBlock struct {
+	Type      string                `json:"type"`
+	Text      string                `json:"text,omitempty"`
+	ID        string                `json:"id,omitempty"`
+	Name      string                `json:"name,omitempty"`
+	Input     any                   `json:"input,omitempty"`
+	ToolUseID string                `json:"tool_use_id,omitempty"`
+	Content   any                   `json:"content,omitempty"`
+	Source    *anthropicImageSource `json:"source,omitempty"`
+}
+
+// anthropicImageSource is the `source` object of an Anthropic image block.
+// Type is "base64" (with MediaType + Data, from an OpenAI data: URI) or
+// "url" (with URL, from an http(s) image_url).
+type anthropicImageSource struct {
 	Type      string `json:"type"`
-	Text      string `json:"text,omitempty"`
-	ID        string `json:"id,omitempty"`
-	Name      string `json:"name,omitempty"`
-	Input     any    `json:"input,omitempty"`
-	ToolUseID string `json:"tool_use_id,omitempty"`
-	Content   any    `json:"content,omitempty"`
+	MediaType string `json:"media_type,omitempty"`
+	Data      string `json:"data,omitempty"`
+	URL       string `json:"url,omitempty"`
 }
 
 // anthropicTool is the wire shape of one entry in Anthropic /v1/messages

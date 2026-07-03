@@ -22,6 +22,52 @@ func decodeRequestBody(t *testing.T, req *llmtypes.Request) map[string]any {
 	return got
 }
 
+func TestToAnthropicRequest_StructuredContentWithImage(t *testing.T) {
+	got := decodeRequestBody(t, &llmtypes.Request{
+		Model: "claude-x",
+		Messages: []llmtypes.Message{{
+			Role: "user",
+			ContentRaw: json.RawMessage(`[
+				{"type":"text","text":"what is this?"},
+				{"type":"image_url","image_url":{"url":"data:image/png;base64,iVBORw0KGgo="}},
+				{"type":"image_url","image_url":{"url":"https://example.com/a.jpg"}}
+			]`),
+		}},
+	})
+	blocks := got["messages"].([]any)[0].(map[string]any)["content"].([]any)
+	if len(blocks) != 3 {
+		t.Fatalf("content blocks = %d, want 3", len(blocks))
+	}
+	text := blocks[0].(map[string]any)
+	if text["type"] != "text" || text["text"] != "what is this?" {
+		t.Errorf("block 0 = %v, want text/'what is this?'", text)
+	}
+	b64 := blocks[1].(map[string]any)
+	src := b64["source"].(map[string]any)
+	if b64["type"] != "image" || src["type"] != "base64" ||
+		src["media_type"] != "image/png" || src["data"] != "iVBORw0KGgo=" {
+		t.Errorf("block 1 = %v, want base64 image/png source", b64)
+	}
+	urlBlock := blocks[2].(map[string]any)
+	urlSrc := urlBlock["source"].(map[string]any)
+	if urlSrc["type"] != "url" || urlSrc["url"] != "https://example.com/a.jpg" {
+		t.Errorf("block 2 source = %v, want url source", urlSrc)
+	}
+}
+
+func TestToAnthropicRequest_MalformedDataURI(t *testing.T) {
+	_, err := toAnthropicRequest(&llmtypes.Request{
+		Model: "claude-x",
+		Messages: []llmtypes.Message{{
+			Role:       "user",
+			ContentRaw: json.RawMessage(`[{"type":"image_url","image_url":{"url":"data:image/png,notbase64"}}]`),
+		}},
+	}, 32, false)
+	if err == nil {
+		t.Fatal("expected error for non-base64 data URI, got nil")
+	}
+}
+
 func TestToAnthropicRequest_PlainText(t *testing.T) {
 	got := decodeRequestBody(t, &llmtypes.Request{
 		Model:    "claude-x",

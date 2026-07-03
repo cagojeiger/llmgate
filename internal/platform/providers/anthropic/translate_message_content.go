@@ -36,14 +36,29 @@ func buildMessageContent(msg llmtypes.Message) (any, error) {
 	if msg.Role == "tool" {
 		return buildToolResultContent(msg)
 	}
+	// A turn carrying tool_calls owns the assistant tool_use path even when it
+	// also has structured content — otherwise the tool_calls are silently
+	// dropped. buildAssistantContent prepends any structured/text blocks.
+	if hasToolCalls(msg.Extra) {
+		return buildAssistantContent(msg)
+	}
 	// Only a JSON array is OpenAI structured content. A null or omitted
 	// content unmarshals to ContentRaw "null"/empty and must fall through to
-	// the tool_calls/text path — otherwise an assistant tool-call turn
-	// (content:null + tool_calls) silently loses its tool_calls.
+	// the text path.
 	if isStructuredContentArray(msg.ContentRaw) {
 		return buildStructuredContent(msg.ContentRaw)
 	}
 	return buildAssistantContent(msg)
+}
+
+// hasToolCalls reports whether Extra carries a non-empty tool_calls value.
+func hasToolCalls(extra map[string]json.RawMessage) bool {
+	raw, ok := extra["tool_calls"]
+	if !ok {
+		return false
+	}
+	trimmed := bytes.TrimSpace(raw)
+	return len(trimmed) > 0 && !bytes.Equal(trimmed, []byte("null"))
 }
 
 // isStructuredContentArray reports whether raw is an OpenAI content-parts array.
@@ -62,10 +77,24 @@ type openAIContentPart struct {
 	} `json:"image_url"`
 }
 
-// buildStructuredContent translates OpenAI's content-parts array into Anthropic
+// buildStructuredContent translates a standalone OpenAI content-parts array
+// into Anthropic content blocks. An empty array is rejected — Anthropic 400s
+// on empty message content, and a clear local error beats that.
+func buildStructuredContent(raw json.RawMessage) (any, error) {
+	blocks, err := structuredContentBlocks(raw)
+	if err != nil {
+		return nil, err
+	}
+	if len(blocks) == 0 {
+		return nil, errors.New("message content array is empty")
+	}
+	return blocks, nil
+}
+
+// structuredContentBlocks translates OpenAI's content-parts array into Anthropic
 // content blocks: text parts pass through; image_url parts become image blocks
 // (base64 source from a data: URI, url source otherwise).
-func buildStructuredContent(raw json.RawMessage) (any, error) {
+func structuredContentBlocks(raw json.RawMessage) ([]anthropicContentBlock, error) {
 	var parts []openAIContentPart
 	if err := json.Unmarshal(raw, &parts); err != nil {
 		return nil, fmt.Errorf("decode structured message content: %w", err)
@@ -173,7 +202,13 @@ func buildAssistantContent(msg llmtypes.Message) (any, error) {
 	}
 
 	blocks := make([]anthropicContentBlock, 0, len(toolCalls)+1)
-	if strings.TrimSpace(msg.Content) != "" {
+	if isStructuredContentArray(msg.ContentRaw) {
+		leading, err := structuredContentBlocks(msg.ContentRaw)
+		if err != nil {
+			return nil, err
+		}
+		blocks = append(blocks, leading...)
+	} else if strings.TrimSpace(msg.Content) != "" {
 		blocks = append(blocks, anthropicContentBlock{Type: "text", Text: msg.Content})
 	}
 	for _, tc := range toolCalls {

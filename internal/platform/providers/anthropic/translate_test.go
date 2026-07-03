@@ -98,6 +98,46 @@ func TestToAnthropicRequest_ToolRoleArrayContent(t *testing.T) {
 	}
 }
 
+func TestToAnthropicRequest_ArrayContentWithToolCalls(t *testing.T) {
+	// An assistant turn with BOTH structured content and tool_calls must keep
+	// both: content blocks first, then the tool_use block.
+	var m llmtypes.Message
+	if err := json.Unmarshal([]byte(
+		`{"role":"assistant","content":[{"type":"text","text":"let me check"}],"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{}"}}]}`,
+	), &m); err != nil {
+		t.Fatalf("unmarshal message: %v", err)
+	}
+	got := decodeRequestBody(t, &llmtypes.Request{
+		Model:    "claude-x",
+		Messages: []llmtypes.Message{{Role: "user", Content: "hi"}, m},
+	})
+	blocks := got["messages"].([]any)[1].(map[string]any)["content"].([]any)
+	if len(blocks) != 2 {
+		t.Fatalf("blocks = %d, want 2 (text + tool_use)", len(blocks))
+	}
+	if blocks[0].(map[string]any)["type"] != "text" ||
+		blocks[0].(map[string]any)["text"] != "let me check" {
+		t.Errorf("block 0 = %v, want leading text", blocks[0])
+	}
+	if blocks[1].(map[string]any)["type"] != "tool_use" ||
+		blocks[1].(map[string]any)["name"] != "get_weather" {
+		t.Errorf("block 1 = %v, want tool_use/get_weather", blocks[1])
+	}
+}
+
+func TestToAnthropicRequest_EmptyContentArrayRejected(t *testing.T) {
+	_, err := toAnthropicRequest(&llmtypes.Request{
+		Model: "claude-x",
+		Messages: []llmtypes.Message{{
+			Role:       "user",
+			ContentRaw: json.RawMessage(`[]`),
+		}},
+	}, 32, false)
+	if err == nil {
+		t.Fatal("expected error for empty content array, got nil")
+	}
+}
+
 func TestToAnthropicRequest_DataURIMediaTypeParams(t *testing.T) {
 	// A data URI with media-type parameters must yield a bare media_type.
 	got := decodeRequestBody(t, &llmtypes.Request{

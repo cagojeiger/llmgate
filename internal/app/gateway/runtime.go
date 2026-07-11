@@ -136,6 +136,7 @@ func BuildRuntime(ctx context.Context, in RuntimeInput) (*Runtime, error) {
 	handler := httpchat.NewHandler(svc, in.Logger, events, httpchat.HandlerConfig{
 		RequestTimeout:    in.Config.RequestTimeout,
 		StreamIdleTimeout: in.Config.StreamIdleTimeout,
+		MaxRequestBytes:   in.Config.MaxRequestBytes,
 		ServiceVersion:    in.Version,
 		Environment:       in.Config.Environment,
 		LifecycleObserver: metricsRecorder,

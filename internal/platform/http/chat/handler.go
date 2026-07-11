@@ -26,20 +26,24 @@ type ChatService interface {
 }
 
 type Handler struct {
-	service        ChatService
-	log            *slog.Logger
-	events         telemetry.EventSink
-	results        llmresultsink.Sink
-	lifecycle      telemetry.LifecycleObserver
-	serviceVersion string
-	environment    string
-	requestTimeout time.Duration
-	stream         *httpstream.Relay
+	service         ChatService
+	log             *slog.Logger
+	events          telemetry.EventSink
+	results         llmresultsink.Sink
+	lifecycle       telemetry.LifecycleObserver
+	serviceVersion  string
+	environment     string
+	requestTimeout  time.Duration
+	maxRequestBytes int64
+	stream          *httpstream.Relay
 }
 
 type HandlerConfig struct {
 	RequestTimeout    time.Duration
 	StreamIdleTimeout time.Duration
+	// MaxRequestBytes caps the request body; <= 0 falls back to the
+	// image-sized default.
+	MaxRequestBytes   int64
 	ServiceVersion    string
 	Environment       string
 	LifecycleObserver telemetry.LifecycleObserver
@@ -77,16 +81,21 @@ func NewHandler(service ChatService, log *slog.Logger, events telemetry.EventSin
 	if environment == "" {
 		environment = "local"
 	}
+	maxRequestBytes := cfg.MaxRequestBytes
+	if maxRequestBytes <= 0 {
+		maxRequestBytes = defaultMaxChatRequestBytes
+	}
 	return &Handler{
-		service:        service,
-		log:            log,
-		events:         events,
-		results:        results,
-		lifecycle:      lifecycle,
-		serviceVersion: serviceVersion,
-		environment:    environment,
-		requestTimeout: cfg.RequestTimeout,
-		stream:         httpstream.NewRelay(log, cfg.StreamIdleTimeout),
+		service:         service,
+		log:             log,
+		events:          events,
+		results:         results,
+		lifecycle:       lifecycle,
+		serviceVersion:  serviceVersion,
+		environment:     environment,
+		requestTimeout:  cfg.RequestTimeout,
+		maxRequestBytes: maxRequestBytes,
+		stream:          httpstream.NewRelay(log, cfg.StreamIdleTimeout),
 	}
 }
 
@@ -153,7 +162,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req, requestBytes, err := decodeChatRequest(w, r)
+	req, requestBytes, err := decodeChatRequest(w, r, h.maxRequestBytes)
 	if err != nil {
 		adoptError(rec, err)
 		response.WriteError(w, err)

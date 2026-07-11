@@ -28,6 +28,7 @@ func resetEnv(t *testing.T) {
 		"LLMGATE_COMPLETE_TIMEOUT",
 		"LLMGATE_STREAM_IDLE_TIMEOUT",
 		"LLMGATE_METRICS_ENABLED",
+		"LLMGATE_MAX_REQUEST_BYTES",
 		"LLMGATE_LLMRESULT_NATS_URL",
 		"LLMGATE_LLMRESULT_NATS_SUBJECT",
 		"LLMGATE_LLMRESULT_NATS_USER",
@@ -481,5 +482,43 @@ func TestLoadServer_RejectsUnknownLogLevel(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "LLMGATE_LOG_LEVEL") {
 		t.Errorf("err = %v, want mention of the failing key", err)
+	}
+}
+
+func TestLoadServer_MaxRequestBytesDefault(t *testing.T) {
+	resetEnv(t)
+
+	cfg, err := LoadServer()
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if cfg.MaxRequestBytes != 10<<20 {
+		t.Errorf("MaxRequestBytes = %d, want %d (10 MiB)", cfg.MaxRequestBytes, 10<<20)
+	}
+}
+
+func TestLoadServer_MaxRequestBytesOverride(t *testing.T) {
+	resetEnv(t)
+	t.Setenv("LLMGATE_MAX_REQUEST_BYTES", "2097152")
+
+	cfg, err := LoadServer()
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if cfg.MaxRequestBytes != 2097152 {
+		t.Errorf("MaxRequestBytes = %d, want 2097152", cfg.MaxRequestBytes)
+	}
+}
+
+func TestLoadServer_MaxRequestBytesRejectsNonPositive(t *testing.T) {
+	resetEnv(t)
+	t.Setenv("LLMGATE_MAX_REQUEST_BYTES", "0")
+
+	_, err := LoadServer()
+	if err == nil {
+		t.Fatal("LoadServer: want error for zero LLMGATE_MAX_REQUEST_BYTES")
+	}
+	if !strings.Contains(err.Error(), "LLMGATE_MAX_REQUEST_BYTES") {
+		t.Errorf("err = %v, want max request bytes key", err)
 	}
 }

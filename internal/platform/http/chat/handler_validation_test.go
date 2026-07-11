@@ -94,3 +94,35 @@ func TestServeHTTP_EmptyMessages_AuditStampedBadRequest(t *testing.T) {
 		t.Errorf("PolicyResult = %q, want anything but allowed", got.PolicyResult)
 	}
 }
+
+func TestHandler_RejectsBodyOverConfiguredCap(t *testing.T) {
+	svc := &trackingService{}
+	h := newHandlerHarness(svc, HandlerConfig{MaxRequestBytes: 16})
+
+	w := h.serve(chatBody) // chatBody is well over 16 bytes
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body = %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "LLMGATE_MAX_REQUEST_BYTES") {
+		t.Errorf("body = %s, want cap hint", w.Body.String())
+	}
+	if svc.completeCalls != 0 || svc.streamCalls != 0 {
+		t.Errorf("service reached (%d/%d), want short-circuit at decode", svc.completeCalls, svc.streamCalls)
+	}
+}
+
+func TestHandler_DefaultCapAcceptsMultiMBBody(t *testing.T) {
+	// The default cap must admit image-sized bodies (the old 1 MiB cap
+	// rejected them): a ~3 MB message must reach the service.
+	r := okFakeService()
+	h := newHandlerHarness(r, HandlerConfig{})
+
+	big := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"` +
+		strings.Repeat("a", 3<<20) + `"}]}`
+	w := h.serve(big)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", w.Code, w.Body.String()[:min(200, w.Body.Len())])
+	}
+}

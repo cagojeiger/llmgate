@@ -99,3 +99,15 @@ func orDefault(key, def string) string {
 	}
 	return def
 }
+
+func positiveInt64(key, def string) (int64, error) {
+	raw := orDefault(key, def)
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be an integer, got %q: %w", key, raw, err)
+	}
+	if n <= 0 {
+		return 0, fmt.Errorf("%s must be > 0, got %q", key, raw)
+	}
+	return n, nil
+}

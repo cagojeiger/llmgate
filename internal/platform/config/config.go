@@ -32,7 +32,11 @@ type Server struct {
 	RequestTimeout    time.Duration
 	CompleteTimeout   time.Duration
 	StreamIdleTimeout time.Duration
-	MetricsEnabled    bool
+	// MaxRequestBytes caps the chat request body. Default 10 MiB — sized for
+	// base64 image content (a phone photo is 2-5 MB, +33% base64), which the
+	// old 1 MiB cap rejected at the gate.
+	MaxRequestBytes int64
+	MetricsEnabled  bool
 
 	// Finalized LLM result event publishing. Empty NATS URL disables remote
 	// publishing (and the handler skips building result events entirely).
@@ -97,6 +101,10 @@ func LoadServer() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	maxRequestBytes, err := positiveInt64("LLMGATE_MAX_REQUEST_BYTES", "10485760")
+	if err != nil {
+		return nil, err
+	}
 	llmResultQueueSize, err := nonNegativeInt("LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE", "1000")
 	if err != nil {
 		return nil, err
@@ -135,6 +143,7 @@ func LoadServer() (*Server, error) {
 		RequestTimeout:              requestTimeout,
 		CompleteTimeout:             completeTimeout,
 		StreamIdleTimeout:           streamIdleTimeout,
+		MaxRequestBytes:             maxRequestBytes,
 		MetricsEnabled:              metricsEnabled,
 		LLMResultNATSURL:            orDefault("LLMGATE_LLMRESULT_NATS_URL", ""),
 		LLMResultNATSSubject:        orDefault("LLMGATE_LLMRESULT_NATS_SUBJECT", "llmgate.llmresult.finalized"),

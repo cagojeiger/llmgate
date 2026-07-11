@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	llmresultsink "llmgate/internal/domain/llmresult/sink"
 	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/llmtypes/fake"
 	"llmgate/internal/domain/routing"
@@ -141,5 +142,22 @@ func TestHandler_LLMResult_StreamErrorOmitsPartialResponse(t *testing.T) {
 	}
 	if got.Response != nil {
 		t.Fatalf("Response = %+v, want nil for incomplete stream", got.Response)
+	}
+}
+
+func TestHandler_LLMResult_NopSinkSkipsEventBuild(t *testing.T) {
+	// A no-op ResultSink must leave the handler with a nil results sink so
+	// the finish defer never pays the FromTelemetry deep-clone, and requests
+	// still complete normally.
+	r := okFakeService()
+	h := newHandlerHarness(r, HandlerConfig{ResultSink: llmresultsink.NopSink{}})
+
+	if h.handler.results != nil {
+		t.Fatal("results = non-nil, want nil for NopSink (event build must be skipped)")
+	}
+
+	w := h.serve(chatBody)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", w.Code, w.Body.String())
 	}
 }

@@ -32,6 +32,7 @@ func resetEnv(t *testing.T) {
 		"LLMGATE_LLMRESULT_NATS_SUBJECT",
 		"LLMGATE_LLMRESULT_NATS_USER",
 		"LLMGATE_LLMRESULT_NATS_PASSWORD",
+		"LLMGATE_LLMRESULT_NATS_ALLOW_PLAINTEXT",
 		"LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE",
 		"LLMGATE_LLMRESULT_ASYNC_BATCH_SIZE",
 		"LLMGATE_LLMRESULT_ASYNC_FLUSH_INTERVAL",
@@ -309,12 +310,31 @@ func TestLoadServer_RejectsInvalidMetricsEnabled(t *testing.T) {
 	}
 }
 
-func TestLoadServer_AllowsInternalNATSOutsideLocal(t *testing.T) {
+func TestLoadServer_RejectsPlaintextNATSOutsideLocal(t *testing.T) {
+	// Result events carry full prompt/completion content; plaintext nats://
+	// outside local must be an explicit opt-in, not the default.
 	resetEnv(t)
 	t.Setenv("LLMGATE_ENVIRONMENT", "prod")
 	t.Setenv("LLMGATE_LLMRESULT_NATS_URL", "nats://nats:4222")
 	t.Setenv("LLMGATE_LLMRESULT_NATS_USER", "llmgate")
 	t.Setenv("LLMGATE_LLMRESULT_NATS_PASSWORD", "s3cret")
+
+	_, err := LoadServer()
+	if err == nil {
+		t.Fatal("LoadServer: want error for plaintext nats:// outside local")
+	}
+	if !strings.Contains(err.Error(), "LLMGATE_LLMRESULT_NATS_ALLOW_PLAINTEXT") {
+		t.Errorf("err = %v, want opt-in hint", err)
+	}
+}
+
+func TestLoadServer_AllowsPlaintextNATSWithOptIn(t *testing.T) {
+	resetEnv(t)
+	t.Setenv("LLMGATE_ENVIRONMENT", "prod")
+	t.Setenv("LLMGATE_LLMRESULT_NATS_URL", "nats://nats:4222")
+	t.Setenv("LLMGATE_LLMRESULT_NATS_USER", "llmgate")
+	t.Setenv("LLMGATE_LLMRESULT_NATS_PASSWORD", "s3cret")
+	t.Setenv("LLMGATE_LLMRESULT_NATS_ALLOW_PLAINTEXT", "true")
 
 	cfg, err := LoadServer()
 	if err != nil {
@@ -322,6 +342,18 @@ func TestLoadServer_AllowsInternalNATSOutsideLocal(t *testing.T) {
 	}
 	if cfg.LLMResultNATSURL != "nats://nats:4222" {
 		t.Errorf("LLMResultNATSURL = %q", cfg.LLMResultNATSURL)
+	}
+	if !cfg.LLMResultNATSAllowPlaintext {
+		t.Error("LLMResultNATSAllowPlaintext = false, want true")
+	}
+}
+
+func TestLoadServer_AllowsPlaintextNATSInLocal(t *testing.T) {
+	resetEnv(t)
+	t.Setenv("LLMGATE_LLMRESULT_NATS_URL", "nats://localhost:4222")
+
+	if _, err := LoadServer(); err != nil {
+		t.Fatalf("LoadServer: %v (local must not require the opt-in)", err)
 	}
 }
 

@@ -31,7 +31,7 @@ jobs:
       action-count: ${{ steps.summary.outputs.action_count }}
       warning-count: ${{ steps.summary.outputs.warning_count }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v6
         with:
@@ -90,7 +90,7 @@ jobs:
       pr-number: ${{ steps.pr.outputs.pull-request-number }}
       pr-url: ${{ steps.pr.outputs.pull-request-url }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v6
         with:

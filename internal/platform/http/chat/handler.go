@@ -54,7 +54,16 @@ func NewHandler(service ChatService, log *slog.Logger, events telemetry.EventSin
 		events = telemetry.NopSink{}
 	}
 	events = telemetry.NewRecoveringSink(events, log)
-	results := llmresultsink.NewRecoveringSink(cfg.ResultSink, log)
+	// A nil or no-op ResultSink leaves h.results nil so the finish defer
+	// skips building result events entirely — FromTelemetry deep-clones the
+	// full request/response payloads, which for image-sized bodies is real
+	// work to construct just to drop.
+	var results llmresultsink.Sink
+	if cfg.ResultSink != nil {
+		if _, nop := cfg.ResultSink.(llmresultsink.NopSink); !nop {
+			results = llmresultsink.NewRecoveringSink(cfg.ResultSink, log)
+		}
+	}
 	lifecycle := cfg.LifecycleObserver
 	if lifecycle == nil {
 		lifecycle = telemetry.NopLifecycleObserver{}

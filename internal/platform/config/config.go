@@ -35,15 +35,18 @@ type Server struct {
 	MetricsEnabled    bool
 
 	// Finalized LLM result event publishing. Empty NATS URL disables remote
-	// publishing; the server still builds result events and drops them through
-	// the no-op sink.
-	LLMResultNATSURL        string
-	LLMResultNATSSubject    string
-	LLMResultNATSUser       string
-	LLMResultNATSPassword   string
-	LLMResultAsyncQueueSize int
-	LLMResultAsyncBatchSize int
-	LLMResultAsyncFlush     time.Duration
+	// publishing (and the handler skips building result events entirely).
+	LLMResultNATSURL      string
+	LLMResultNATSSubject  string
+	LLMResultNATSUser     string
+	LLMResultNATSPassword string
+	// LLMResultNATSAllowPlaintext permits nats:// (no TLS) outside local.
+	// Result events carry full prompt and completion content, so plaintext
+	// transport is opt-in even for an in-cluster broker.
+	LLMResultNATSAllowPlaintext bool
+	LLMResultAsyncQueueSize     int
+	LLMResultAsyncBatchSize     int
+	LLMResultAsyncFlush         time.Duration
 	// LLMResultAsyncEmitTimeout caps one NATS publish from the async
 	// worker so a stuck broker cannot freeze the drain loop.
 	LLMResultAsyncEmitTimeout time.Duration
@@ -114,30 +117,35 @@ func LoadServer() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	llmResultAllowPlaintext, err := boolValue("LLMGATE_LLMRESULT_NATS_ALLOW_PLAINTEXT", "false")
+	if err != nil {
+		return nil, err
+	}
 
 	cfg := &Server{
-		Addr:                       orDefault("LLMGATE_ADDR", ":8080"),
-		Environment:                orDefault("LLMGATE_ENVIRONMENT", "local"),
-		ShutdownDrainTimeout:       drainTimeout,
-		LogLevel:                   logLevel,
-		FallbackOn:                 parseCSV("LLMGATE_FALLBACK_ON", "rate_limit,upstream,timeout,network"),
-		CircuitFailures:            circuitFailures,
-		CircuitOpen:                circuitOpen,
-		CircuitMaxOpen:             circuitMaxOpen,
-		CircuitJitter:              circuitJitter,
-		RequestTimeout:             requestTimeout,
-		CompleteTimeout:            completeTimeout,
-		StreamIdleTimeout:          streamIdleTimeout,
-		MetricsEnabled:             metricsEnabled,
-		LLMResultNATSURL:           orDefault("LLMGATE_LLMRESULT_NATS_URL", ""),
-		LLMResultNATSSubject:       orDefault("LLMGATE_LLMRESULT_NATS_SUBJECT", "llmgate.llmresult.finalized"),
-		LLMResultNATSUser:          orDefault("LLMGATE_LLMRESULT_NATS_USER", ""),
-		LLMResultNATSPassword:      orDefault("LLMGATE_LLMRESULT_NATS_PASSWORD", ""),
-		LLMResultAsyncQueueSize:    llmResultQueueSize,
-		LLMResultAsyncBatchSize:    llmResultBatchSize,
-		LLMResultAsyncFlush:        llmResultFlush,
-		LLMResultAsyncEmitTimeout:  llmResultEmitTimeout,
-		LLMResultAsyncCloseTimeout: llmResultCloseTimeout,
+		Addr:                        orDefault("LLMGATE_ADDR", ":8080"),
+		Environment:                 orDefault("LLMGATE_ENVIRONMENT", "local"),
+		ShutdownDrainTimeout:        drainTimeout,
+		LogLevel:                    logLevel,
+		FallbackOn:                  parseCSV("LLMGATE_FALLBACK_ON", "rate_limit,upstream,timeout,network"),
+		CircuitFailures:             circuitFailures,
+		CircuitOpen:                 circuitOpen,
+		CircuitMaxOpen:              circuitMaxOpen,
+		CircuitJitter:               circuitJitter,
+		RequestTimeout:              requestTimeout,
+		CompleteTimeout:             completeTimeout,
+		StreamIdleTimeout:           streamIdleTimeout,
+		MetricsEnabled:              metricsEnabled,
+		LLMResultNATSURL:            orDefault("LLMGATE_LLMRESULT_NATS_URL", ""),
+		LLMResultNATSSubject:        orDefault("LLMGATE_LLMRESULT_NATS_SUBJECT", "llmgate.llmresult.finalized"),
+		LLMResultNATSUser:           orDefault("LLMGATE_LLMRESULT_NATS_USER", ""),
+		LLMResultNATSPassword:       orDefault("LLMGATE_LLMRESULT_NATS_PASSWORD", ""),
+		LLMResultNATSAllowPlaintext: llmResultAllowPlaintext,
+		LLMResultAsyncQueueSize:     llmResultQueueSize,
+		LLMResultAsyncBatchSize:     llmResultBatchSize,
+		LLMResultAsyncFlush:         llmResultFlush,
+		LLMResultAsyncEmitTimeout:   llmResultEmitTimeout,
+		LLMResultAsyncCloseTimeout:  llmResultCloseTimeout,
 	}
 	if err := validateSecurityDefaults(cfg); err != nil {
 		return nil, err
@@ -159,8 +167,17 @@ func validateSecurityDefaults(cfg *Server) error {
 	if err != nil {
 		return fmt.Errorf("LLMGATE_LLMRESULT_NATS_URL must be a valid URL: %w", err)
 	}
-	if !strings.EqualFold(u.Scheme, "nats") && !strings.EqualFold(u.Scheme, "tls") {
+	switch {
+	case strings.EqualFold(u.Scheme, "tls"):
+		return nil
+	case strings.EqualFold(u.Scheme, "nats"):
+		// Result events carry full prompt/completion content, so plaintext
+		// NATS outside local needs an explicit opt-in (in-cluster brokers).
+		if cfg.LLMResultNATSAllowPlaintext {
+			return nil
+		}
+		return errors.New("LLMGATE_LLMRESULT_NATS_URL uses plaintext nats:// outside local; use tls:// or set LLMGATE_LLMRESULT_NATS_ALLOW_PLAINTEXT=true for an in-cluster broker")
+	default:
 		return errors.New("LLMGATE_LLMRESULT_NATS_URL must use nats:// or tls://")
 	}
-	return nil
 }

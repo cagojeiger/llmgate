@@ -188,6 +188,62 @@ func TestToAnthropicRequest_MalformedDataURI(t *testing.T) {
 	}
 }
 
+func TestToAnthropicRequest_DropsOpenAIOnlyKeys(t *testing.T) {
+	// OpenAI-only params must not reach the Anthropic wire (a strict upstream
+	// 400s on them, and a 400 is not fallback-eligible), while anthropic-native
+	// extras like top_k keep passing through.
+	got := decodeRequestBody(t, &llmtypes.Request{
+		Model:    "claude-x",
+		Messages: []llmtypes.Message{{Role: "user", Content: "hi"}},
+		Extra: map[string]json.RawMessage{
+			"frequency_penalty": json.RawMessage(`0.5`),
+			"response_format":   json.RawMessage(`{"type":"json_object"}`),
+			"metadata":          json.RawMessage(`{"team":"infra"}`),
+			"logit_bias":        json.RawMessage(`{"1234":5}`),
+			"top_k":             json.RawMessage(`40`),
+		},
+	})
+	for _, key := range []string{"frequency_penalty", "response_format", "metadata", "logit_bias"} {
+		if _, leaked := got[key]; leaked {
+			t.Errorf("%s leaked onto the anthropic wire", key)
+		}
+	}
+	if got["top_k"] != float64(40) {
+		t.Errorf("top_k = %v, want 40 (anthropic-native extras must pass through)", got["top_k"])
+	}
+}
+
+func TestToAnthropicRequest_MaxCompletionTokens(t *testing.T) {
+	// Newer OpenAI SDKs send max_completion_tokens; it must become max_tokens
+	// instead of leaking as an unknown param.
+	got := decodeRequestBody(t, &llmtypes.Request{
+		Model:    "claude-x",
+		Messages: []llmtypes.Message{{Role: "user", Content: "hi"}},
+		Extra: map[string]json.RawMessage{
+			"max_completion_tokens": json.RawMessage(`123`),
+		},
+	})
+	if got["max_tokens"] != float64(123) {
+		t.Errorf("max_tokens = %v, want 123", got["max_tokens"])
+	}
+	if _, leaked := got["max_completion_tokens"]; leaked {
+		t.Error("max_completion_tokens leaked onto the anthropic wire")
+	}
+
+	// An explicit typed max_tokens wins over max_completion_tokens.
+	got = decodeRequestBody(t, &llmtypes.Request{
+		Model:     "claude-x",
+		MaxTokens: 77,
+		Messages:  []llmtypes.Message{{Role: "user", Content: "hi"}},
+		Extra: map[string]json.RawMessage{
+			"max_completion_tokens": json.RawMessage(`123`),
+		},
+	})
+	if got["max_tokens"] != float64(77) {
+		t.Errorf("max_tokens = %v, want 77 (typed field wins)", got["max_tokens"])
+	}
+}
+
 func TestToAnthropicRequest_PlainText(t *testing.T) {
 	got := decodeRequestBody(t, &llmtypes.Request{
 		Model:    "claude-x",

@@ -1,0 +1,10 @@
+# Kimi K3 (2x usage) via OpenCode Go
+# source: https://models.dev/api.json provider=opencode-go
+# context: 1,048,576 tokens / max output: 131,072 tokens
+# capabilities: reasoning=yes, tool_call=yes, input=text,image,video, output=text
+id: kimi-k3
+vendor: opencode
+protocol: openai
+base_url: https://opencode.ai/zen/go/v1
+auth_env: LLMGATE_OPENCODE_API_KEY
+auth_scheme: bearer

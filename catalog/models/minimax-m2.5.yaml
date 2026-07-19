@@ -1,0 +1,10 @@
+# MiniMax-M2.5 via OpenCode Go (deprecated)
+# source: https://models.dev/api.json provider=opencode-go
+# context: 204,800 tokens / max output: 65,536 tokens
+# capabilities: reasoning=yes, tool_call=yes, input=text, output=text
+id: minimax-m2.5
+vendor: opencode
+protocol: anthropic
+base_url: https://opencode.ai/zen/go/v1
+auth_env: LLMGATE_OPENCODE_API_KEY
+auth_scheme: x-api-key

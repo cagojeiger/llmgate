@@ -1,5 +1,5 @@
 event: message_start
-data: {"type":"message_start","message":{"id":"068c3096694853a7787dc0990e4013c1","type":"message","role":"assistant","content":[],"model":"MiniMax-M2.7","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":53,"output_tokens":0}}}
+data: {"type":"message_start","message":{"id":"06b3b60ed930abaa996f34df6cd7dc96","type":"message","role":"assistant","content":[],"model":"MiniMax-M2.7","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":53,"output_tokens":0}}}
 
 event: ping
 data: {"type":"ping"}
@@ -11,16 +11,25 @@ event: content_block_delta
 data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"The user"}}
 
 event: content_block_delta
-data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" asks: \"Count 1 to 5, one number per line.\" So we need to output numbers 1,2,3,4,5 each on its own line. That's trivial. There's"}}
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" says \"Count 1 to 5, one number per line.\" So we need to output numbers 1, 2, 3, 4, 5 each on its own line. This is"}}
 
 event: content_block_delta
-data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" no policy violation. It's a simple request. Provide output exactly like:\n\n1\n2\n3\n4\n5\n\nWe need to follow"}}
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" a simple request. There's no policy violation. We just respond with the numbers. There's no need for additional text, but"}}
 
 event: content_block_delta
-data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" the guidelines: no extra text, just the numbers. Usually, it's fine. Provide as plain text.\n\nThus answer."}}
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" we can comply. The user is not requesting anything disallowed. We'll just"}}
 
 event: content_block_delta
-data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"c4c9e971225f46cca5e73fe36c100fe3e69b4f1750b45668e91b6636a9744594"}}
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" produce:\n\n1\n2\n3\n4\n5\n\nMake sure each on separate line. Possibly include no extra text"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":". Usually answer as requested. Should we include any extra context? The request is just to count. So output the numbers each"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" on its own line."}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"aabb0096ccc0d44f970e1e62ff008e0cd0702767b8748cc30a0bf2d4263b3d8e"}}
 
 event: content_block_stop
 data: {"type":"content_block_stop","index":0}
@@ -29,16 +38,13 @@ event: content_block_start
 data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}
 
 event: content_block_delta
-data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"1\n2\n"}}
-
-event: content_block_delta
-data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"3\n4\n5"}}
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"1  \n2  \n3  \n4  \n5"}}
 
 event: content_block_stop
 data: {"type":"content_block_stop","index":1}
 
 event: message_delta
-data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":53,"output_tokens":108}}
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":53,"output_tokens":149}}
 
 event: message_stop
 data: {"type":"message_stop"}

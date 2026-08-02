@@ -1,3 +1,0 @@
-alias: local-dense
-chain:
-  - google/gemma-4-31b-it

@@ -1,10 +1,8 @@
 # 작업 — 코드 작성 / 리팩터링 / 테스트 작성 / 문서 작성 / 로그 분석 / 후보 생성.
-# 기준: 코드 품질, 작성 능력, 실작업 수행력.
+# 기준: 코드 품질, 작성 능력, 실작업 수행력. (OpenCode Go 전용)
 alias: worker
 chain:
   - kimi-k2.7-code
   - mimo-v2.5-pro
   - qwen3.7-plus
-  - qwen3.6-plus
-  - kimi-k2.6
   - minimax-m3

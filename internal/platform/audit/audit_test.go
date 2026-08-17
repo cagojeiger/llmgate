@@ -263,10 +263,12 @@ func TestNaming_UniqueAcrossSameSecond(t *testing.T) {
 
 func TestFileSink_RecoverOrphans(t *testing.T) {
 	dir := t.TempDir()
-	// simulate a crash: a file left in active/ by a previous process.
 	activeDir := filepath.Join(dir, "active")
 	mustMkdir(t, activeDir)
-	writeFile(t, filepath.Join(activeDir, activeFileName), `{"request_id":"orphan"}`+"\n")
+	// A previous process left two files in active/: one with records
+	// (crash before rotation) and one empty (opened, never written).
+	writeFile(t, filepath.Join(activeDir, sealedName("oldinst", time.Now())), `{"request_id":"orphan"}`+"\n")
+	writeFile(t, filepath.Join(activeDir, sealedName("oldinst", time.Now())), "")
 
 	s, err := NewFileSink(Config{Dir: dir}, nil, "", nil)
 	if err != nil {
@@ -277,8 +279,9 @@ func TestFileSink_RecoverOrphans(t *testing.T) {
 	if got := len(listFiles(s.dirs.active)); got != 0 {
 		t.Fatalf("active files after recover = %d, want 0", got)
 	}
+	// The written orphan is recovered to pending; the empty one is dropped.
 	if got := len(listFiles(s.dirs.pending)); got != 1 {
-		t.Fatalf("pending files after recover = %d, want 1 (orphan sealed)", got)
+		t.Fatalf("pending files after recover = %d, want 1 (empty orphan dropped)", got)
 	}
 }
 
@@ -441,6 +444,19 @@ func TestConfig_RotateIntervalMustDivide24h(t *testing.T) {
 		t.Fatalf("10m should be accepted: %v", err)
 	}
 	_ = s.Close()
+}
+
+// The active file name is instance-scoped and fixed at open, so two
+// processes sharing a dir never collide and a failed seal-rename cannot
+// mix buckets.
+func TestWriter_ActiveFileIsInstanceScoped(t *testing.T) {
+	d := newDirs(t)
+	w := newWriter(d, "instA", 0, time.Hour, slogDiscard())
+	w.appendLine(context.Background(), []byte("{}\n"))
+	files := listFiles(d.active)
+	if len(files) != 1 || !strings.HasPrefix(files[0].name, "instA-") {
+		t.Fatalf("active file should be instance-scoped (instA-…), got %v", files)
+	}
 }
 
 // helpers

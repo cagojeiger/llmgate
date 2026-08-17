@@ -133,7 +133,7 @@ func LoadServer() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	auditRotateInterval, err := positiveDuration("LLMGATE_AUDIT_ROTATE_INTERVAL", "1h")
+	auditRotateInterval, err := positiveDuration("LLMGATE_AUDIT_ROTATE_INTERVAL", "10m")
 	if err != nil {
 		return nil, err
 	}

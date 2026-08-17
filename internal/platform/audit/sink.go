@@ -69,7 +69,7 @@ func NewFileSink(cfg Config, store ObjectStore, prefix string, log *slog.Logger)
 		}
 	}
 
-	w := newWriter(d, instanceID(), cfg.RotateMaxBytes, log)
+	w := newWriter(d, instanceID(), cfg.RotateMaxBytes, cfg.RotateInterval, log)
 	w.recoverOrphans()
 
 	s := &FileSink{

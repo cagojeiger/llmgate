@@ -59,7 +59,7 @@ type Config struct {
 
 func (c Config) withDefaults() Config {
 	if c.RotateInterval <= 0 {
-		c.RotateInterval = time.Hour // one clock-aligned file per hour
+		c.RotateInterval = 10 * time.Minute // clock-aligned 10-minute buckets
 	}
 	if c.RotateMaxBytes == 0 {
 		c.RotateMaxBytes = 128 << 20 // 128 MiB
@@ -96,6 +96,14 @@ func (c Config) validate() error {
 	case CompressionGzip, CompressionNone:
 	default:
 		return fmt.Errorf("audit: Compression %q must be %q or %q", c.Compression, CompressionGzip, CompressionNone)
+	}
+	// Buckets are UTC clock-aligned by truncating to RotateInterval, which
+	// anchors at the UTC epoch (a day boundary). Only an interval that
+	// divides 24h evenly aligns to clean daily/hourly boundaries; an odd
+	// interval (e.g. 7m) would drift across hours. Enforce it so the
+	// dt/hour partition and the file's window always agree.
+	if c.RotateInterval > 0 && 24*time.Hour%c.RotateInterval != 0 {
+		return fmt.Errorf("audit: RotateInterval (%s) must divide 24h evenly for clock-aligned buckets (e.g. 1m, 5m, 10m, 15m, 30m, 1h, 2h, 6h, 12h)", c.RotateInterval)
 	}
 	return nil
 }

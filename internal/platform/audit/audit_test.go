@@ -288,7 +288,7 @@ func TestWriter_RotateSealsActiveAndSkipsEmpty(t *testing.T) {
 	for _, p := range []string{d.active, d.pending, d.uploaded} {
 		mustMkdir(t, p)
 	}
-	w := newWriter(d, "inst", 0, slogDiscard())
+	w := newWriter(d, "inst", 0, time.Hour, slogDiscard())
 	w.appendLine(context.Background(), []byte(`{"a":1}`+"\n"))
 	w.rotate()
 	if got := len(listFiles(d.pending)); got != 1 {
@@ -394,6 +394,53 @@ func TestShipper_UploadPassParallel(t *testing.T) {
 		t.Fatalf("compressed should drain to uploaded: compressed=%d uploaded=%d",
 			len(listFiles(d.compressed)), len(listFiles(d.uploaded)))
 	}
+}
+
+func TestBucketStartOf_UTC(t *testing.T) {
+	now := time.Date(2026, 8, 17, 10, 37, 12, 0, time.UTC)
+	if got := bucketStartOf(now, 10*time.Minute); !got.Equal(time.Date(2026, 8, 17, 10, 30, 0, 0, time.UTC)) {
+		t.Fatalf("10m bucket start = %v, want 10:30 UTC", got)
+	}
+	if got := bucketStartOf(now, time.Hour); !got.Equal(time.Date(2026, 8, 17, 10, 0, 0, 0, time.UTC)) {
+		t.Fatalf("1h bucket start = %v, want 10:00 UTC", got)
+	}
+	// a time in another zone is normalised to UTC before truncating
+	kst := time.FixedZone("KST", 9*3600)
+	got := bucketStartOf(time.Date(2026, 8, 17, 19, 37, 0, 0, kst), time.Hour) // 10:37 UTC
+	if !got.Equal(time.Date(2026, 8, 17, 10, 0, 0, 0, time.UTC)) {
+		t.Fatalf("cross-zone bucket = %v, want 10:00 UTC", got)
+	}
+}
+
+// A file that opens mid-bucket and seals at the next boundary must be
+// labelled by the bucket START (its data window), not the seal instant.
+func TestWriter_LabelsByBucketStart(t *testing.T) {
+	d := newDirs(t)
+	w := newWriter(d, "inst", 0, time.Hour, slogDiscard())
+	w.appendLine(context.Background(), []byte(`{"a":1}`+"\n"))
+	w.rotate()
+	files := listFiles(d.pending)
+	if len(files) != 1 {
+		t.Fatalf("want 1 sealed file, got %d", len(files))
+	}
+	got, ok := parseSealTime(files[0].name)
+	if !ok {
+		t.Fatalf("parse seal time from %q failed", files[0].name)
+	}
+	if want := time.Now().UTC().Truncate(time.Hour); !got.Equal(want) {
+		t.Fatalf("label = %v, want the bucket start %v (not the seal instant)", got, want)
+	}
+}
+
+func TestConfig_RotateIntervalMustDivide24h(t *testing.T) {
+	if _, err := NewFileSink(Config{Dir: t.TempDir(), RotateInterval: 7 * time.Minute}, nil, "", nil); err == nil {
+		t.Fatal("7m must be rejected — it does not divide 24h evenly")
+	}
+	s, err := NewFileSink(Config{Dir: t.TempDir(), RotateInterval: 10 * time.Minute}, nil, "", nil)
+	if err != nil {
+		t.Fatalf("10m should be accepted: %v", err)
+	}
+	_ = s.Close()
 }
 
 // helpers

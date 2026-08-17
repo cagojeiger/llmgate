@@ -1,0 +1,8 @@
+# Qwen3-ASR speech-to-text. Runs as a local, unauthenticated STT server on the
+# pod network, so no auth_env / auth_scheme — the transcription api allows an
+# upstream with no credentials.
+id: qwen-asr
+vendor: qwen
+api: transcription
+protocol: openai
+base_url: http://127.0.0.1:8001

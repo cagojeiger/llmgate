@@ -38,8 +38,10 @@ func TestBuildRouterInputs_MissingAuthDoesNotBlockOtherModels(t *testing.T) {
 		Aliases: map[string]*catalog.Alias{},
 	}
 
-	models, aliases, err := buildRouterInputs(cat, map[llmtypes.Protocol]providerFactory{
-		"openai": openaiFactory,
+	models, aliases, _, err := buildRouterInputs(cat, routerFactories{
+		chat: map[llmtypes.Protocol]providerFactory{
+			"openai": openaiFactory,
+		},
 	})
 	if err != nil {
 		t.Fatalf("buildRouterInputs() error = %v", err)

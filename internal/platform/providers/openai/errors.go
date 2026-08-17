@@ -17,6 +17,13 @@ import (
 // `content_filter` — OpenAI gateways encode policy blocks via the
 // envelope, not via a dedicated status code).
 func (c *Client) classify(status int, body []byte, retryAfterHeader string) *llmtypes.Error {
+	return classifyError(c.cfg.Name, status, body, retryAfterHeader)
+}
+
+// classifyError is the provider-name-parameterized form of classify so
+// adapters that are not the chat *Client (e.g. the transcription client)
+// reuse the exact same status + envelope mapping.
+func classifyError(name string, status int, body []byte, retryAfterHeader string) *llmtypes.Error {
 	env := parseErrorEnvelope(body)
 	message := env.Message
 	if message == "" {
@@ -32,7 +39,7 @@ func (c *Client) classify(status int, body []byte, retryAfterHeader string) *llm
 
 	return &llmtypes.Error{
 		Kind:       kind,
-		Provider:   c.cfg.Name,
+		Provider:   name,
 		Message:    upstream.PublicProviderMessage(kind, message),
 		StatusCode: status,
 		RetryAfter: upstream.ParseRetryAfter(retryAfterHeader),

@@ -21,6 +21,15 @@ func validateModel(m *Model) error {
 	if !m.Protocol.Valid() {
 		return fmt.Errorf("model %q: protocol %q must be one of %s", m.ID, m.Protocol, llmtypes.JoinProtocols("|"))
 	}
+	// api defaults to chat so pre-existing model files (which never carried the
+	// field) keep validating unchanged. Mutating the pointer here means the
+	// resolved value is what routing/gateway later read.
+	if m.API == "" {
+		m.API = APIChat
+	}
+	if !m.API.Valid() {
+		return fmt.Errorf("model %q: api %q must be one of %s", m.ID, m.API, JoinAPIs("|"))
+	}
 	if m.BaseURL == "" {
 		return fmt.Errorf("model %q: base_url is required", m.ID)
 	}
@@ -28,7 +37,15 @@ func validateModel(m *Model) error {
 	if err != nil {
 		return fmt.Errorf("model %q: base_url %q: %w", m.ID, m.BaseURL, err)
 	}
-	if u.Scheme != "http" && u.Scheme != "https" {
+	// The realtime surface speaks WebSocket, so its base_url is a ws://|wss://
+	// endpoint; every other surface is HTTP. Enforcing per-surface schemes
+	// catches a mis-pasted http:// realtime URL (which coder/websocket's Dial
+	// would reject far downstream) at boot instead.
+	if m.API == APIRealtime {
+		if u.Scheme != "ws" && u.Scheme != "wss" {
+			return fmt.Errorf("model %q: base_url %q must be ws or wss for realtime api", m.ID, m.BaseURL)
+		}
+	} else if u.Scheme != "http" && u.Scheme != "https" {
 		return fmt.Errorf("model %q: base_url %q must be http or https", m.ID, m.BaseURL)
 	}
 	if u.Host == "" {
@@ -39,7 +56,13 @@ func validateModel(m *Model) error {
 	switch m.AuthScheme {
 	case "bearer", "x-api-key":
 	case "":
-		return fmt.Errorf("model %q: auth_scheme is required", m.ID)
+		// Transcription and realtime upstreams may be unauthenticated (e.g. a
+		// local STT server on the pod network), so an empty scheme is allowed
+		// there. Chat models always front a credentialed vendor, so the scheme
+		// stays mandatory for them.
+		if m.API != APITranscription && m.API != APIRealtime {
+			return fmt.Errorf("model %q: auth_scheme is required", m.ID)
+		}
 	default:
 		return fmt.Errorf("model %q: auth_scheme %q must be bearer|x-api-key", m.ID, m.AuthScheme)
 	}

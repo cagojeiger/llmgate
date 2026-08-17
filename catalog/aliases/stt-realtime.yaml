@@ -1,0 +1,5 @@
+# 실시간 음성 → 텍스트 (realtime speech-to-text). 현재 로컬 Qwen3-ASR realtime 하나만
+# 물려 있어 체인 길이 1. /v1/realtime 의 기본 alias (?model 미지정 시).
+alias: stt-realtime
+chain:
+  - qwen-asr-realtime

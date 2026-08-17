@@ -198,6 +198,75 @@ auth_scheme: oauth
 	}
 }
 
+// A transcription model may omit auth entirely (unauthenticated local STT).
+func TestLoadDir_TranscriptionAuthOptional(t *testing.T) {
+	dir := writeCatalogDir(t,
+		map[string]string{"asr.yaml": `id: qwen-asr
+vendor: qwen
+api: transcription
+protocol: openai
+base_url: http://127.0.0.1:8001
+`},
+		nil)
+	cat, err := LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir error = %v, want nil (transcription may be unauthenticated)", err)
+	}
+	m, ok := cat.Models["qwen-asr"]
+	if !ok {
+		t.Fatal("Models[qwen-asr] missing")
+	}
+	if m.API != APITranscription {
+		t.Fatalf("API = %q, want transcription", m.API)
+	}
+}
+
+// A chat model (default api) still requires an auth_scheme.
+func TestLoadDir_ChatAuthSchemeStillRequired(t *testing.T) {
+	dir := writeCatalogDir(t,
+		map[string]string{"bad.yaml": `id: bad
+vendor: x
+protocol: openai
+base_url: https://example.test/v1
+`},
+		nil)
+	_, err := LoadDir(dir)
+	if err == nil || !strings.Contains(err.Error(), "auth_scheme is required") {
+		t.Fatalf("error = %v, want auth_scheme-required error", err)
+	}
+}
+
+// An unknown api value fails boot.
+func TestLoadDir_BadAPI(t *testing.T) {
+	dir := writeCatalogDir(t,
+		map[string]string{"bad.yaml": `id: bad
+vendor: x
+api: embeddings
+protocol: openai
+base_url: https://example.test/v1
+auth_scheme: bearer
+`},
+		nil)
+	_, err := LoadDir(dir)
+	if err == nil || !strings.Contains(err.Error(), "chat|transcription") {
+		t.Fatalf("error = %v, want api enum error", err)
+	}
+}
+
+// The default (empty) api resolves to chat.
+func TestLoadDir_APIDefaultsToChat(t *testing.T) {
+	dir := writeCatalogDir(t,
+		map[string]string{"ok.yaml": modelYAML("ok")},
+		nil)
+	cat, err := LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir error = %v", err)
+	}
+	if got := cat.Models["ok"].API; got != APIChat {
+		t.Fatalf("API = %q, want chat (default)", got)
+	}
+}
+
 func TestLoadDir_BadBaseURL(t *testing.T) {
 	dir := writeCatalogDir(t,
 		map[string]string{"bad.yaml": `id: bad

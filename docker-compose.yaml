@@ -137,8 +137,10 @@ services:
       - minio-data:/data
     restart: "no"
 
-  # One-shot bucket creation, like nats-init. The mc alias loop doubles as
-  # a readiness wait so llmgate's depends_on can gate on completion.
+  # Provisions the audit bucket for local testing. llmgate never creates
+  # buckets itself (it requires a pre-existing one, like the cluster's
+  # Loki buckets), so this fixture stands in for ops provisioning. The mc
+  # alias loop doubles as a readiness wait for llmgate's depends_on.
   minio-init:
     image: minio/mc:latest
     depends_on:

@@ -26,9 +26,17 @@ func TestS3Store_Integration(t *testing.T) {
 		UseSSL:    false,
 		PathStyle: true,
 	}
-	store, err := NewS3Store(cfg)
+	store, err := NewS3Store(cfg, slogDiscard())
 	if err != nil {
 		t.Fatalf("NewS3Store: %v", err)
+	}
+
+	// The store must refuse a bucket that does not exist rather than
+	// create it: this service only uses pre-provisioned buckets.
+	missing := cfg
+	missing.Bucket = "no-such-bucket-" + randToken() // valid S3 name, absent
+	if _, err := NewS3Store(missing, slogDiscard()); err == nil {
+		t.Fatalf("NewS3Store with missing bucket should fail (must not create it)")
 	}
 
 	// Write a sealed-style file and upload it under a real partition key.

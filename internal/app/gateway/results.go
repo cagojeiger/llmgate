@@ -40,7 +40,7 @@ func buildAuditSink(cfg *config.Server, log *slog.Logger) (llmresultsink.Sink, e
 			SecretKey: cfg.AuditS3SecretKey,
 			UseSSL:    cfg.AuditS3UseSSL,
 			PathStyle: cfg.AuditS3PathStyle,
-		})
+		}, log)
 		if err != nil {
 			return nil, fmt.Errorf("build audit s3 store: %w", err)
 		}

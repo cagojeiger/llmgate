@@ -140,8 +140,8 @@ func TestService_Transcribe_ChatModelNotReachable(t *testing.T) {
 type stubTranscriptionStream struct{}
 
 func (stubTranscriptionStream) Recv() (*llmtypes.TranscriptionEvent, error) { return nil, io.EOF }
-func (stubTranscriptionStream) Close() error                               { return nil }
-func (stubTranscriptionStream) Summary() *llmtypes.Summary                 { return &llmtypes.Summary{} }
+func (stubTranscriptionStream) Close() error                                { return nil }
+func (stubTranscriptionStream) Summary() *llmtypes.Summary                  { return &llmtypes.Summary{} }
 
 func TestService_TranscribeStream_ResolvesAliasAndReturnsStream(t *testing.T) {
 	tr := &fakeTranscriber{name: "qwen", stream: stubTranscriptionStream{}}

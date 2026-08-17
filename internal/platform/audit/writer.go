@@ -57,14 +57,22 @@ func bucketStartOf(t time.Time, interval time.Duration) time.Time {
 // just move them as-is (no re-labelling); empty orphans (opened, never
 // written, then crashed) are dropped to avoid a zero-record object.
 func (w *writer) recoverOrphans() {
+	var recovered, droppedEmpty int
 	for _, f := range listFiles(w.dir.active) {
 		if f.size == 0 {
 			_ = os.Remove(f.path)
+			droppedEmpty++
 			continue
 		}
 		if err := os.Rename(f.path, filepath.Join(w.dir.pending, f.name)); err != nil {
 			w.log.Warn("audit recover orphan failed", slog.String("file", f.name), slog.String("err", err.Error()))
+			continue
 		}
+		recovered++
+	}
+	if recovered+droppedEmpty > 0 {
+		w.log.Info("audit recovered orphaned files on boot",
+			slog.Int("recovered", recovered), slog.Int("dropped_empty", droppedEmpty))
 	}
 }
 

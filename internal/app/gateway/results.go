@@ -104,6 +104,24 @@ func buildAuditTerminal(_ context.Context, cfg *config.Server, log *slog.Logger)
 	if err != nil {
 		return nil, fmt.Errorf("build audit file sink: %w", err)
 	}
+	target := cfg.AuditS3Endpoint
+	if target == "" {
+		target = "(local-only, no upload)"
+	}
+	// Startup visibility: an operator should be able to tell from the logs
+	// that the sink is on and how it is tuned. Credentials are never
+	// logged.
+	log.Info("audit result sink enabled",
+		slog.String("dir", cfg.AuditDir),
+		slog.String("s3_endpoint", target),
+		slog.String("s3_bucket", cfg.AuditS3Bucket),
+		// human-readable durations ("1h0m0s"), not raw nanoseconds, so the
+		// startup line reads cleanly in log analysis.
+		slog.String("rotate_interval", cfg.AuditRotateInterval.String()),
+		slog.String("upload_interval", cfg.AuditUploadInterval.String()),
+		slog.String("retention", cfg.AuditRetention.String()),
+		slog.String("compression", cfg.AuditCompression),
+		slog.Int("upload_concurrency", cfg.AuditUploadConcurrency))
 	return fileSink, nil
 }
 

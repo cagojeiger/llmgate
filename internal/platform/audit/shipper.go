@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -73,11 +74,24 @@ func (s *shipper) flush(ctx context.Context) {
 }
 
 func (s *shipper) pass(ctx context.Context) {
-	s.compressPass(ctx)
+	compressed, compressFailed := s.compressPass(ctx)
+	var uploaded, uploadFailed int
 	if s.store != nil {
-		s.uploadPass(ctx)
+		uploaded, uploadFailed = s.uploadPass(ctx)
 	}
-	s.reapPass(ctx)
+	reaped, dropped := s.reapPass(ctx)
+	// Heartbeat: log only when something happened, so an idle sink stays
+	// quiet while any activity — and every drop/failure — stays visible.
+	// With metrics deferred, these structured lines are the sink's SLI.
+	if compressed+uploaded+reaped+dropped+compressFailed+uploadFailed > 0 {
+		s.log.LogAttrs(ctx, slog.LevelInfo, "audit maintenance",
+			slog.Int("compressed", compressed),
+			slog.Int("uploaded", uploaded),
+			slog.Int("reaped", reaped),
+			slog.Int("dropped", dropped),
+			slog.Int("compress_failed", compressFailed),
+			slog.Int("upload_failed", uploadFailed))
+	}
 }
 
 // compressPass moves sealed files from pending/ to compressed/. With gzip
@@ -90,36 +104,42 @@ func (s *shipper) pass(ctx context.Context) {
 // must not steal request-serving cores; running it in the one shipper
 // goroutine caps it at a single core. (Upload is parallelized instead
 // because it is I/O-bound and barely touches the CPU.)
-func (s *shipper) compressPass(ctx context.Context) {
+func (s *shipper) compressPass(ctx context.Context) (done, failed int) {
 	for _, f := range listFiles(s.pendingDir) {
 		if ctx.Err() != nil {
-			return
+			return done, failed
 		}
 		if s.cfg.Compression == CompressionNone {
 			if err := os.Rename(f.path, filepath.Join(s.compressedDir, f.name)); err != nil {
 				s.log.LogAttrs(ctx, slog.LevelWarn, "audit stage failed",
 					slog.String("file", f.name), slog.String("err", err.Error()))
+				failed++
+				continue
 			}
+			done++
 			continue
 		}
 		dst := filepath.Join(s.compressedDir, f.name+".gz")
 		if err := compressFile(f.path, dst); err != nil {
 			s.log.LogAttrs(ctx, slog.LevelWarn, "audit compress failed",
 				slog.String("file", f.name), slog.String("err", err.Error()))
+			failed++
 			continue // leave in pending/, retry next tick
 		}
 		s.remove(ctx, f.path) // drop the plaintext original
+		done++
 	}
+	return done, failed
 }
 
 // uploadPass pushes every compressed file to the store, up to
 // UploadConcurrency in parallel — a single sequential stream is the main
 // per-replica throughput ceiling. Keys derive from the seal time encoded
 // in the filename so a retry after a crash re-puts the identical key.
-func (s *shipper) uploadPass(ctx context.Context) {
+func (s *shipper) uploadPass(ctx context.Context) (done, failed int) {
 	files := listFiles(s.compressedDir)
 	if len(files) == 0 {
-		return
+		return done, failed
 	}
 	conc := s.cfg.UploadConcurrency
 	if conc < 1 {
@@ -127,6 +147,7 @@ func (s *shipper) uploadPass(ctx context.Context) {
 	}
 	sem := make(chan struct{}, conc)
 	var wg sync.WaitGroup
+	var okc, failc atomic.Int64
 	for _, f := range files {
 		if ctx.Err() != nil {
 			break
@@ -136,18 +157,25 @@ func (s *shipper) uploadPass(ctx context.Context) {
 		go func(f fileInfo) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			s.uploadOne(ctx, f)
+			if s.uploadOne(ctx, f) {
+				okc.Add(1)
+			} else {
+				failc.Add(1)
+			}
 		}(f)
 	}
 	wg.Wait()
+	return int(okc.Load()), int(failc.Load())
 }
 
-func (s *shipper) uploadOne(ctx context.Context, f fileInfo) {
+// uploadOne returns true when the object is safely in the store (even if
+// the local move to uploaded/ then failed — the data is durable).
+func (s *shipper) uploadOne(ctx context.Context, f fileInfo) bool {
 	key := objectKey(s.prefix, sealTimeOf(f), f.name)
 	if err := s.store.Put(ctx, key, f.path); err != nil {
 		s.log.LogAttrs(ctx, slog.LevelWarn, "audit upload failed",
 			slog.String("file", f.name), slog.String("key", key), slog.String("err", err.Error()))
-		return // leave in compressed/, retry next tick
+		return false // leave in compressed/, retry next tick
 	}
 	if err := os.Rename(f.path, filepath.Join(s.uploadedDir, f.name)); err != nil {
 		// Object is already in the store; drop the local copy rather than
@@ -156,13 +184,15 @@ func (s *shipper) uploadOne(ctx context.Context, f fileInfo) {
 			slog.String("file", f.name), slog.String("err", err.Error()))
 		s.remove(ctx, f.path)
 	}
+	return true
 }
 
 // reapPass enforces retention then the disk cap. With a store, retention
 // deletes uploaded/ files older than Retention (safe in object storage);
 // in local-only mode the compressed/ copy is authoritative, so retention
-// applies there by seal age instead.
-func (s *shipper) reapPass(ctx context.Context) {
+// applies there by seal age instead. dropped counts only lossy disk-cap
+// evictions (files that never reached the store).
+func (s *shipper) reapPass(ctx context.Context) (reaped, dropped int) {
 	retainDir := s.uploadedDir
 	if s.store == nil {
 		retainDir = s.compressedDir
@@ -170,19 +200,21 @@ func (s *shipper) reapPass(ctx context.Context) {
 	cutoff := time.Now().Add(-s.cfg.Retention)
 	for _, f := range listFiles(retainDir) {
 		if sealTimeOf(f).Before(cutoff) {
-			s.remove(ctx, f.path)
+			if s.remove(ctx, f.path) {
+				reaped++
+			}
 		}
 	}
-	s.enforceDiskCap(ctx)
+	return reaped, s.enforceDiskCap(ctx)
 }
 
 // enforceDiskCap keeps the on-disk footprint under DiskCap by dropping
 // already-uploaded files first (no data loss), then oldest compressed,
 // then oldest pending (bounded loss, accepted for this data). active/ is
-// never touched — the writer owns it.
-func (s *shipper) enforceDiskCap(ctx context.Context) {
+// never touched — the writer owns it. Returns the count of lossy drops.
+func (s *shipper) enforceDiskCap(ctx context.Context) (dropped int) {
 	if s.cfg.DiskCap <= 0 {
-		return
+		return dropped
 	}
 	active := listFiles(s.activeDir)
 	uploaded := listFiles(s.uploadedDir)
@@ -190,7 +222,7 @@ func (s *shipper) enforceDiskCap(ctx context.Context) {
 	pending := listFiles(s.pendingDir)
 	total := sumSize(active) + sumSize(uploaded) + sumSize(compressed) + sumSize(pending)
 	if total <= s.cfg.DiskCap {
-		return
+		return dropped
 	}
 	sortBySealTime(uploaded)
 	sortBySealTime(compressed)
@@ -206,7 +238,7 @@ func (s *shipper) enforceDiskCap(ctx context.Context) {
 	for _, tier := range tiers {
 		for _, f := range tier.files {
 			if total <= s.cfg.DiskCap {
-				return
+				return dropped
 			}
 			if tier.lossy {
 				// Best-effort loss is accepted, but never silent.
@@ -215,9 +247,13 @@ func (s *shipper) enforceDiskCap(ctx context.Context) {
 			}
 			if s.remove(ctx, f.path) {
 				total -= f.size
+				if tier.lossy {
+					dropped++
+				}
 			}
 		}
 	}
+	return dropped
 }
 
 func (s *shipper) remove(ctx context.Context, path string) bool {

@@ -1,9 +1,10 @@
 # Qwen3-ASR realtime (streaming) speech-to-text over WebSocket. Runs as a local,
 # unauthenticated realtime STT server on the pod network, so no auth_env /
-# auth_scheme. base_url is a ws:// endpoint — the gateway brokers the OpenAI
+# auth_scheme. base_url is the ws:// API root (through /v1, same convention as
+# chat/transcription); the gateway appends /realtime and brokers the OpenAI
 # Realtime transcription session to it, relaying event frames verbatim.
 id: qwen-asr-realtime
 vendor: qwen
 api: realtime
 protocol: openai
-base_url: ws://127.0.0.1:8770
+base_url: ws://127.0.0.1:8770/v1

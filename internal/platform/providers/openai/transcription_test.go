@@ -24,8 +24,8 @@ func mustNewTranscription(t *testing.T, cfg TranscriptionConfig) *TranscriptionC
 func TestTranscriptionClient_JSONResponse(t *testing.T) {
 	var gotModel, gotLanguage, gotFilename, gotAuth string
 	srv := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/audio/transcriptions" {
-			t.Errorf("path = %q, want /v1/audio/transcriptions", r.URL.Path)
+		if r.URL.Path != "/audio/transcriptions" {
+			t.Errorf("path = %q, want /audio/transcriptions", r.URL.Path)
 		}
 		gotAuth = r.Header.Get("Authorization")
 		mediaType, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))

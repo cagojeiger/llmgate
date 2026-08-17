@@ -31,7 +31,8 @@ type TranscriptionConfig struct {
 
 // TranscriptionClient adapts an OpenAI-compatible speech-to-text upstream to
 // llmtypes.TranscriptionProvider. It POSTs multipart/form-data to
-// BaseURL + "/v1/audio/transcriptions" and parses the result into a typed
+// BaseURL + "/audio/transcriptions" (BaseURL is the /v1 API root, same
+// convention as chat) and parses the result into a typed
 // TranscriptionResponse so the full result can be audited, not passed through
 // opaquely.
 type TranscriptionClient struct {
@@ -80,7 +81,7 @@ func (c *TranscriptionClient) Transcribe(ctx context.Context, req *llmtypes.Tran
 		return nil, c.badRequest("build multipart body", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL+"/v1/audio/transcriptions", bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL+"/audio/transcriptions", bytes.NewReader(body))
 	if err != nil {
 		return nil, c.badRequest("build request", err)
 	}

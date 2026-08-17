@@ -57,7 +57,9 @@ func (h *Handler) broker(clientConn *websocket.Conn, endpoint string, rec *telem
 	// coder/websocket owns the handshake *http.Response body — the caller never
 	// closes it (nil on success, drained by Dial on failure), so bodyclose is
 	// suppressed rather than double-closing it.
-	upstreamConn, _, err := websocket.Dial(sessionCtx, endpoint, nil) //nolint:bodyclose // handshake response body is managed by coder/websocket
+	// endpoint is the /v1 API root (same base_url convention as chat/transcription);
+	// append the OpenAI realtime resource path to reach the session socket.
+	upstreamConn, _, err := websocket.Dial(sessionCtx, endpoint+"/realtime", nil) //nolint:bodyclose // handshake response body is managed by coder/websocket
 	if err != nil {
 		// Surface the failure to the client as a protocol `error` frame before
 		// closing, so an SDK sees why the session never started.

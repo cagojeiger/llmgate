@@ -32,7 +32,9 @@ func (c *TranscriptionClient) TranscribeStream(ctx context.Context, req *llmtype
 		return nil, c.badRequest("build multipart body", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL+"/v1/audio/transcriptions", bytes.NewReader(body))
+	// base_url is the vendor's OpenAI API root (through /v1), same convention as
+	// chat's BaseURL+"/chat/completions"; append only the resource sub-path.
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL+"/audio/transcriptions", bytes.NewReader(body))
 	if err != nil {
 		return nil, c.badRequest("build request", err)
 	}

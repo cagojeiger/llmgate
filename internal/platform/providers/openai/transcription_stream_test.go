@@ -16,8 +16,8 @@ import (
 func TestTranscribeStream_RelaysDeltaAndDone(t *testing.T) {
 	var gotStream, gotAccept string
 	srv := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/audio/transcriptions" {
-			t.Errorf("path = %q, want /v1/audio/transcriptions", r.URL.Path)
+		if r.URL.Path != "/audio/transcriptions" {
+			t.Errorf("path = %q, want /audio/transcriptions", r.URL.Path)
 		}
 		gotAccept = r.Header.Get("Accept")
 		_, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))

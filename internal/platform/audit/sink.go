@@ -25,9 +25,10 @@ import (
 const finalFlushTimeout = 15 * time.Second
 
 type dirs struct {
-	active   string
-	pending  string
-	uploaded string
+	active     string
+	pending    string
+	compressed string
+	uploaded   string
 }
 
 // FileSink is the terminal Sink. It is a thin composition: the writer
@@ -57,11 +58,12 @@ func NewFileSink(cfg Config, store ObjectStore, prefix string, log *slog.Logger)
 		log = slog.Default()
 	}
 	d := dirs{
-		active:   filepath.Join(cfg.Dir, "active"),
-		pending:  filepath.Join(cfg.Dir, "pending"),
-		uploaded: filepath.Join(cfg.Dir, "uploaded"),
+		active:     filepath.Join(cfg.Dir, "active"),
+		pending:    filepath.Join(cfg.Dir, "pending"),
+		compressed: filepath.Join(cfg.Dir, "compressed"),
+		uploaded:   filepath.Join(cfg.Dir, "uploaded"),
 	}
-	for _, p := range []string{d.active, d.pending, d.uploaded} {
+	for _, p := range []string{d.active, d.pending, d.compressed, d.uploaded} {
 		if err := os.MkdirAll(p, 0o750); err != nil {
 			return nil, fmt.Errorf("audit: mkdir %s: %w", p, err)
 		}
@@ -101,17 +103,28 @@ func (s *FileSink) Emit(ctx context.Context, event *result.Event) {
 	s.w.appendLine(ctx, append(line, '\n'))
 }
 
+// rotateLoop seals the active file at each clock boundary aligned to
+// interval (e.g. hourly at :00, or every 10m at :00/:10/…) so each sealed
+// file maps to a clean time bucket. Aligning to the wall clock — rather
+// than interval-after-start — is what makes a file's coverage obvious
+// when analyzing later.
 func (s *FileSink) rotateLoop(ctx context.Context, interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
 	for {
+		timer := time.NewTimer(time.Until(nextBoundary(time.Now(), interval)))
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			s.w.rotate()
 		}
 	}
+}
+
+// nextBoundary returns the next wall-clock instant that is a whole
+// multiple of interval (in UTC), so buckets align across replicas.
+func nextBoundary(now time.Time, interval time.Duration) time.Time {
+	return now.UTC().Truncate(interval).Add(interval)
 }
 
 // Close stops the loops, seals the final active file, then makes one

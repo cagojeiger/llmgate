@@ -1,6 +1,8 @@
 package audit
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"io"
@@ -37,6 +39,16 @@ func (f *fakeStore) Put(_ context.Context, key, filePath string) error {
 	b, err := os.ReadFile(filePath)
 	if err != nil {
 		return err
+	}
+	if strings.HasSuffix(key, ".gz") { // store decompressed so line counts work
+		zr, e := gzip.NewReader(bytes.NewReader(b))
+		if e != nil {
+			return e
+		}
+		if b, err = io.ReadAll(zr); err != nil {
+			return err
+		}
+		_ = zr.Close()
 	}
 	f.puts[key] = b
 	return nil
@@ -139,11 +151,12 @@ func TestFileSink_UploadRetryLeavesPending(t *testing.T) {
 	ctx := context.Background()
 	s.Emit(ctx, event("r1"))
 
-	// First pass: seal + a failing upload leaves the file in pending.
+	// First pass: seal, compress, then a failing upload leaves the file
+	// staged in compressed/ (not pending/ — compression already ran).
 	s.w.rotate()
 	s.shipper.pass(ctx)
-	if got := len(listFiles(s.dirs.pending)); got != 1 {
-		t.Fatalf("pending after failed upload = %d, want 1", got)
+	if got := len(listFiles(s.dirs.compressed)); got != 1 {
+		t.Fatalf("compressed after failed upload = %d, want 1", got)
 	}
 	if store.count() != 0 {
 		t.Fatalf("store count after failed upload = %d, want 0", store.count())
@@ -167,9 +180,10 @@ func TestFileSink_LocalOnlyNoStore(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	// Local-only: sealed file stays in pending (no store to move it).
-	if got := len(listFiles(s.dirs.pending)); got != 1 {
-		t.Fatalf("pending files = %d, want 1 in local-only mode", got)
+	// Local-only: file is compressed (as .jsonl.gz) but not uploaded — it
+	// comes to rest in compressed/, the terminal local state.
+	if got := len(listFiles(s.dirs.compressed)); got != 1 {
+		t.Fatalf("compressed files = %d, want 1 in local-only mode", got)
 	}
 }
 
@@ -316,7 +330,88 @@ func TestShipper_DiskCapDropsPendingDataLoss(t *testing.T) {
 	}
 }
 
+func TestNextBoundary_ClockAligned(t *testing.T) {
+	now := time.Date(2026, 8, 17, 10, 37, 12, 0, time.UTC)
+	if got := nextBoundary(now, 10*time.Minute); !got.Equal(time.Date(2026, 8, 17, 10, 40, 0, 0, time.UTC)) {
+		t.Fatalf("10m boundary = %v, want 10:40", got)
+	}
+	if got := nextBoundary(now, time.Hour); !got.Equal(time.Date(2026, 8, 17, 11, 0, 0, 0, time.UTC)) {
+		t.Fatalf("1h boundary = %v, want 11:00", got)
+	}
+}
+
+func TestFileSink_GzipObjectKeyAndContent(t *testing.T) {
+	store := newFakeStore()
+	s, err := NewFileSink(Config{Dir: t.TempDir()}, store, "audit", nil)
+	if err != nil {
+		t.Fatalf("NewFileSink: %v", err)
+	}
+	for i := 0; i < 3; i++ {
+		s.Emit(context.Background(), event("r"+string(rune('0'+i))))
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if store.count() != 1 {
+		t.Fatalf("object count = %d, want 1", store.count())
+	}
+	for k := range store.puts {
+		if !strings.HasSuffix(k, ".jsonl.gz") {
+			t.Fatalf("object key %q should end .jsonl.gz", k)
+		}
+	}
+	if store.totalLines() != 3 { // fakeStore decompresses .gz
+		t.Fatalf("decompressed lines = %d, want 3", store.totalLines())
+	}
+}
+
+func TestShipper_CompressionNoneStages(t *testing.T) {
+	d := newDirs(t)
+	writeFile(t, filepath.Join(d.pending, sealedName("inst", time.Now())), `{"a":1}`+"\n")
+	sh := newShipper(d, nil, "", Config{Compression: CompressionNone}.withDefaults(), slogDiscard())
+	sh.compressPass(context.Background())
+	files := listFiles(d.compressed)
+	if len(files) != 1 || strings.HasSuffix(files[0].name, ".gz") {
+		t.Fatalf("none mode should stage a plain .jsonl in compressed/, got %v", files)
+	}
+	if len(listFiles(d.pending)) != 0 {
+		t.Fatalf("pending should be drained")
+	}
+}
+
+func TestShipper_UploadPassParallel(t *testing.T) {
+	d := newDirs(t)
+	store := newFakeStore()
+	for i := 0; i < 5; i++ {
+		writeFile(t, filepath.Join(d.compressed, sealedName("inst", time.Now().Add(time.Duration(i)*time.Second))), "x")
+	}
+	sh := newShipper(d, store, "", Config{UploadConcurrency: 4}.withDefaults(), slogDiscard())
+	sh.uploadPass(context.Background())
+	if store.count() != 5 {
+		t.Fatalf("uploaded objects = %d, want 5", store.count())
+	}
+	if len(listFiles(d.uploaded)) != 5 || len(listFiles(d.compressed)) != 0 {
+		t.Fatalf("compressed should drain to uploaded: compressed=%d uploaded=%d",
+			len(listFiles(d.compressed)), len(listFiles(d.uploaded)))
+	}
+}
+
 // helpers
+
+func newDirs(t *testing.T) dirs {
+	t.Helper()
+	root := t.TempDir()
+	d := dirs{
+		active:     filepath.Join(root, "active"),
+		pending:    filepath.Join(root, "pending"),
+		compressed: filepath.Join(root, "compressed"),
+		uploaded:   filepath.Join(root, "uploaded"),
+	}
+	for _, p := range []string{d.active, d.pending, d.compressed, d.uploaded} {
+		mustMkdir(t, p)
+	}
+	return d
+}
 
 func mustMkdir(t *testing.T, p string) {
 	t.Helper()

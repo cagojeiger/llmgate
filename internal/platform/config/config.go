@@ -50,20 +50,22 @@ type Server struct {
 	// events (internal/platform/audit). Empty AuditDir disables it. Empty
 	// AuditS3Endpoint runs it local-only (rolling log, no upload). Result
 	// events carry full prompt/completion bodies.
-	AuditDir            string
-	AuditRotateInterval time.Duration
-	AuditRotateMaxBytes int64
-	AuditUploadInterval time.Duration
-	AuditRetention      time.Duration
-	AuditDiskCap        int64
-	AuditS3Endpoint     string
-	AuditS3Bucket       string
-	AuditS3Region       string
-	AuditS3AccessKey    string
-	AuditS3SecretKey    string
-	AuditS3Prefix       string
-	AuditS3UseSSL       bool
-	AuditS3PathStyle    bool
+	AuditDir               string
+	AuditRotateInterval    time.Duration
+	AuditRotateMaxBytes    int64
+	AuditUploadInterval    time.Duration
+	AuditRetention         time.Duration
+	AuditDiskCap           int64
+	AuditCompression       string
+	AuditUploadConcurrency int
+	AuditS3Endpoint        string
+	AuditS3Bucket          string
+	AuditS3Region          string
+	AuditS3AccessKey       string
+	AuditS3SecretKey       string
+	AuditS3Prefix          string
+	AuditS3UseSSL          bool
+	AuditS3PathStyle       bool
 }
 
 func LoadServer() (*Server, error) {
@@ -139,7 +141,7 @@ func LoadServer() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	auditUploadInterval, err := positiveDuration("LLMGATE_AUDIT_UPLOAD_INTERVAL", "1h")
+	auditUploadInterval, err := positiveDuration("LLMGATE_AUDIT_UPLOAD_INTERVAL", "30s")
 	if err != nil {
 		return nil, err
 	}
@@ -148,6 +150,10 @@ func LoadServer() (*Server, error) {
 		return nil, err
 	}
 	auditDiskCap, err := positiveInt64("LLMGATE_AUDIT_DISK_CAP", "5368709120")
+	if err != nil {
+		return nil, err
+	}
+	auditUploadConcurrency, err := nonNegativeInt("LLMGATE_AUDIT_UPLOAD_CONCURRENCY", "4")
 	if err != nil {
 		return nil, err
 	}
@@ -186,6 +192,8 @@ func LoadServer() (*Server, error) {
 		AuditUploadInterval:        auditUploadInterval,
 		AuditRetention:             auditRetention,
 		AuditDiskCap:               auditDiskCap,
+		AuditCompression:           orDefault("LLMGATE_AUDIT_COMPRESSION", "gzip"),
+		AuditUploadConcurrency:     auditUploadConcurrency,
 		AuditS3Endpoint:            orDefault("LLMGATE_AUDIT_S3_ENDPOINT", ""),
 		AuditS3Bucket:              orDefault("LLMGATE_AUDIT_S3_BUCKET", ""),
 		AuditS3Region:              orDefault("LLMGATE_AUDIT_S3_REGION", "us-east-1"),

@@ -24,16 +24,12 @@ type writer struct {
 
 	mu sync.Mutex
 	f  *os.File
-	// bucketStart is the UTC time-bucket the active file belongs to
-	// (open time truncated to rotateInterval). Sealed files are labelled
-	// by this — the DATA window's start — not by the seal instant, so a
-	// file covering 10:00–11:00 keys under hour=10 even though it seals at
-	// 11:00.
-	bucketStart time.Time
 	// activeName is the final sealed name, fixed when the file opens:
-	// <instance>-<bucketStart>-<rand>.jsonl. Naming at open (not at seal)
-	// means the active file is already instance-scoped and unique, so a
-	// failed seal-rename can never cause the next write to append across
+	// <instance>-<bucketStart>-<rand>.jsonl, where bucketStart is the
+	// open time truncated to rotateInterval (the DATA window's start, not
+	// the seal instant — a file covering 10:00–11:00 keys under hour=10).
+	// Naming at open makes the active file instance-scoped and unique, so
+	// a failed seal-rename can never make the next write append across
 	// buckets, and two processes sharing a dir never collide.
 	activeName string
 	size       int64
@@ -105,8 +101,8 @@ func (w *writer) ensureOpenLocked() error {
 	// 10:00 and seals at the 11:00 boundary is labelled hour=10 (its data
 	// window), and its unique instance-scoped name is set now so a later
 	// seal-rename failure can never mix buckets.
-	w.bucketStart = bucketStartOf(time.Now(), w.rotateInterval)
-	w.activeName = sealedName(w.instance, w.bucketStart)
+	bucketStart := bucketStartOf(time.Now(), w.rotateInterval)
+	w.activeName = sealedName(w.instance, bucketStart)
 	f, err := os.OpenFile(filepath.Join(w.dir.active, w.activeName), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
 	if err != nil {
 		return err

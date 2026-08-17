@@ -119,7 +119,12 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, ctx context.Cont
 	// transcript(s) + counts + duration, not the raw audio.
 	defer func() {
 		telemetry.FinishAuditEvent(rec, rec.StatusCode, rec.Kind, time.Since(start).Milliseconds())
-		h.events.Emit(ctx, rec)
+		// The WS upgrade hijacks the connection, so r.Context() is already
+		// canceled by the time this session-close audit fires. Detach so a
+		// canceled ctx can't drop the durable record; request-scoped values
+		// (request id, etc.) are preserved.
+		auditCtx := context.WithoutCancel(ctx)
+		h.events.Emit(auditCtx, rec)
 		if h.results != nil {
 			if ev, ok := llmresultschema.FromRealtime(llmresultschema.RealtimeBuildInput{
 				Audit:          rec,
@@ -129,7 +134,7 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, ctx context.Cont
 				Turns:          turns,
 				Transcripts:    transcripts,
 			}); ok {
-				h.results.Emit(ctx, ev)
+				h.results.Emit(auditCtx, ev)
 			}
 		}
 	}()

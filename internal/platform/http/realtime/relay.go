@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/coder/websocket"
 
@@ -29,13 +30,28 @@ const completedType = "conversation.item.input_audio_transcription.completed"
 // per-message memory against a hostile peer.
 const maxRealtimeMessageBytes = 16 << 20
 
+// maxSessionDuration bounds a realtime session so a forgotten or runaway
+// connection cannot pin a goroutine pair (and its two conns) indefinitely. It
+// is a backstop, not an idle timeout — a long legitimate session (e.g. a
+// meeting) is expected to stay well under it; on expiry both relay reads unblock
+// and the session closes cleanly with its audit record intact.
+const maxSessionDuration = time.Hour
+
+// The audit record accumulates one entry per completed turn. A long session
+// must not grow it (and the durable audit) without bound, so appends stop after
+// either cap while turns keeps counting the true total.
+const (
+	maxAuditTurns           = 512
+	maxAuditTranscriptBytes = 1 << 20 // 1 MiB of transcript text per session
+)
+
 func (h *Handler) broker(clientConn *websocket.Conn, endpoint string, rec *telemetry.AuditEvent) (int, []string) {
 	// The relay outlives the request: after the WS upgrade the request ctx is
 	// canceled (the conn is hijacked), so a fresh session ctx — detached from
 	// the request — governs both relay goroutines. Canceling it is how one
 	// direction's close unblocks the other's pending Read.
 	//nolint:contextcheck // WS relay is session-scoped and must detach from the hijacked request ctx, mirroring the async audit sink's intentional detach
-	sessionCtx, cancel := context.WithCancel(context.Background())
+	sessionCtx, cancel := context.WithTimeout(context.Background(), maxSessionDuration)
 	defer cancel()
 
 	// coder/websocket owns the handshake *http.Response body — the caller never
@@ -62,6 +78,7 @@ func (h *Handler) broker(clientConn *websocket.Conn, endpoint string, rec *telem
 	var (
 		turns       int
 		transcripts []string
+		auditBytes  int
 		wg          sync.WaitGroup
 	)
 	wg.Add(2)
@@ -85,8 +102,11 @@ func (h *Handler) broker(clientConn *websocket.Conn, endpoint string, rec *telem
 		relay(sessionCtx, upstreamConn, clientConn, func(data []byte) {
 			if t, ok := sniffCompleted(data); ok {
 				turns++
-				if t != "" {
+				// Count every turn but stop growing the audit payload past the
+				// caps so a long session can't balloon the durable record.
+				if t != "" && len(transcripts) < maxAuditTurns && auditBytes < maxAuditTranscriptBytes {
 					transcripts = append(transcripts, t)
+					auditBytes += len(t)
 				}
 			}
 		})

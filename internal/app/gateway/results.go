@@ -11,21 +11,38 @@ import (
 	natsllmresult "llmgate/internal/platform/nats/llmresult"
 )
 
-// buildResultSink selects the finalized-result sink. The audit
-// (local-rotate + S3) sink takes priority when configured; otherwise the
-// NATS publisher; otherwise a no-op. Whichever terminal sink is chosen is
-// wrapped by the shared AsyncSink so transport backpressure stays off the
-// request path.
+// buildResultSink assembles the finalized-result sink. The audit
+// (local-rotate + S3) and NATS sinks are independent and coexist: each is
+// enabled by its own config, and when both are set events fan out to both
+// so existing NATS consumers keep working while audit is rolled out. Each
+// terminal sink is wrapped by the shared AsyncSink so transport
+// backpressure stays off the request path.
 func buildResultSink(ctx context.Context, cfg *config.Server, log *slog.Logger) (llmresultsink.Sink, error) {
-	switch {
-	case cfg == nil:
+	if cfg == nil {
 		return llmresultsink.NopSink{}, nil
-	case cfg.AuditDir != "":
-		return buildAuditSink(cfg, log) //nolint:contextcheck // FileSink's rotator/shipper goroutines detach from the build ctx by design (they stop on Close, not on build completion)
-	case cfg.LLMResultNATSURL != "":
-		return buildNATSSink(ctx, cfg, log)
+	}
+	var sinks []llmresultsink.Sink
+	if cfg.AuditDir != "" {
+		s, err := buildAuditSink(cfg, log) //nolint:contextcheck // FileSink's rotator/shipper goroutines detach from the build ctx by design (they stop on Close, not on build completion)
+		if err != nil {
+			return nil, err
+		}
+		sinks = append(sinks, s)
+	}
+	if cfg.LLMResultNATSURL != "" {
+		s, err := buildNATSSink(ctx, cfg, log)
+		if err != nil {
+			return nil, err
+		}
+		sinks = append(sinks, s)
+	}
+	switch len(sinks) {
+	case 0:
+		return llmresultsink.NopSink{}, nil
+	case 1:
+		return sinks[0], nil
 	default:
-		return llmresultsink.NopSink{}, nil
+		return llmresultsink.NewFanoutSink(log, sinks...), nil
 	}
 }
 

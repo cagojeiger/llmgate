@@ -127,7 +127,8 @@ func BuildRuntime(ctx context.Context, in RuntimeInput) (*Runtime, error) {
 		metricsRecorder,
 	)
 
-	results, err := buildResultSink(ctx, in.Config, in.Logger)
+	//nolint:contextcheck // the audit sink's background workers and its one-shot S3 bucket probe detach from the build ctx by design
+	results, err := buildResultSink(in.Config, in.Logger)
 	if err != nil {
 		_ = events.Close()
 		return nil, err

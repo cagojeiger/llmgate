@@ -59,7 +59,7 @@ type Config struct {
 
 func (c Config) withDefaults() Config {
 	if c.RotateInterval <= 0 {
-		c.RotateInterval = 10 * time.Minute // clock-aligned 10-minute buckets
+		c.RotateInterval = time.Hour // one clock-aligned file per hour = one dt/hour partition
 	}
 	if c.RotateMaxBytes == 0 {
 		c.RotateMaxBytes = 128 << 20 // 128 MiB

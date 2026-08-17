@@ -11,30 +11,56 @@ import (
 	natsllmresult "llmgate/internal/platform/nats/llmresult"
 )
 
-// buildResultSink assembles the finalized-result sink. The audit
-// (local-rotate + S3) and NATS sinks are independent and coexist: each is
-// enabled by its own config, and when both are set events fan out to both
-// so existing NATS consumers keep working while audit is rolled out. Each
-// terminal sink is wrapped by the shared AsyncSink so transport
-// backpressure stays off the request path.
+// resultSinkFactory builds one terminal result sink when its config gate
+// is set. Registration is an explicit list (defaultResultSinkFactories),
+// mirroring defaultProviderFactories rather than init() self-registration:
+// the active set stays obvious and a test can inject its own factories.
+// build returns the raw terminal — the assembler owns the uniform
+// AsyncSink wrapping and the fan-out.
+type resultSinkFactory struct {
+	name    string
+	enabled func(*config.Server) bool
+	build   func(context.Context, *config.Server, *slog.Logger) (llmresultsink.Sink, error)
+}
+
+func defaultResultSinkFactories() []resultSinkFactory {
+	return []resultSinkFactory{
+		{
+			name:    "audit",
+			enabled: func(c *config.Server) bool { return c.AuditDir != "" },
+			build:   buildAuditTerminal,
+		},
+		{
+			name:    "nats",
+			enabled: func(c *config.Server) bool { return c.LLMResultNATSURL != "" },
+			build:   buildNATSTerminal,
+		},
+	}
+}
+
+// buildResultSink assembles the finalized-result sink from the default
+// registry. Enabled sinks are independent and additive: each terminal is
+// wrapped in its own AsyncSink (backpressure isolated per sink), and when
+// more than one is enabled events fan out to all of them.
 func buildResultSink(ctx context.Context, cfg *config.Server, log *slog.Logger) (llmresultsink.Sink, error) {
+	return assembleResultSink(ctx, cfg, log, defaultResultSinkFactories())
+}
+
+func assembleResultSink(ctx context.Context, cfg *config.Server, log *slog.Logger, factories []resultSinkFactory) (llmresultsink.Sink, error) {
 	if cfg == nil {
 		return llmresultsink.NopSink{}, nil
 	}
 	var sinks []llmresultsink.Sink
-	if cfg.AuditDir != "" {
-		s, err := buildAuditSink(cfg, log) //nolint:contextcheck // FileSink's rotator/shipper goroutines detach from the build ctx by design (they stop on Close, not on build completion)
-		if err != nil {
-			return nil, err
+	for _, f := range factories {
+		if !f.enabled(cfg) {
+			continue
 		}
-		sinks = append(sinks, s)
-	}
-	if cfg.LLMResultNATSURL != "" {
-		s, err := buildNATSSink(ctx, cfg, log)
+		terminal, err := f.build(ctx, cfg, log)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("build %s result sink: %w", f.name, err)
 		}
-		sinks = append(sinks, s)
+		//nolint:contextcheck // AsyncSink worker detaches from the request/build ctx by design (see emitOne)
+		sinks = append(sinks, wrapAsync(terminal, cfg, log))
 	}
 	switch len(sinks) {
 	case 0:
@@ -46,10 +72,13 @@ func buildResultSink(ctx context.Context, cfg *config.Server, log *slog.Logger) 
 	}
 }
 
-func buildAuditSink(cfg *config.Server, log *slog.Logger) (llmresultsink.Sink, error) {
+// buildAuditTerminal builds the raw audit FileSink (no async wrap). It
+// ignores ctx: the sink's rotator/shipper goroutines detach from the
+// build ctx by design and stop on Close.
+func buildAuditTerminal(_ context.Context, cfg *config.Server, log *slog.Logger) (llmresultsink.Sink, error) {
 	var store audit.ObjectStore
 	if cfg.AuditS3Endpoint != "" {
-		s, err := audit.NewS3Store(audit.S3Config{
+		s, err := audit.NewS3Store(audit.S3Config{ //nolint:contextcheck // NewS3Store uses its own bounded ctx for the one-shot bucket probe
 			Endpoint:  cfg.AuditS3Endpoint,
 			Bucket:    cfg.AuditS3Bucket,
 			Region:    cfg.AuditS3Region,
@@ -63,7 +92,7 @@ func buildAuditSink(cfg *config.Server, log *slog.Logger) (llmresultsink.Sink, e
 		}
 		store = s
 	}
-	fileSink, err := audit.NewFileSink(audit.Config{
+	fileSink, err := audit.NewFileSink(audit.Config{ //nolint:contextcheck // FileSink's rotator/shipper goroutines detach from the build ctx by design (stop on Close)
 		Dir:            cfg.AuditDir,
 		RotateInterval: cfg.AuditRotateInterval,
 		RotateMaxBytes: cfg.AuditRotateMaxBytes,
@@ -74,10 +103,12 @@ func buildAuditSink(cfg *config.Server, log *slog.Logger) (llmresultsink.Sink, e
 	if err != nil {
 		return nil, fmt.Errorf("build audit file sink: %w", err)
 	}
-	return wrapAsync(fileSink, cfg, log), nil
+	return fileSink, nil
 }
 
-func buildNATSSink(ctx context.Context, cfg *config.Server, log *slog.Logger) (llmresultsink.Sink, error) {
+// buildNATSTerminal builds the raw NATS publisher (no async wrap). It uses
+// ctx for the initial connection only.
+func buildNATSTerminal(ctx context.Context, cfg *config.Server, log *slog.Logger) (llmresultsink.Sink, error) {
 	publisher, err := natsllmresult.NewPublisher(ctx, natsllmresult.Config{
 		URL:      cfg.LLMResultNATSURL,
 		Subject:  cfg.LLMResultNATSSubject,
@@ -87,12 +118,11 @@ func buildNATSSink(ctx context.Context, cfg *config.Server, log *slog.Logger) (l
 	if err != nil {
 		return nil, fmt.Errorf("build llm result nats publisher: %w", err)
 	}
-	return wrapAsync(publisher, cfg, log), nil //nolint:contextcheck // AsyncSink worker detaches from request ctx by design (see emitOne)
+	return publisher, nil
 }
 
 func wrapAsync(terminal llmresultsink.Sink, cfg *config.Server, log *slog.Logger) llmresultsink.Sink {
 	return llmresultsink.NewAsyncSinkWithConfig(terminal, log, llmresultsink.AsyncConfig{
-
 		QueueSize:     cfg.LLMResultAsyncQueueSize,
 		BatchSize:     cfg.LLMResultAsyncBatchSize,
 		FlushInterval: cfg.LLMResultAsyncFlush,

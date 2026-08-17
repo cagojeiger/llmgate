@@ -62,3 +62,44 @@ func (s *Recovering[E]) Emit(ctx context.Context, event E) {
 func (s *Recovering[E]) Close() error {
 	return s.next.Close()
 }
+
+// Fanout delivers each event to every contained sink, wrapping each call
+// in Recovering so one sink's panic is logged and isolated from the
+// others. Both event pipelines (telemetry, llmresult) specialize it, so
+// the fan-out logic lives here once. label and eventTypeOf are the same
+// per-pipeline accessors Recovering takes.
+type Fanout[E any] struct {
+	log         *slog.Logger
+	sinks       []Sink[E]
+	label       string
+	eventTypeOf func(E) string
+}
+
+func NewFanout[E any](log *slog.Logger, label string, eventTypeOf func(E) string, sinks ...Sink[E]) *Fanout[E] {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &Fanout[E]{log: log, sinks: sinks, label: label, eventTypeOf: eventTypeOf}
+}
+
+func (s *Fanout[E]) Emit(ctx context.Context, event E) {
+	for _, next := range s.sinks {
+		if next == nil {
+			continue
+		}
+		NewRecovering(next, s.log, s.label, s.eventTypeOf).Emit(ctx, event)
+	}
+}
+
+func (s *Fanout[E]) Close() error {
+	var firstErr error
+	for _, next := range s.sinks {
+		if next == nil {
+			continue
+		}
+		if err := next.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}

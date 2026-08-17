@@ -459,6 +459,44 @@ func TestWriter_ActiveFileIsInstanceScoped(t *testing.T) {
 	}
 }
 
+// Emit is normally driven by a single AsyncSink worker, but exercise the
+// writer mutex under concurrent callers so `go test -race` guards it.
+func TestFileSink_ConcurrentEmit(t *testing.T) {
+	s, err := NewFileSink(Config{Dir: t.TempDir(), RotateMaxBytes: 1 << 20}, nil, "", nil)
+	if err != nil {
+		t.Fatalf("NewFileSink: %v", err)
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 40; j++ {
+				s.Emit(context.Background(), event("r"))
+			}
+		}()
+	}
+	wg.Wait()
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+func TestShipper_PassReturnsActivityCounts(t *testing.T) {
+	d := newDirs(t)
+	store := newFakeStore()
+	for i := 0; i < 2; i++ {
+		writeFile(t, filepath.Join(d.pending, sealedName("inst", time.Now().Add(time.Duration(i)*time.Second))), `{"a":1}`+"\n")
+	}
+	sh := newShipper(d, store, "", Config{}.withDefaults(), slogDiscard())
+	if c, cf := sh.compressPass(context.Background()); c != 2 || cf != 0 {
+		t.Fatalf("compress counts = %d,%d want 2,0", c, cf)
+	}
+	if u, uf := sh.uploadPass(context.Background()); u != 2 || uf != 0 {
+		t.Fatalf("upload counts = %d,%d want 2,0", u, uf)
+	}
+}
+
 // helpers
 
 func newDirs(t *testing.T) dirs {

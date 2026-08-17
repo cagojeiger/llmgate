@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"sync"
 	"testing"
 
 	llmresultschema "llmgate/internal/domain/llmresult/schema"
@@ -61,15 +62,60 @@ func TestAssembleResultSink_ByEnabledCount(t *testing.T) {
 	}
 	_ = got.Close()
 
-	// two enabled -> Fanout
+	// two enabled -> still one async boundary (fan-out lives inside it)
 	got, err = assembleResultSink(ctx, cfg, log, []resultSinkFactory{stubFactory("a", true), stubFactory("b", true)})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if _, ok := got.(*llmresultsink.FanoutSink); !ok {
-		t.Fatalf("2 enabled: got %T, want *FanoutSink", got)
+	if _, ok := got.(*llmresultsink.AsyncSink); !ok {
+		t.Fatalf("2 enabled: got %T, want *AsyncSink (single boundary wrapping the fan-out)", got)
 	}
 	_ = got.Close()
+}
+
+type countingSink struct {
+	mu sync.Mutex
+	n  int
+}
+
+func (c *countingSink) Emit(context.Context, *llmresultschema.Event) {
+	c.mu.Lock()
+	c.n++
+	c.mu.Unlock()
+}
+func (c *countingSink) Close() error { return nil }
+func (c *countingSink) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.n
+}
+
+func termFactory(name string, on bool, sink llmresultsink.Sink) resultSinkFactory {
+	return resultSinkFactory{
+		name:    name,
+		enabled: func(*config.Server) bool { return on },
+		build: func(context.Context, *config.Server, *slog.Logger) (llmresultsink.Sink, error) {
+			return sink, nil
+		},
+	}
+}
+
+// With two terminals, one async boundary must fan out to both. Close
+// drains the worker queue, so the assertion is deterministic.
+func TestAssembleResultSink_SingleBoundaryFansOutToAll(t *testing.T) {
+	a, b := &countingSink{}, &countingSink{}
+	sink, err := assembleResultSink(context.Background(), &config.Server{}, discardLogger(),
+		[]resultSinkFactory{termFactory("a", true, a), termFactory("b", true, b)})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	sink.Emit(context.Background(), &llmresultschema.Event{})
+	if err := sink.Close(); err != nil { // drains the queue
+		t.Fatalf("close: %v", err)
+	}
+	if a.count() != 1 || b.count() != 1 {
+		t.Fatalf("fan-out delivery = (%d, %d), want (1, 1)", a.count(), b.count())
+	}
 }
 
 func TestAssembleResultSink_BuildErrorPropagates(t *testing.T) {

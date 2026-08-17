@@ -91,8 +91,11 @@ func (s *shipper) uploadPass(ctx context.Context) {
 		}
 		dst := filepath.Join(s.uploadedDir, f.name)
 		if err := os.Rename(f.path, dst); err != nil {
-			s.log.LogAttrs(ctx, slog.LevelWarn, "audit mark-uploaded failed",
+			// The object is already in the store; drop the local copy
+			// rather than re-uploading the same file on every tick.
+			s.log.LogAttrs(ctx, slog.LevelWarn, "audit mark-uploaded failed; dropping local copy (already in store)",
 				slog.String("file", f.name), slog.String("err", err.Error()))
+			s.remove(ctx, f.path)
 		}
 	}
 }
@@ -133,10 +136,23 @@ func (s *shipper) enforceDiskCap(ctx context.Context) {
 	// Oldest-first within each tier; uploaded is drained before pending.
 	sortBySealTime(uploaded)
 	sortBySealTime(pending)
-	for _, tier := range [][]fileInfo{uploaded, pending} {
-		for _, f := range tier {
+	tiers := []struct {
+		files []fileInfo
+		lossy bool // pending files were never uploaded — dropping them loses data
+	}{
+		{uploaded, false},
+		{pending, true},
+	}
+	for _, tier := range tiers {
+		for _, f := range tier.files {
 			if total <= s.cfg.DiskCap {
 				return
+			}
+			if tier.lossy {
+				// Best-effort loss is accepted, but never silent — the
+				// ADR promises disk-cap drops surface via logs.
+				s.log.LogAttrs(ctx, slog.LevelWarn, "audit disk cap exceeded; dropping un-uploaded file (data loss)",
+					slog.String("file", f.name), slog.Int64("bytes", f.size), slog.Int64("cap", s.cfg.DiskCap))
 			}
 			if s.remove(ctx, f.path) {
 				total -= f.size

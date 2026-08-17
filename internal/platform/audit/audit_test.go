@@ -140,9 +140,7 @@ func TestFileSink_UploadRetryLeavesPending(t *testing.T) {
 	s.Emit(ctx, event("r1"))
 
 	// First pass: seal + a failing upload leaves the file in pending.
-	s.mu.Lock()
-	s.rotateLocked()
-	s.mu.Unlock()
+	s.w.rotate()
 	s.shipper.pass(ctx)
 	if got := len(listFiles(s.dirs.pending)); got != 1 {
 		t.Fatalf("pending after failed upload = %d, want 1", got)
@@ -246,6 +244,75 @@ func TestNaming_UniqueAcrossSameSecond(t *testing.T) {
 	b := sealedName("inst", now)
 	if a == b {
 		t.Fatalf("sealed names collided within same second: %q", a)
+	}
+}
+
+func TestFileSink_RecoverOrphans(t *testing.T) {
+	dir := t.TempDir()
+	// simulate a crash: a file left in active/ by a previous process.
+	activeDir := filepath.Join(dir, "active")
+	mustMkdir(t, activeDir)
+	writeFile(t, filepath.Join(activeDir, activeFileName), `{"request_id":"orphan"}`+"\n")
+
+	s, err := NewFileSink(Config{Dir: dir}, nil, "", nil)
+	if err != nil {
+		t.Fatalf("NewFileSink: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	if got := len(listFiles(s.dirs.active)); got != 0 {
+		t.Fatalf("active files after recover = %d, want 0", got)
+	}
+	if got := len(listFiles(s.dirs.pending)); got != 1 {
+		t.Fatalf("pending files after recover = %d, want 1 (orphan sealed)", got)
+	}
+}
+
+func TestWriter_RotateSealsActiveAndSkipsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	d := dirs{active: filepath.Join(dir, "active"), pending: filepath.Join(dir, "pending"), uploaded: filepath.Join(dir, "uploaded")}
+	for _, p := range []string{d.active, d.pending, d.uploaded} {
+		mustMkdir(t, p)
+	}
+	w := newWriter(d, "inst", 0, slogDiscard())
+	w.appendLine(context.Background(), []byte(`{"a":1}`+"\n"))
+	w.rotate()
+	if got := len(listFiles(d.pending)); got != 1 {
+		t.Fatalf("pending after rotate = %d, want 1", got)
+	}
+	w.rotate() // nothing open -> no empty object
+	if got := len(listFiles(d.pending)); got != 1 {
+		t.Fatalf("empty rotate should not add a file; pending = %d", got)
+	}
+}
+
+func TestConfig_DiskCapBelowRotateRejected(t *testing.T) {
+	_, err := NewFileSink(Config{Dir: t.TempDir(), RotateMaxBytes: 1000, DiskCap: 500}, nil, "", nil)
+	if err == nil {
+		t.Fatal("NewFileSink should reject DiskCap < RotateMaxBytes")
+	}
+}
+
+func TestShipper_DiskCapDropsPendingDataLoss(t *testing.T) {
+	dir := t.TempDir()
+	d := dirs{active: filepath.Join(dir, "active"), pending: filepath.Join(dir, "pending"), uploaded: filepath.Join(dir, "uploaded")}
+	for _, p := range []string{d.active, d.pending, d.uploaded} {
+		mustMkdir(t, p)
+	}
+	// local-only (no store), two pending files over the cap.
+	old := sealedName("inst", time.Now().Add(-2*time.Hour))
+	newer := sealedName("inst", time.Now().Add(-1*time.Hour))
+	writeFile(t, filepath.Join(d.pending, old), strings.Repeat("a", 100))
+	writeFile(t, filepath.Join(d.pending, newer), strings.Repeat("b", 100))
+
+	sh := newShipper(d, nil, "", Config{DiskCap: 150, Retention: 999 * time.Hour}.withDefaults(), slogDiscard())
+	sh.enforceDiskCap(context.Background())
+
+	if fileExists(filepath.Join(d.pending, old)) {
+		t.Fatal("oldest un-uploaded pending should be dropped when over cap (bounded data loss)")
+	}
+	if !fileExists(filepath.Join(d.pending, newer)) {
+		t.Fatal("newer pending should survive once under cap")
 	}
 }
 

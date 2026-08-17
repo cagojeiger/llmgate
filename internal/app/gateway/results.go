@@ -39,9 +39,13 @@ func defaultResultSinkFactories() []resultSinkFactory {
 }
 
 // buildResultSink assembles the finalized-result sink from the default
-// registry. Enabled sinks are independent and additive: each terminal is
-// wrapped in its own AsyncSink (backpressure isolated per sink), and when
-// more than one is enabled events fan out to all of them.
+// registry. The async boundary is applied once, at the edge: one queue +
+// one worker drains events off the request path, then fans them out
+// synchronously to every enabled terminal. This keeps a single buffer of
+// body-carrying events (no per-sink duplication, no cross-queue pointer
+// pinning) at the cost of the terminals sharing one worker — acceptable
+// for best-effort data, and terminals are ordered fast-first (local audit
+// before remote NATS).
 func buildResultSink(ctx context.Context, cfg *config.Server, log *slog.Logger) (llmresultsink.Sink, error) {
 	return assembleResultSink(ctx, cfg, log, defaultResultSinkFactories())
 }
@@ -50,7 +54,7 @@ func assembleResultSink(ctx context.Context, cfg *config.Server, log *slog.Logge
 	if cfg == nil {
 		return llmresultsink.NopSink{}, nil
 	}
-	var sinks []llmresultsink.Sink
+	var terminals []llmresultsink.Sink
 	for _, f := range factories {
 		if !f.enabled(cfg) {
 			continue
@@ -59,16 +63,17 @@ func assembleResultSink(ctx context.Context, cfg *config.Server, log *slog.Logge
 		if err != nil {
 			return nil, fmt.Errorf("build %s result sink: %w", f.name, err)
 		}
-		//nolint:contextcheck // AsyncSink worker detaches from the request/build ctx by design (see emitOne)
-		sinks = append(sinks, wrapAsync(terminal, cfg, log))
+		terminals = append(terminals, terminal)
 	}
-	switch len(sinks) {
+	switch len(terminals) {
 	case 0:
 		return llmresultsink.NopSink{}, nil
 	case 1:
-		return sinks[0], nil
+		//nolint:contextcheck // AsyncSink worker detaches from the request/build ctx by design (see emitOne)
+		return wrapAsync(terminals[0], cfg, log), nil
 	default:
-		return llmresultsink.NewFanoutSink(log, sinks...), nil
+		//nolint:contextcheck // AsyncSink worker detaches from the request/build ctx by design (see emitOne)
+		return wrapAsync(llmresultsink.NewFanoutSink(log, terminals...), cfg, log), nil
 	}
 }
 

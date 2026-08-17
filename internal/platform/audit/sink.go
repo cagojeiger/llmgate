@@ -24,31 +24,25 @@ import (
 // dead store cannot stall shutdown past the operator's grace period.
 const finalFlushTimeout = 15 * time.Second
 
-const activeFileName = "current.jsonl"
-
 type dirs struct {
 	active   string
 	pending  string
 	uploaded string
 }
 
-// FileSink is the terminal Sink: it appends events to the active file
-// and owns the rotation and shipper goroutines. It is meant to be
-// wrapped by the shared AsyncSink so writes stay off the request path.
+// FileSink is the terminal Sink. It is a thin composition: the writer
+// produces sealed files, the shipper uploads and reaps them, and FileSink
+// wires the two, runs their background loops, and sequences shutdown. It
+// is meant to be wrapped by the shared AsyncSink so writes stay off the
+// request path.
 type FileSink struct {
-	dirs     dirs
-	instance string
-	cfg      Config
-	log      *slog.Logger
-
-	mu     sync.Mutex
-	f      *os.File
-	size   int64
-	opened time.Time
-
+	dirs    dirs
+	w       *writer
 	shipper *shipper
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
+	log     *slog.Logger
+
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 }
 
 // NewFileSink prepares the working directories, recovers any file left
@@ -73,38 +67,28 @@ func NewFileSink(cfg Config, store ObjectStore, prefix string, log *slog.Logger)
 		}
 	}
 
+	w := newWriter(d, instanceID(), cfg.RotateMaxBytes, log)
+	w.recoverOrphans()
+
 	s := &FileSink{
-		dirs:     d,
-		instance: instanceID(),
-		cfg:      cfg,
-		log:      log,
-		shipper:  newShipper(d, store, prefix, cfg, log),
+		dirs:    d,
+		w:       w,
+		shipper: newShipper(d, store, prefix, cfg, log),
+		log:     log,
 	}
-	s.recoverOrphans()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
 	s.wg.Add(2)
-	go func() { defer s.wg.Done(); s.rotateLoop(ctx) }()
+	go func() { defer s.wg.Done(); s.rotateLoop(ctx, cfg.RotateInterval) }()
 	go func() { defer s.wg.Done(); s.shipper.run(ctx) }()
 	return s, nil
 }
 
-// recoverOrphans seals any file the previous process left in active/
-// (a crash before rotation) so its records are shipped rather than
-// overwritten. The seal time falls back to the file's mod time.
-func (s *FileSink) recoverOrphans() {
-	for _, f := range listFiles(s.dirs.active) {
-		name := sealedName(s.instance, f.mod)
-		if err := os.Rename(f.path, filepath.Join(s.dirs.pending, name)); err != nil {
-			s.log.Warn("audit recover orphan failed", slog.String("file", f.name), slog.String("err", err.Error()))
-		}
-	}
-}
-
-// Emit appends one event as a JSON line. It is called by the AsyncSink
-// worker, off the request path. Write failures are logged, never
-// returned — the audit path must not affect request handling.
+// Emit encodes one event as a JSON line and hands it to the writer. It is
+// called by the AsyncSink worker, off the request path. Failures are
+// logged, never returned — the audit path must not affect request
+// handling.
 func (s *FileSink) Emit(ctx context.Context, event *result.Event) {
 	if s == nil || event == nil {
 		return
@@ -114,77 +98,18 @@ func (s *FileSink) Emit(ctx context.Context, event *result.Event) {
 		s.log.LogAttrs(ctx, slog.LevelWarn, "audit marshal failed", slog.String("err", err.Error()))
 		return
 	}
-	line = append(line, '\n')
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := s.ensureOpenLocked(); err != nil {
-		s.log.LogAttrs(ctx, slog.LevelWarn, "audit open failed", slog.String("err", err.Error()))
-		return
-	}
-	n, err := s.f.Write(line)
-	if err != nil {
-		s.log.LogAttrs(ctx, slog.LevelWarn, "audit write failed", slog.String("err", err.Error()))
-		return
-	}
-	s.size += int64(n)
-	if s.cfg.RotateMaxBytes > 0 && s.size >= s.cfg.RotateMaxBytes {
-		s.rotateLocked()
-	}
+	s.w.appendLine(ctx, append(line, '\n'))
 }
 
-func (s *FileSink) ensureOpenLocked() error {
-	if s.f != nil {
-		return nil
-	}
-	f, err := os.OpenFile(filepath.Join(s.dirs.active, activeFileName), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
-	if err != nil {
-		return err
-	}
-	s.f, s.size, s.opened = f, 0, time.Now()
-	return nil
-}
-
-// rotateLocked seals the active file into pending/ under a fresh sealed
-// name. Empty files are skipped so upload never creates zero-byte
-// objects. fsync before rename makes the sealed bytes durable on disk
-// before the shipper can pick the file up. Caller holds s.mu.
-func (s *FileSink) rotateLocked() {
-	if s.f == nil {
-		return
-	}
-	f := s.f
-	size := s.size
-	s.f, s.size = nil, 0
-	if size == 0 && fileEmpty(f) {
-		// nothing written since last rotation; drop the empty active file
-		_ = f.Close()
-		_ = os.Remove(f.Name())
-		return
-	}
-	if err := f.Sync(); err != nil {
-		s.log.Warn("audit fsync failed", slog.String("err", err.Error()))
-	}
-	if err := f.Close(); err != nil {
-		s.log.Warn("audit close active failed", slog.String("err", err.Error()))
-	}
-	name := sealedName(s.instance, time.Now())
-	if err := os.Rename(f.Name(), filepath.Join(s.dirs.pending, name)); err != nil {
-		s.log.Warn("audit seal rename failed", slog.String("err", err.Error()))
-	}
-}
-
-func (s *FileSink) rotateLoop(ctx context.Context) {
-	ticker := time.NewTicker(s.cfg.RotateInterval)
+func (s *FileSink) rotateLoop(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.mu.Lock()
-			s.rotateLocked()
-			s.mu.Unlock()
+			s.w.rotate()
 		}
 	}
 }
@@ -201,19 +126,10 @@ func (s *FileSink) Close() error {
 	}
 	s.wg.Wait() // loops stopped: no concurrent rotate/pass
 
-	s.mu.Lock()
-	s.rotateLocked()
-	s.mu.Unlock()
+	s.w.close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), finalFlushTimeout)
 	defer cancel()
 	s.shipper.flush(ctx)
 	return nil
-}
-
-// fileEmpty reports whether f currently has zero bytes on disk. Used to
-// distinguish a freshly (re)opened active file from one with records.
-func fileEmpty(f *os.File) bool {
-	info, err := f.Stat()
-	return err == nil && info.Size() == 0
 }

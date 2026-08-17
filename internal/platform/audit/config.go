@@ -2,6 +2,7 @@ package audit
 
 import (
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -63,6 +64,12 @@ func (c Config) withDefaults() Config {
 func (c Config) validate() error {
 	if c.Dir == "" {
 		return errors.New("audit: Dir is required")
+	}
+	// A cap below one rotation's worth is unenforceable: a single active
+	// file can exceed it and the reaper never touches active/, so the cap
+	// would stay breached. Fail fast rather than run permanently over.
+	if c.DiskCap > 0 && c.RotateMaxBytes > 0 && c.DiskCap < c.RotateMaxBytes {
+		return fmt.Errorf("audit: DiskCap (%d) must be >= RotateMaxBytes (%d)", c.DiskCap, c.RotateMaxBytes)
 	}
 	return nil
 }

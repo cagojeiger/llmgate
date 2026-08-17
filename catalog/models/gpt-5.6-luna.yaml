@@ -1,0 +1,9 @@
+# GPT-5.6 Luna via OpenCode Go (신규 계열)
+# source: https://models.dev/api.json provider=opencode-go
+# capabilities: tool_call=yes, input=text, output=text
+id: gpt-5.6-luna
+vendor: opencode
+protocol: openai
+base_url: https://opencode.ai/zen/go/v1
+auth_env: LLMGATE_OPENCODE_API_KEY
+auth_scheme: bearer

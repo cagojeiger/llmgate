@@ -1,5 +1,5 @@
-# Qwen 계열 최신 Max, Anthropic 프로토콜
-id: qwen3.7-max
+# Qwen 계열 최신 Max (qwen3.7-max 대체), Anthropic 프로토콜
+id: qwen3.8-max
 vendor: opencode
 protocol: anthropic
 base_url: https://opencode.ai/zen/go/v1

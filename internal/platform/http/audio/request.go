@@ -32,6 +32,10 @@ func decodeTranscriptionRequest(w http.ResponseWriter, r *http.Request, maxBytes
 		}
 		return nil, 0, &llmtypes.Error{Kind: llmtypes.KindBadRequest, Message: "parse multipart form: " + err.Error()}
 	}
+	// Audio parts larger than multipartMemory spill to temp files that net/http
+	// does not auto-remove; the audio is copied into req.Audio below, so drop the
+	// temp files when this returns.
+	defer func() { _ = r.MultipartForm.RemoveAll() }()
 
 	req := &llmtypes.TranscriptionRequest{
 		Model:          r.FormValue("model"),

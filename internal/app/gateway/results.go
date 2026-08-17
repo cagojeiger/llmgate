@@ -92,12 +92,14 @@ func buildAuditTerminal(_ context.Context, cfg *config.Server, log *slog.Logger)
 		store = s
 	}
 	fileSink, err := audit.NewFileSink(audit.Config{ //nolint:contextcheck // FileSink's rotator/shipper goroutines detach from the build ctx by design (stop on Close)
-		Dir:            cfg.AuditDir,
-		RotateInterval: cfg.AuditRotateInterval,
-		RotateMaxBytes: cfg.AuditRotateMaxBytes,
-		UploadInterval: cfg.AuditUploadInterval,
-		Retention:      cfg.AuditRetention,
-		DiskCap:        cfg.AuditDiskCap,
+		Dir:               cfg.AuditDir,
+		RotateInterval:    cfg.AuditRotateInterval,
+		RotateMaxBytes:    cfg.AuditRotateMaxBytes,
+		UploadInterval:    cfg.AuditUploadInterval,
+		Retention:         cfg.AuditRetention,
+		DiskCap:           cfg.AuditDiskCap,
+		Compression:       cfg.AuditCompression,
+		UploadConcurrency: cfg.AuditUploadConcurrency,
 	}, store, cfg.AuditS3Prefix, log)
 	if err != nil {
 		return nil, fmt.Errorf("build audit file sink: %w", err)

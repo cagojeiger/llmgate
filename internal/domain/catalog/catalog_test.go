@@ -42,8 +42,8 @@ func TestLoadDir_RepoCatalog(t *testing.T) {
 	if !ok {
 		t.Fatal("Aliases[smart] missing")
 	}
-	if len(smart.Chain) < 1 || smart.Chain[0] != "qwen3.7-max" {
-		t.Fatalf("smart.Chain = %v, want chain starting with qwen3.7-max", smart.Chain)
+	if len(smart.Chain) < 1 || smart.Chain[0] != "qwen3.8-max" {
+		t.Fatalf("smart.Chain = %v, want chain starting with qwen3.8-max", smart.Chain)
 	}
 }
 

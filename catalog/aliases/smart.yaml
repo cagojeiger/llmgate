@@ -2,7 +2,7 @@
 # 기준: 추론 능력, 정확도, 복잡 문제 해결. 대문서 출력 품질 최상순. (OpenCode Go 전용)
 alias: smart
 chain:
-  - qwen3.7-max
+  - qwen3.8-max
   - deepseek-v4-pro
   - qwen3.7-plus
   - kimi-k2.7-code

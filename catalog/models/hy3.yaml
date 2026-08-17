@@ -1,8 +1,7 @@
-# GLM-5.2 via OpenCode Go
-# source: https://models.dev/api.json provider=opencode-go
-# context: 1,000,000 tokens / max output: 131,072 tokens
+# Hy3 (GA, hy3-preview 대체) via OpenCode Go
+# source: https://models.dev/api.json provider=tencent-tokenhub
 # capabilities: reasoning=yes, tool_call=yes, input=text, output=text
-id: glm-5.2
+id: hy3
 vendor: opencode
 protocol: openai
 base_url: https://opencode.ai/zen/go/v1

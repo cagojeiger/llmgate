@@ -115,9 +115,11 @@ func buildAuditTerminal(_ context.Context, cfg *config.Server, log *slog.Logger)
 		slog.String("dir", cfg.AuditDir),
 		slog.String("s3_endpoint", target),
 		slog.String("s3_bucket", cfg.AuditS3Bucket),
-		slog.Duration("rotate_interval", cfg.AuditRotateInterval),
-		slog.Duration("upload_interval", cfg.AuditUploadInterval),
-		slog.Duration("retention", cfg.AuditRetention),
+		// human-readable durations ("1h0m0s"), not raw nanoseconds, so the
+		// startup line reads cleanly in log analysis.
+		slog.String("rotate_interval", cfg.AuditRotateInterval.String()),
+		slog.String("upload_interval", cfg.AuditUploadInterval.String()),
+		slog.String("retention", cfg.AuditRetention.String()),
 		slog.String("compression", cfg.AuditCompression),
 		slog.Int("upload_concurrency", cfg.AuditUploadConcurrency))
 	return fileSink, nil

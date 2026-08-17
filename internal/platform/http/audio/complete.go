@@ -53,17 +53,23 @@ func (h *Handler) serveTranscription(w http.ResponseWriter, r *http.Request, req
 	return result.Response
 }
 
-// encodeTranscription renders the response in the caller's requested format:
-// text / srt / vtt emit the raw transcript as text/plain; json (default) and
-// verbose_json emit the JSON object. omitempty on the timing fields means the
-// plain json format collapses to {"text":...} while verbose_json keeps them.
+// encodeTranscription renders the response in the caller's requested format,
+// labeling each with its OpenAI content type so a caller (or proxy) can tell
+// srt from vtt from plain text. The transcript body is whatever the upstream
+// produced for that response_format (llmgate forwards the field verbatim); json
+// (default) and verbose_json emit the JSON object — omitempty on the timing
+// fields collapses plain json to {"text":...} while verbose_json keeps them.
 func encodeTranscription(responseFormat string, resp *llmtypes.TranscriptionResponse) ([]byte, string, error) {
 	if resp == nil {
 		resp = &llmtypes.TranscriptionResponse{}
 	}
 	switch strings.ToLower(responseFormat) {
-	case "text", "srt", "vtt":
+	case "text":
 		return []byte(resp.Text), "text/plain; charset=utf-8", nil
+	case "srt":
+		return []byte(resp.Text), "application/x-subrip", nil
+	case "vtt":
+		return []byte(resp.Text), "text/vtt; charset=utf-8", nil
 	default: // "", json, verbose_json
 		out, err := json.Marshal(resp)
 		if err != nil {

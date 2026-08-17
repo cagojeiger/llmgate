@@ -58,6 +58,26 @@ type Server struct {
 	// goroutine. Operators sizing terminationGracePeriodSeconds should
 	// budget ShutdownDrainTimeout + this value + a small margin.
 	LLMResultAsyncCloseTimeout time.Duration
+
+	// Audit sink: local-rotate + best-effort upload of finalized result
+	// events (internal/platform/audit). Empty AuditDir disables it and
+	// takes priority over the NATS sink when set. Empty AuditS3Endpoint
+	// runs it local-only (rolling log, no upload). Result events carry
+	// full prompt/completion bodies, same as the NATS path.
+	AuditDir            string
+	AuditRotateInterval time.Duration
+	AuditRotateMaxBytes int64
+	AuditUploadInterval time.Duration
+	AuditRetention      time.Duration
+	AuditDiskCap        int64
+	AuditS3Endpoint     string
+	AuditS3Bucket       string
+	AuditS3Region       string
+	AuditS3AccessKey    string
+	AuditS3SecretKey    string
+	AuditS3Prefix       string
+	AuditS3UseSSL       bool
+	AuditS3PathStyle    bool
 }
 
 func LoadServer() (*Server, error) {
@@ -129,6 +149,34 @@ func LoadServer() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	auditRotateInterval, err := positiveDuration("LLMGATE_AUDIT_ROTATE_INTERVAL", "1h")
+	if err != nil {
+		return nil, err
+	}
+	auditRotateMaxBytes, err := positiveInt64("LLMGATE_AUDIT_ROTATE_MAX_BYTES", "134217728")
+	if err != nil {
+		return nil, err
+	}
+	auditUploadInterval, err := positiveDuration("LLMGATE_AUDIT_UPLOAD_INTERVAL", "1h")
+	if err != nil {
+		return nil, err
+	}
+	auditRetention, err := positiveDuration("LLMGATE_AUDIT_RETENTION", "168h")
+	if err != nil {
+		return nil, err
+	}
+	auditDiskCap, err := positiveInt64("LLMGATE_AUDIT_DISK_CAP", "5368709120")
+	if err != nil {
+		return nil, err
+	}
+	auditS3UseSSL, err := boolValue("LLMGATE_AUDIT_S3_USE_SSL", "false")
+	if err != nil {
+		return nil, err
+	}
+	auditS3PathStyle, err := boolValue("LLMGATE_AUDIT_S3_PATH_STYLE", "true")
+	if err != nil {
+		return nil, err
+	}
 
 	cfg := &Server{
 		Addr:                        orDefault("LLMGATE_ADDR", ":8080"),
@@ -155,6 +203,20 @@ func LoadServer() (*Server, error) {
 		LLMResultAsyncFlush:         llmResultFlush,
 		LLMResultAsyncEmitTimeout:   llmResultEmitTimeout,
 		LLMResultAsyncCloseTimeout:  llmResultCloseTimeout,
+		AuditDir:                    orDefault("LLMGATE_AUDIT_DIR", ""),
+		AuditRotateInterval:         auditRotateInterval,
+		AuditRotateMaxBytes:         auditRotateMaxBytes,
+		AuditUploadInterval:         auditUploadInterval,
+		AuditRetention:              auditRetention,
+		AuditDiskCap:                auditDiskCap,
+		AuditS3Endpoint:             orDefault("LLMGATE_AUDIT_S3_ENDPOINT", ""),
+		AuditS3Bucket:               orDefault("LLMGATE_AUDIT_S3_BUCKET", ""),
+		AuditS3Region:               orDefault("LLMGATE_AUDIT_S3_REGION", "us-east-1"),
+		AuditS3AccessKey:            orDefault("LLMGATE_AUDIT_S3_ACCESS_KEY", ""),
+		AuditS3SecretKey:            orDefault("LLMGATE_AUDIT_S3_SECRET_KEY", ""),
+		AuditS3Prefix:               orDefault("LLMGATE_AUDIT_S3_PREFIX", ""),
+		AuditS3UseSSL:               auditS3UseSSL,
+		AuditS3PathStyle:            auditS3PathStyle,
 	}
 	if err := validateSecurityDefaults(cfg); err != nil {
 		return nil, err

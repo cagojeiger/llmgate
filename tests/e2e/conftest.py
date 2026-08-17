@@ -120,16 +120,31 @@ def _ensure_port_free(port: int) -> None:
 
 
 def _materialize_cassette_catalog(dst_root: Path, upstream_url: str) -> Path:
-    """Copy catalog/ into dst_root, rewriting every base_url: to upstream_url."""
+    """Copy catalog/ into dst_root, pointing every base_url: at the mock upstream.
+
+    HTTP surfaces get the full upstream_url. ws://|wss:// surfaces (the realtime
+    api) keep their scheme and only swap the authority — a realtime model
+    rewritten to http:// would fail per-surface scheme validation and the gate
+    would never boot, erroring every test with "gate did not become healthy".
+    """
     src = REPO_ROOT / "catalog"
     dst = dst_root / "catalog"
     if dst.exists():
         shutil.rmtree(dst)
     shutil.copytree(src, dst)
-    base_url_pat = re.compile(r"^(\s*base_url:).*$", flags=re.MULTILINE)
+    authority = upstream_url.split("://", 1)[-1]
+    base_url_pat = re.compile(r"^(\s*base_url:)\s*(\S+).*$", flags=re.MULTILINE)
+
+    def _rewrite(m: "re.Match[str]") -> str:
+        prefix, existing = m.group(1), m.group(2)
+        if existing.startswith(("ws://", "wss://")):
+            scheme = existing.split("://", 1)[0]
+            return f"{prefix} {scheme}://{authority}"
+        return f"{prefix} {upstream_url}"
+
     for yaml_path in (dst / "models").glob("*.yaml"):
         text = yaml_path.read_text()
-        yaml_path.write_text(base_url_pat.sub(rf"\1 {upstream_url}", text))
+        yaml_path.write_text(base_url_pat.sub(_rewrite, text))
     return dst
 
 

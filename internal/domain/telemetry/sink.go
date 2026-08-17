@@ -1,7 +1,6 @@
 package telemetry
 
 import (
-	"context"
 	"log/slog"
 
 	"llmgate/internal/domain/sinkutil"
@@ -27,41 +26,13 @@ func NewRecoveringSink(next EventSink, log *slog.Logger) EventSink {
 	return sinkutil.NewRecovering(next, log, "telemetry sink panic", eventTypeOf)
 }
 
-// FanoutSink fans each event out to every contained sink. A panic in one sink
-// is logged and isolated so later sinks still receive the event.
-type FanoutSink struct {
-	log   *slog.Logger
-	sinks []EventSink
-}
+// FanoutSink fans each event out to every contained sink, isolating a
+// panic in one so later sinks still receive the event. It is the shared
+// sinkutil.Fanout specialized to telemetry's event type.
+type FanoutSink = sinkutil.Fanout[Event]
 
 func NewFanoutSink(log *slog.Logger, sinks ...EventSink) *FanoutSink {
-	if log == nil {
-		log = slog.Default()
-	}
-	return &FanoutSink{log: log, sinks: sinks}
-}
-
-func (s *FanoutSink) Emit(ctx context.Context, event Event) {
-	for _, sink := range s.sinks {
-		if sink == nil {
-			continue
-		}
-		// Wrap per-call so one sink panic does not stop later sinks.
-		sinkutil.NewRecovering(sink, s.log, "telemetry sink panic", eventTypeOf).Emit(ctx, event)
-	}
-}
-
-func (s *FanoutSink) Close() error {
-	var firstErr error
-	for _, sink := range s.sinks {
-		if sink == nil {
-			continue
-		}
-		if err := sink.Close(); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-	return firstErr
+	return sinkutil.NewFanout(log, "telemetry sink panic", eventTypeOf, sinks...)
 }
 
 func eventTypeOf(event Event) string {

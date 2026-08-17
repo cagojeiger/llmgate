@@ -9,8 +9,6 @@ import (
 	"time"
 )
 
-const activeFileName = "current.jsonl"
-
 // writer turns events into sealed files: it appends lines to the active
 // file and rotates it (fsync + atomic rename into pending/) on a size
 // trigger or on demand. It owns only the active-file state; the shipper
@@ -26,13 +24,15 @@ type writer struct {
 
 	mu sync.Mutex
 	f  *os.File
-	// bucketStart is the UTC time-bucket the active file belongs to
-	// (open time truncated to rotateInterval). Sealed files are labelled
-	// by this — the DATA window's start — not by the seal instant, so a
-	// file covering 10:00–11:00 keys under hour=10 even though it seals at
-	// 11:00.
-	bucketStart time.Time
-	size        int64
+	// activeName is the final sealed name, fixed when the file opens:
+	// <instance>-<bucketStart>-<rand>.jsonl, where bucketStart is the
+	// open time truncated to rotateInterval (the DATA window's start, not
+	// the seal instant — a file covering 10:00–11:00 keys under hour=10).
+	// Naming at open makes the active file instance-scoped and unique, so
+	// a failed seal-rename can never make the next write append across
+	// buckets, and two processes sharing a dir never collide.
+	activeName string
+	size       int64
 }
 
 func newWriter(dir dirs, instance string, rotateMaxBytes int64, rotateInterval time.Duration, log *slog.Logger) *writer {
@@ -53,11 +53,16 @@ func bucketStartOf(t time.Time, interval time.Duration) time.Time {
 // recoverOrphans seals any file the previous process left in active/ (a
 // crash before rotation) so its records ship rather than being appended
 // to by this process. Runs before any goroutine starts, so it needs no
-// lock. The bucket is derived from the file's mod time (its last write).
+// lock. Orphans already carry their open-time bucket in their name, so we
+// just move them as-is (no re-labelling); empty orphans (opened, never
+// written, then crashed) are dropped to avoid a zero-record object.
 func (w *writer) recoverOrphans() {
 	for _, f := range listFiles(w.dir.active) {
-		name := sealedName(w.instance, bucketStartOf(f.mod, w.rotateInterval))
-		if err := os.Rename(f.path, filepath.Join(w.dir.pending, name)); err != nil {
+		if f.size == 0 {
+			_ = os.Remove(f.path)
+			continue
+		}
+		if err := os.Rename(f.path, filepath.Join(w.dir.pending, f.name)); err != nil {
 			w.log.Warn("audit recover orphan failed", slog.String("file", f.name), slog.String("err", err.Error()))
 		}
 	}
@@ -92,14 +97,17 @@ func (w *writer) ensureOpenLocked() error {
 	if w.f != nil {
 		return nil
 	}
-	f, err := os.OpenFile(filepath.Join(w.dir.active, activeFileName), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
+	// Fix the bucket and the final name at open: the file that opens at
+	// 10:00 and seals at the 11:00 boundary is labelled hour=10 (its data
+	// window), and its unique instance-scoped name is set now so a later
+	// seal-rename failure can never mix buckets.
+	bucketStart := bucketStartOf(time.Now(), w.rotateInterval)
+	w.activeName = sealedName(w.instance, bucketStart)
+	f, err := os.OpenFile(filepath.Join(w.dir.active, w.activeName), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
 	if err != nil {
 		return err
 	}
-	// The bucket is fixed when the file opens (its first record), so a
-	// file that opens at 10:00 and seals at the 11:00 boundary is still
-	// labelled hour=10 — the window its data covers.
-	w.f, w.size, w.bucketStart = f, 0, bucketStartOf(time.Now(), w.rotateInterval)
+	w.f, w.size = f, 0
 	return nil
 }
 
@@ -129,7 +137,8 @@ func (w *writer) rotateLocked() {
 	}
 	f := w.f
 	size := w.size
-	w.f, w.size = nil, 0
+	name := w.activeName
+	w.f, w.size, w.activeName = nil, 0, ""
 	if size == 0 && fileEmpty(f) {
 		_ = f.Close()
 		_ = os.Remove(f.Name())
@@ -141,9 +150,12 @@ func (w *writer) rotateLocked() {
 	if err := f.Close(); err != nil {
 		w.log.Warn("audit close active failed", slog.String("err", err.Error()))
 	}
-	name := sealedName(w.instance, w.bucketStart)
+	// The active file already has its final sealed name, so this is a
+	// pure move. If it fails the file stays in active/ under that unique
+	// name — the next write opens a fresh file (no bucket mixing) and
+	// recoverOrphans re-seals the leftover on the next boot.
 	if err := os.Rename(f.Name(), filepath.Join(w.dir.pending, name)); err != nil {
-		w.log.Warn("audit seal rename failed", slog.String("err", err.Error()))
+		w.log.Warn("audit seal rename failed; leftover kept for boot recovery", slog.String("file", name), slog.String("err", err.Error()))
 	}
 }
 

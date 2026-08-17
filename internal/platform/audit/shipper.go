@@ -84,6 +84,12 @@ func (s *shipper) pass(ctx context.Context) {
 // it streams pending/<name> → compressed/<name>.gz and drops the
 // plaintext; with CompressionNone it just renames. The atomic hand-off
 // means the uploader never sees a half-compressed file.
+//
+// Deliberately single-threaded — do NOT parallelize this. Compression is
+// CPU-bound, and this audit path is a best-effort background concern that
+// must not steal request-serving cores; running it in the one shipper
+// goroutine caps it at a single core. (Upload is parallelized instead
+// because it is I/O-bound and barely touches the CPU.)
 func (s *shipper) compressPass(ctx context.Context) {
 	for _, f := range listFiles(s.pendingDir) {
 		if ctx.Err() != nil {

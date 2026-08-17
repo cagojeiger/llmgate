@@ -8,7 +8,6 @@ import (
 	llmresultsink "llmgate/internal/domain/llmresult/sink"
 	"llmgate/internal/platform/audit"
 	"llmgate/internal/platform/config"
-	natsllmresult "llmgate/internal/platform/nats/llmresult"
 )
 
 // resultSinkFactory builds one terminal result sink when its config gate
@@ -30,11 +29,6 @@ func defaultResultSinkFactories() []resultSinkFactory {
 			enabled: func(c *config.Server) bool { return c.AuditDir != "" },
 			build:   buildAuditTerminal,
 		},
-		{
-			name:    "nats",
-			enabled: func(c *config.Server) bool { return c.LLMResultNATSURL != "" },
-			build:   buildNATSTerminal,
-		},
 	}
 }
 
@@ -44,8 +38,8 @@ func defaultResultSinkFactories() []resultSinkFactory {
 // synchronously to every enabled terminal. This keeps a single buffer of
 // body-carrying events (no per-sink duplication, no cross-queue pointer
 // pinning) at the cost of the terminals sharing one worker — acceptable
-// for best-effort data, and terminals are ordered fast-first (local audit
-// before remote NATS).
+// for best-effort data, and terminals are ordered fast-first (local
+// terminals before any remote ones).
 func buildResultSink(ctx context.Context, cfg *config.Server, log *slog.Logger) (llmresultsink.Sink, error) {
 	return assembleResultSink(ctx, cfg, log, defaultResultSinkFactories())
 }
@@ -109,21 +103,6 @@ func buildAuditTerminal(_ context.Context, cfg *config.Server, log *slog.Logger)
 		return nil, fmt.Errorf("build audit file sink: %w", err)
 	}
 	return fileSink, nil
-}
-
-// buildNATSTerminal builds the raw NATS publisher (no async wrap). It uses
-// ctx for the initial connection only.
-func buildNATSTerminal(ctx context.Context, cfg *config.Server, log *slog.Logger) (llmresultsink.Sink, error) {
-	publisher, err := natsllmresult.NewPublisher(ctx, natsllmresult.Config{
-		URL:      cfg.LLMResultNATSURL,
-		Subject:  cfg.LLMResultNATSSubject,
-		User:     cfg.LLMResultNATSUser,
-		Password: cfg.LLMResultNATSPassword,
-	}, log)
-	if err != nil {
-		return nil, fmt.Errorf("build llm result nats publisher: %w", err)
-	}
-	return publisher, nil
 }
 
 func wrapAsync(terminal llmresultsink.Sink, cfg *config.Server, log *slog.Logger) llmresultsink.Sink {

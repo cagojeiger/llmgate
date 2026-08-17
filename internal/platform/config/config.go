@@ -1,11 +1,7 @@
 package config
 
 import (
-	"errors"
-	"fmt"
 	"log/slog"
-	"net/url"
-	"strings"
 	"time"
 )
 
@@ -38,21 +34,12 @@ type Server struct {
 	MaxRequestBytes int64
 	MetricsEnabled  bool
 
-	// Finalized LLM result event publishing. Empty NATS URL disables remote
-	// publishing (and the handler skips building result events entirely).
-	LLMResultNATSURL      string
-	LLMResultNATSSubject  string
-	LLMResultNATSUser     string
-	LLMResultNATSPassword string
-	// LLMResultNATSAllowPlaintext permits nats:// (no TLS) outside local.
-	// Result events carry full prompt and completion content, so plaintext
-	// transport is opt-in even for an in-cluster broker.
-	LLMResultNATSAllowPlaintext bool
-	LLMResultAsyncQueueSize     int
-	LLMResultAsyncBatchSize     int
-	LLMResultAsyncFlush         time.Duration
-	// LLMResultAsyncEmitTimeout caps one NATS publish from the async
-	// worker so a stuck broker cannot freeze the drain loop.
+	// Finalized LLM result event publishing.
+	LLMResultAsyncQueueSize int
+	LLMResultAsyncBatchSize int
+	LLMResultAsyncFlush     time.Duration
+	// LLMResultAsyncEmitTimeout caps one downstream Emit from the async
+	// worker so a stuck sink cannot freeze the drain loop.
 	LLMResultAsyncEmitTimeout time.Duration
 	// LLMResultAsyncCloseTimeout caps Close()'s wait on the worker
 	// goroutine. Operators sizing terminationGracePeriodSeconds should
@@ -60,10 +47,9 @@ type Server struct {
 	LLMResultAsyncCloseTimeout time.Duration
 
 	// Audit sink: local-rotate + best-effort upload of finalized result
-	// events (internal/platform/audit). Empty AuditDir disables it and
-	// takes priority over the NATS sink when set. Empty AuditS3Endpoint
-	// runs it local-only (rolling log, no upload). Result events carry
-	// full prompt/completion bodies, same as the NATS path.
+	// events (internal/platform/audit). Empty AuditDir disables it. Empty
+	// AuditS3Endpoint runs it local-only (rolling log, no upload). Result
+	// events carry full prompt/completion bodies.
 	AuditDir            string
 	AuditRotateInterval time.Duration
 	AuditRotateMaxBytes int64
@@ -145,10 +131,6 @@ func LoadServer() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	llmResultAllowPlaintext, err := boolValue("LLMGATE_LLMRESULT_NATS_ALLOW_PLAINTEXT", "false")
-	if err != nil {
-		return nil, err
-	}
 	auditRotateInterval, err := positiveDuration("LLMGATE_AUDIT_ROTATE_INTERVAL", "1h")
 	if err != nil {
 		return nil, err
@@ -179,76 +161,39 @@ func LoadServer() (*Server, error) {
 	}
 
 	cfg := &Server{
-		Addr:                        orDefault("LLMGATE_ADDR", ":8080"),
-		Environment:                 orDefault("LLMGATE_ENVIRONMENT", "local"),
-		ShutdownDrainTimeout:        drainTimeout,
-		LogLevel:                    logLevel,
-		FallbackOn:                  parseCSV("LLMGATE_FALLBACK_ON", "rate_limit,upstream,timeout,network"),
-		CircuitFailures:             circuitFailures,
-		CircuitOpen:                 circuitOpen,
-		CircuitMaxOpen:              circuitMaxOpen,
-		CircuitJitter:               circuitJitter,
-		RequestTimeout:              requestTimeout,
-		CompleteTimeout:             completeTimeout,
-		StreamIdleTimeout:           streamIdleTimeout,
-		MaxRequestBytes:             maxRequestBytes,
-		MetricsEnabled:              metricsEnabled,
-		LLMResultNATSURL:            orDefault("LLMGATE_LLMRESULT_NATS_URL", ""),
-		LLMResultNATSSubject:        orDefault("LLMGATE_LLMRESULT_NATS_SUBJECT", "llmgate.llmresult.finalized"),
-		LLMResultNATSUser:           orDefault("LLMGATE_LLMRESULT_NATS_USER", ""),
-		LLMResultNATSPassword:       orDefault("LLMGATE_LLMRESULT_NATS_PASSWORD", ""),
-		LLMResultNATSAllowPlaintext: llmResultAllowPlaintext,
-		LLMResultAsyncQueueSize:     llmResultQueueSize,
-		LLMResultAsyncBatchSize:     llmResultBatchSize,
-		LLMResultAsyncFlush:         llmResultFlush,
-		LLMResultAsyncEmitTimeout:   llmResultEmitTimeout,
-		LLMResultAsyncCloseTimeout:  llmResultCloseTimeout,
-		AuditDir:                    orDefault("LLMGATE_AUDIT_DIR", ""),
-		AuditRotateInterval:         auditRotateInterval,
-		AuditRotateMaxBytes:         auditRotateMaxBytes,
-		AuditUploadInterval:         auditUploadInterval,
-		AuditRetention:              auditRetention,
-		AuditDiskCap:                auditDiskCap,
-		AuditS3Endpoint:             orDefault("LLMGATE_AUDIT_S3_ENDPOINT", ""),
-		AuditS3Bucket:               orDefault("LLMGATE_AUDIT_S3_BUCKET", ""),
-		AuditS3Region:               orDefault("LLMGATE_AUDIT_S3_REGION", "us-east-1"),
-		AuditS3AccessKey:            orDefault("LLMGATE_AUDIT_S3_ACCESS_KEY", ""),
-		AuditS3SecretKey:            orDefault("LLMGATE_AUDIT_S3_SECRET_KEY", ""),
-		AuditS3Prefix:               orDefault("LLMGATE_AUDIT_S3_PREFIX", ""),
-		AuditS3UseSSL:               auditS3UseSSL,
-		AuditS3PathStyle:            auditS3PathStyle,
-	}
-	if err := validateSecurityDefaults(cfg); err != nil {
-		return nil, err
+		Addr:                       orDefault("LLMGATE_ADDR", ":8080"),
+		Environment:                orDefault("LLMGATE_ENVIRONMENT", "local"),
+		ShutdownDrainTimeout:       drainTimeout,
+		LogLevel:                   logLevel,
+		FallbackOn:                 parseCSV("LLMGATE_FALLBACK_ON", "rate_limit,upstream,timeout,network"),
+		CircuitFailures:            circuitFailures,
+		CircuitOpen:                circuitOpen,
+		CircuitMaxOpen:             circuitMaxOpen,
+		CircuitJitter:              circuitJitter,
+		RequestTimeout:             requestTimeout,
+		CompleteTimeout:            completeTimeout,
+		StreamIdleTimeout:          streamIdleTimeout,
+		MaxRequestBytes:            maxRequestBytes,
+		MetricsEnabled:             metricsEnabled,
+		LLMResultAsyncQueueSize:    llmResultQueueSize,
+		LLMResultAsyncBatchSize:    llmResultBatchSize,
+		LLMResultAsyncFlush:        llmResultFlush,
+		LLMResultAsyncEmitTimeout:  llmResultEmitTimeout,
+		LLMResultAsyncCloseTimeout: llmResultCloseTimeout,
+		AuditDir:                   orDefault("LLMGATE_AUDIT_DIR", ""),
+		AuditRotateInterval:        auditRotateInterval,
+		AuditRotateMaxBytes:        auditRotateMaxBytes,
+		AuditUploadInterval:        auditUploadInterval,
+		AuditRetention:             auditRetention,
+		AuditDiskCap:               auditDiskCap,
+		AuditS3Endpoint:            orDefault("LLMGATE_AUDIT_S3_ENDPOINT", ""),
+		AuditS3Bucket:              orDefault("LLMGATE_AUDIT_S3_BUCKET", ""),
+		AuditS3Region:              orDefault("LLMGATE_AUDIT_S3_REGION", "us-east-1"),
+		AuditS3AccessKey:           orDefault("LLMGATE_AUDIT_S3_ACCESS_KEY", ""),
+		AuditS3SecretKey:           orDefault("LLMGATE_AUDIT_S3_SECRET_KEY", ""),
+		AuditS3Prefix:              orDefault("LLMGATE_AUDIT_S3_PREFIX", ""),
+		AuditS3UseSSL:              auditS3UseSSL,
+		AuditS3PathStyle:           auditS3PathStyle,
 	}
 	return cfg, nil
-}
-
-func validateSecurityDefaults(cfg *Server) error {
-	if cfg == nil || strings.EqualFold(cfg.Environment, "local") {
-		return nil
-	}
-	if cfg.LLMResultNATSURL == "" {
-		return nil
-	}
-	if cfg.LLMResultNATSUser == "" || cfg.LLMResultNATSPassword == "" {
-		return errors.New("LLMGATE_LLMRESULT_NATS_USER and LLMGATE_LLMRESULT_NATS_PASSWORD are required when remote llmresult publishing is enabled outside local")
-	}
-	u, err := url.Parse(cfg.LLMResultNATSURL)
-	if err != nil {
-		return fmt.Errorf("LLMGATE_LLMRESULT_NATS_URL must be a valid URL: %w", err)
-	}
-	switch {
-	case strings.EqualFold(u.Scheme, "tls"):
-		return nil
-	case strings.EqualFold(u.Scheme, "nats"):
-		// Result events carry full prompt/completion content, so plaintext
-		// NATS outside local needs an explicit opt-in (in-cluster brokers).
-		if cfg.LLMResultNATSAllowPlaintext {
-			return nil
-		}
-		return errors.New("LLMGATE_LLMRESULT_NATS_URL uses plaintext nats:// outside local; use tls:// or set LLMGATE_LLMRESULT_NATS_ALLOW_PLAINTEXT=true for an in-cluster broker")
-	default:
-		return errors.New("LLMGATE_LLMRESULT_NATS_URL must use nats:// or tls://")
-	}
 }

@@ -40,7 +40,7 @@ func TestAsyncSink_Close_TimeoutAbandonsHangingWorker(t *testing.T) {
 }
 
 // ctxRespectingSlowSink blocks inside Emit until ctx is cancelled. This
-// models a NATS publisher that respects the per-emit timeout.
+// models a remote publisher that respects the per-emit timeout.
 type ctxRespectingSlowSink struct {
 	emits    atomic.Int64
 	ctxDones atomic.Int64

@@ -15,8 +15,8 @@ const (
 	defaultAsyncQueueSize     = 1000
 	defaultAsyncBatchSize     = 100
 	defaultAsyncFlushInterval = time.Second
-	// defaultAsyncEmitTimeout bounds one downstream Emit (e.g. NATS
-	// Publish) so a stuck broker cannot freeze the drain loop.
+	// defaultAsyncEmitTimeout bounds one downstream Emit so a stuck
+	// remote sink cannot freeze the drain loop.
 	defaultAsyncEmitTimeout = 10 * time.Second
 	// defaultAsyncCloseTimeout bounds Close() waiting on the worker.
 	// It fits inside the post-drain headroom operators are expected to
@@ -134,8 +134,8 @@ func (s *AsyncSink) Close() error {
 				slog.Uint64("dropped_total", s.dropped.Load()),
 			)
 		case <-time.After(s.closeTimeout):
-			// Worker is still inside next.Emit (broker hang). We
-			// abandon it: the underlying NATS conn close below will
+			// Worker is still inside next.Emit (downstream hang). We
+			// abandon it: the underlying sink's Close below will
 			// usually unblock it; if not, the worker goroutine
 			// outlives Close until process exit. queue_remaining is
 			// how many already-enqueued events the worker had not yet

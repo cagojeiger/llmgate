@@ -134,18 +134,15 @@ func TestAssembleResultSink_BuildErrorPropagates(t *testing.T) {
 
 func TestDefaultResultSinkFactories_NamesAndGates(t *testing.T) {
 	factories := defaultResultSinkFactories()
-	if len(factories) != 2 {
-		t.Fatalf("factory count = %d, want 2 (audit, nats)", len(factories))
+	if len(factories) != 1 {
+		t.Fatalf("factory count = %d, want 1 (audit)", len(factories))
 	}
-	audit, nats := factories[0], factories[1]
-	if audit.name != "audit" || nats.name != "nats" {
-		t.Fatalf("names = (%q, %q), want (audit, nats)", audit.name, nats.name)
+	audit := factories[0]
+	if audit.name != "audit" {
+		t.Fatalf("name = %q, want audit", audit.name)
 	}
 	if !audit.enabled(&config.Server{AuditDir: "/x"}) || audit.enabled(&config.Server{}) {
 		t.Fatal("audit gate should key off AuditDir")
-	}
-	if !nats.enabled(&config.Server{LLMResultNATSURL: "nats://x"}) || nats.enabled(&config.Server{}) {
-		t.Fatal("nats gate should key off LLMResultNATSURL")
 	}
 }
 

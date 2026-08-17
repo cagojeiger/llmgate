@@ -29,11 +29,6 @@ func resetEnv(t *testing.T) {
 		"LLMGATE_STREAM_IDLE_TIMEOUT",
 		"LLMGATE_METRICS_ENABLED",
 		"LLMGATE_MAX_REQUEST_BYTES",
-		"LLMGATE_LLMRESULT_NATS_URL",
-		"LLMGATE_LLMRESULT_NATS_SUBJECT",
-		"LLMGATE_LLMRESULT_NATS_USER",
-		"LLMGATE_LLMRESULT_NATS_PASSWORD",
-		"LLMGATE_LLMRESULT_NATS_ALLOW_PLAINTEXT",
 		"LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE",
 		"LLMGATE_LLMRESULT_ASYNC_BATCH_SIZE",
 		"LLMGATE_LLMRESULT_ASYNC_FLUSH_INTERVAL",
@@ -89,18 +84,6 @@ func TestLoadServer_Defaults(t *testing.T) {
 	}
 	if cfg.MetricsEnabled {
 		t.Error("MetricsEnabled = true, want false default")
-	}
-	if cfg.LLMResultNATSURL != "" {
-		t.Errorf("LLMResultNATSURL = %q, want disabled empty default", cfg.LLMResultNATSURL)
-	}
-	if cfg.LLMResultNATSSubject != "llmgate.llmresult.finalized" {
-		t.Errorf("LLMResultNATSSubject = %q, want llmgate.llmresult.finalized", cfg.LLMResultNATSSubject)
-	}
-	if cfg.LLMResultNATSUser != "" {
-		t.Errorf("LLMResultNATSUser = %q, want empty (anonymous)", cfg.LLMResultNATSUser)
-	}
-	if cfg.LLMResultNATSPassword != "" {
-		t.Errorf("LLMResultNATSPassword = %q, want empty", cfg.LLMResultNATSPassword)
 	}
 	if cfg.LLMResultAsyncQueueSize != 1000 {
 		t.Errorf("LLMResultAsyncQueueSize = %d, want 1000", cfg.LLMResultAsyncQueueSize)
@@ -209,12 +192,8 @@ func TestLoadServer_StreamIdleTimeoutOverride(t *testing.T) {
 	}
 }
 
-func TestLoadServer_LLMResultNATSOverrides(t *testing.T) {
+func TestLoadServer_LLMResultAsyncOverrides(t *testing.T) {
 	resetEnv(t)
-	t.Setenv("LLMGATE_LLMRESULT_NATS_URL", "nats://localhost:4222")
-	t.Setenv("LLMGATE_LLMRESULT_NATS_SUBJECT", "results.finalized")
-	t.Setenv("LLMGATE_LLMRESULT_NATS_USER", "llmgate")
-	t.Setenv("LLMGATE_LLMRESULT_NATS_PASSWORD", "s3cret")
 	t.Setenv("LLMGATE_LLMRESULT_ASYNC_QUEUE_SIZE", "25")
 	t.Setenv("LLMGATE_LLMRESULT_ASYNC_BATCH_SIZE", "5")
 	t.Setenv("LLMGATE_LLMRESULT_ASYNC_FLUSH_INTERVAL", "250ms")
@@ -222,18 +201,6 @@ func TestLoadServer_LLMResultNATSOverrides(t *testing.T) {
 	cfg, err := LoadServer()
 	if err != nil {
 		t.Fatalf("LoadServer: %v", err)
-	}
-	if cfg.LLMResultNATSURL != "nats://localhost:4222" {
-		t.Errorf("LLMResultNATSURL = %q", cfg.LLMResultNATSURL)
-	}
-	if cfg.LLMResultNATSSubject != "results.finalized" {
-		t.Errorf("LLMResultNATSSubject = %q", cfg.LLMResultNATSSubject)
-	}
-	if cfg.LLMResultNATSUser != "llmgate" {
-		t.Errorf("LLMResultNATSUser = %q, want llmgate", cfg.LLMResultNATSUser)
-	}
-	if cfg.LLMResultNATSPassword != "s3cret" {
-		t.Errorf("LLMResultNATSPassword = %q, want s3cret", cfg.LLMResultNATSPassword)
 	}
 	if cfg.LLMResultAsyncQueueSize != 25 {
 		t.Errorf("LLMResultAsyncQueueSize = %d, want 25", cfg.LLMResultAsyncQueueSize)
@@ -308,99 +275,6 @@ func TestLoadServer_RejectsInvalidMetricsEnabled(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "LLMGATE_METRICS_ENABLED") {
 		t.Errorf("err = %v, want metrics enabled key", err)
-	}
-}
-
-func TestLoadServer_RejectsPlaintextNATSOutsideLocal(t *testing.T) {
-	// Result events carry full prompt/completion content; plaintext nats://
-	// outside local must be an explicit opt-in, not the default.
-	resetEnv(t)
-	t.Setenv("LLMGATE_ENVIRONMENT", "prod")
-	t.Setenv("LLMGATE_LLMRESULT_NATS_URL", "nats://nats:4222")
-	t.Setenv("LLMGATE_LLMRESULT_NATS_USER", "llmgate")
-	t.Setenv("LLMGATE_LLMRESULT_NATS_PASSWORD", "s3cret")
-
-	_, err := LoadServer()
-	if err == nil {
-		t.Fatal("LoadServer: want error for plaintext nats:// outside local")
-	}
-	if !strings.Contains(err.Error(), "LLMGATE_LLMRESULT_NATS_ALLOW_PLAINTEXT") {
-		t.Errorf("err = %v, want opt-in hint", err)
-	}
-}
-
-func TestLoadServer_AllowsPlaintextNATSWithOptIn(t *testing.T) {
-	resetEnv(t)
-	t.Setenv("LLMGATE_ENVIRONMENT", "prod")
-	t.Setenv("LLMGATE_LLMRESULT_NATS_URL", "nats://nats:4222")
-	t.Setenv("LLMGATE_LLMRESULT_NATS_USER", "llmgate")
-	t.Setenv("LLMGATE_LLMRESULT_NATS_PASSWORD", "s3cret")
-	t.Setenv("LLMGATE_LLMRESULT_NATS_ALLOW_PLAINTEXT", "true")
-
-	cfg, err := LoadServer()
-	if err != nil {
-		t.Fatalf("LoadServer: %v", err)
-	}
-	if cfg.LLMResultNATSURL != "nats://nats:4222" {
-		t.Errorf("LLMResultNATSURL = %q", cfg.LLMResultNATSURL)
-	}
-	if !cfg.LLMResultNATSAllowPlaintext {
-		t.Error("LLMResultNATSAllowPlaintext = false, want true")
-	}
-}
-
-func TestLoadServer_AllowsPlaintextNATSInLocal(t *testing.T) {
-	resetEnv(t)
-	t.Setenv("LLMGATE_LLMRESULT_NATS_URL", "nats://localhost:4222")
-
-	if _, err := LoadServer(); err != nil {
-		t.Fatalf("LoadServer: %v (local must not require the opt-in)", err)
-	}
-}
-
-func TestLoadServer_AllowsTLSNATSOutsideLocal(t *testing.T) {
-	resetEnv(t)
-	t.Setenv("LLMGATE_ENVIRONMENT", "prod")
-	t.Setenv("LLMGATE_LLMRESULT_NATS_URL", "tls://nats:4222")
-	t.Setenv("LLMGATE_LLMRESULT_NATS_USER", "llmgate")
-	t.Setenv("LLMGATE_LLMRESULT_NATS_PASSWORD", "s3cret")
-
-	cfg, err := LoadServer()
-	if err != nil {
-		t.Fatalf("LoadServer: %v", err)
-	}
-	if cfg.LLMResultNATSURL != "tls://nats:4222" {
-		t.Errorf("LLMResultNATSURL = %q", cfg.LLMResultNATSURL)
-	}
-}
-
-func TestLoadServer_RequiresNATSCredentialsOutsideLocal(t *testing.T) {
-	resetEnv(t)
-	t.Setenv("LLMGATE_ENVIRONMENT", "prod")
-	t.Setenv("LLMGATE_LLMRESULT_NATS_URL", "nats://nats:4222")
-
-	_, err := LoadServer()
-	if err == nil {
-		t.Fatal("LoadServer: want error for missing NATS credentials outside local")
-	}
-	if !strings.Contains(err.Error(), "LLMGATE_LLMRESULT_NATS_USER") {
-		t.Errorf("err = %v, want credentials requirement", err)
-	}
-}
-
-func TestLoadServer_RejectsUnsupportedNATSScheme(t *testing.T) {
-	resetEnv(t)
-	t.Setenv("LLMGATE_ENVIRONMENT", "prod")
-	t.Setenv("LLMGATE_LLMRESULT_NATS_URL", "http://nats:4222")
-	t.Setenv("LLMGATE_LLMRESULT_NATS_USER", "llmgate")
-	t.Setenv("LLMGATE_LLMRESULT_NATS_PASSWORD", "s3cret")
-
-	_, err := LoadServer()
-	if err == nil {
-		t.Fatal("LoadServer: want error for unsupported NATS URL scheme")
-	}
-	if !strings.Contains(err.Error(), "nats:// or tls://") {
-		t.Errorf("err = %v, want supported scheme requirement", err)
 	}
 }
 

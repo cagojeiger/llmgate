@@ -188,7 +188,7 @@ func TestShipper_ReapRetention(t *testing.T) {
 	writeFile(t, filepath.Join(d.uploaded, fresh), "y")
 
 	sh := newShipper(d, newFakeStore(), "", Config{Retention: 24 * time.Hour}.withDefaults(), slogDiscard())
-	sh.reapPass()
+	sh.reapPass(context.Background())
 
 	if fileExists(filepath.Join(d.uploaded, old)) {
 		t.Fatalf("old uploaded file should be reaped past retention")
@@ -214,7 +214,7 @@ func TestShipper_DiskCapDropsOldestUploadedFirst(t *testing.T) {
 	// Cap 150 forces dropping the oldest uploaded (100) → total 200; still
 	// over, drop newer uploaded (100) → 100; pending is spared last.
 	sh := newShipper(d, newFakeStore(), "", Config{DiskCap: 150, Retention: 999 * time.Hour}.withDefaults(), slogDiscard())
-	sh.enforceDiskCap()
+	sh.enforceDiskCap(context.Background())
 
 	if fileExists(filepath.Join(d.uploaded, older)) {
 		t.Fatalf("oldest uploaded should be dropped first")

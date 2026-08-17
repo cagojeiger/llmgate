@@ -21,7 +21,7 @@ func buildResultSink(ctx context.Context, cfg *config.Server, log *slog.Logger) 
 	case cfg == nil:
 		return llmresultsink.NopSink{}, nil
 	case cfg.AuditDir != "":
-		return buildAuditSink(cfg, log)
+		return buildAuditSink(cfg, log) //nolint:contextcheck // FileSink's rotator/shipper goroutines detach from the build ctx by design (they stop on Close, not on build completion)
 	case cfg.LLMResultNATSURL != "":
 		return buildNATSSink(ctx, cfg, log)
 	default:
@@ -70,11 +70,12 @@ func buildNATSSink(ctx context.Context, cfg *config.Server, log *slog.Logger) (l
 	if err != nil {
 		return nil, fmt.Errorf("build llm result nats publisher: %w", err)
 	}
-	return wrapAsync(publisher, cfg, log), nil
+	return wrapAsync(publisher, cfg, log), nil //nolint:contextcheck // AsyncSink worker detaches from request ctx by design (see emitOne)
 }
 
 func wrapAsync(terminal llmresultsink.Sink, cfg *config.Server, log *slog.Logger) llmresultsink.Sink {
-	return llmresultsink.NewAsyncSinkWithConfig(terminal, log, llmresultsink.AsyncConfig{ //nolint:contextcheck // AsyncSink worker detaches from request ctx by design (see emitOne)
+	return llmresultsink.NewAsyncSinkWithConfig(terminal, log, llmresultsink.AsyncConfig{
+
 		QueueSize:     cfg.LLMResultAsyncQueueSize,
 		BatchSize:     cfg.LLMResultAsyncBatchSize,
 		FlushInterval: cfg.LLMResultAsyncFlush,

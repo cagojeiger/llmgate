@@ -71,7 +71,7 @@ func (s *shipper) pass(ctx context.Context) {
 	if s.store != nil {
 		s.uploadPass(ctx)
 	}
-	s.reapPass()
+	s.reapPass(ctx)
 }
 
 // uploadPass pushes every sealed file to the store, moving each to
@@ -101,7 +101,7 @@ func (s *shipper) uploadPass(ctx context.Context) {
 // deletes uploaded/ files older than Retention (they are safe in object
 // storage). Without a store the local copy is authoritative, so
 // retention applies to pending/ by seal age instead.
-func (s *shipper) reapPass() {
+func (s *shipper) reapPass(ctx context.Context) {
 	retainDir := s.uploadedDir
 	if s.store == nil {
 		retainDir = s.pendingDir
@@ -109,17 +109,17 @@ func (s *shipper) reapPass() {
 	cutoff := time.Now().Add(-s.cfg.Retention)
 	for _, f := range listFiles(retainDir) {
 		if sealTimeOf(f).Before(cutoff) {
-			s.remove(f.path)
+			s.remove(ctx, f.path)
 		}
 	}
-	s.enforceDiskCap()
+	s.enforceDiskCap(ctx)
 }
 
 // enforceDiskCap keeps the on-disk footprint under DiskCap by dropping
 // already-uploaded files first (no data loss) and only then oldest
 // pending files (bounded loss, accepted for this data). active/ is never
 // touched — the writer owns it.
-func (s *shipper) enforceDiskCap() {
+func (s *shipper) enforceDiskCap(ctx context.Context) {
 	if s.cfg.DiskCap <= 0 {
 		return
 	}
@@ -138,16 +138,16 @@ func (s *shipper) enforceDiskCap() {
 			if total <= s.cfg.DiskCap {
 				return
 			}
-			if s.remove(f.path) {
+			if s.remove(ctx, f.path) {
 				total -= f.size
 			}
 		}
 	}
 }
 
-func (s *shipper) remove(path string) bool {
+func (s *shipper) remove(ctx context.Context, path string) bool {
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		s.log.LogAttrs(context.Background(), slog.LevelWarn, "audit reap failed",
+		s.log.LogAttrs(ctx, slog.LevelWarn, "audit reap failed",
 			slog.String("path", path), slog.String("err", err.Error()))
 		return false
 	}

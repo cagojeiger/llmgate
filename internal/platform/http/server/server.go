@@ -15,12 +15,14 @@ import (
 )
 
 type ServerOptions struct {
-	Config         *config.Server
-	Log            *slog.Logger
-	Handler        http.Handler
-	Consumers      *consumers.Store
-	Probe          *httpprobe.State
-	MetricsHandler http.Handler
+	Config          *config.Server
+	Log             *slog.Logger
+	Handler         http.Handler
+	AudioHandler    http.Handler
+	RealtimeHandler http.Handler
+	Consumers       *consumers.Store
+	Probe           *httpprobe.State
+	MetricsHandler  http.Handler
 }
 
 func New(cfg *config.Server, log *slog.Logger, h http.Handler, store *consumers.Store, probe *httpprobe.State) *http.Server {
@@ -72,11 +74,21 @@ func NewWithOptions(opts ServerOptions) *http.Server {
 	r.Group(func(r chi.Router) {
 		chain.Apply(r)
 
-		// Auth scope: only chat sits behind auth today. Future
-		// auth-required routes go inside this inner Group.
+		// Auth scope: chat and audio transcription both sit behind auth.
+		// Future auth-required routes go inside this inner Group.
 		r.Group(func(r chi.Router) {
 			r.Use(httpauth.Middleware(store))
 			r.Post("/v1/chat/completions", h.ServeHTTP)
+			if opts.AudioHandler != nil {
+				r.Post("/v1/audio/transcriptions", opts.AudioHandler.ServeHTTP)
+			}
+			// The realtime broker is a WebSocket route: the client sends its
+			// bearer as an Authorization header on the upgrade GET, so chi's
+			// auth middleware classifies it exactly like the POST routes above
+			// before the handler upgrades the connection.
+			if opts.RealtimeHandler != nil {
+				r.Get("/v1/realtime", opts.RealtimeHandler.ServeHTTP)
+			}
 		})
 	})
 

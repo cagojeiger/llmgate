@@ -1,0 +1,4 @@
+# 음성 → 텍스트 (speech-to-text). 현재 로컬 Qwen3-ASR 하나만 물려 있어 체인 길이 1.
+alias: stt
+chain:
+  - qwen-asr

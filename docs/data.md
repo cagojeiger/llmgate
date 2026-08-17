@@ -9,7 +9,7 @@
 catalog/                              consumers/
 ├── models/<id>.yaml                  └── <name>.yaml
 │      id + vendor + protocol            name +
-│      + base_url + auth_env             key_hashes (sha256:hex64)
+│      + api + base_url + auth_env       key_hashes (sha256:hex64)
 │      + auth_scheme                     + allowed_aliases (optional)
 │      + extra_body (optional)           [raw 키는 디스크 미존재]
 └── aliases/<name>.yaml
@@ -28,6 +28,17 @@ auth_env: LLMGATE_OPENCODE_API_KEY
 auth_scheme: bearer
 extra_body:
   reasoning_effort: low
+```
+
+```yaml
+# catalog/models/qwen-asr.yaml — 음성→텍스트(STT) 모델.
+# api: transcription 이면 /v1/audio/transcriptions 로 라우팅된다. 로컬 STT 서버는
+# 인증이 없어 auth_env / auth_scheme 를 생략한다 (chat 모델은 여전히 필수).
+id: qwen-asr
+vendor: qwen
+api: transcription           # 생략 시 chat (기본값)
+protocol: openai
+base_url: http://127.0.0.1:8001
 ```
 
 ```yaml

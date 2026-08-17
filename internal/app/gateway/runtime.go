@@ -18,8 +18,10 @@ import (
 	"llmgate/internal/domain/routing"
 	"llmgate/internal/domain/telemetry"
 	"llmgate/internal/platform/config"
+	httpaudio "llmgate/internal/platform/http/audio"
 	httpchat "llmgate/internal/platform/http/chat"
 	httpprobe "llmgate/internal/platform/http/probe"
+	httprealtime "llmgate/internal/platform/http/realtime"
 	"llmgate/internal/platform/http/server"
 	promtelemetry "llmgate/internal/platform/telemetry/prometheus"
 	slogtelemetry "llmgate/internal/platform/telemetry/slog"
@@ -92,7 +94,7 @@ func BuildRuntime(ctx context.Context, in RuntimeInput) (*Runtime, error) {
 		in.Logger = slog.Default()
 	}
 
-	models, aliases, err := buildRouterInputs(in.Catalog, defaultProviderFactories())
+	models, aliases, transcribers, err := buildRouterInputs(in.Catalog, defaultProviderFactories())
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +107,7 @@ func BuildRuntime(ctx context.Context, in RuntimeInput) (*Runtime, error) {
 		CircuitJitter:   in.Config.CircuitJitter,
 		CompleteTimeout: in.Config.CompleteTimeout,
 	}
-	svc, err := routing.NewService(models, aliases, policy, in.Logger)
+	svc, err := routing.NewService(models, aliases, policy, in.Logger, routing.WithTranscription(transcribers))
 	if err != nil {
 		return nil, err
 	}
@@ -143,6 +145,22 @@ func BuildRuntime(ctx context.Context, in RuntimeInput) (*Runtime, error) {
 		LifecycleObserver: metricsRecorder,
 		ResultSink:        results,
 	})
+	audioHandler := httpaudio.NewHandler(svc, in.Logger, events, httpaudio.HandlerConfig{
+		RequestTimeout:    in.Config.RequestTimeout,
+		MaxRequestBytes:   in.Config.MaxRequestBytes,
+		ServiceVersion:    in.Version,
+		Environment:       in.Config.Environment,
+		LifecycleObserver: metricsRecorder,
+		ResultSink:        results,
+	})
+	// The realtime broker resolves its upstream straight from the catalog (not
+	// the routing Service), so it takes the catalog and the same result sink as
+	// the audio handler for its one session-close audit record.
+	realtimeHandler := httprealtime.NewHandler(in.Catalog, in.Logger, events, httprealtime.HandlerConfig{
+		ServiceVersion: in.Version,
+		Environment:    in.Config.Environment,
+		ResultSink:     results,
+	})
 	probe := httpprobe.NewState()
 	var metricsHandler http.Handler
 	if in.Config.MetricsEnabled {
@@ -152,12 +170,14 @@ func BuildRuntime(ctx context.Context, in RuntimeInput) (*Runtime, error) {
 		})
 	}
 	srv := server.NewWithOptions(server.ServerOptions{
-		Config:         in.Config,
-		Log:            in.Logger.With(slog.String("log", "access")),
-		Handler:        handler,
-		Consumers:      in.Consumers,
-		Probe:          probe,
-		MetricsHandler: metricsHandler,
+		Config:          in.Config,
+		Log:             in.Logger.With(slog.String("log", "access")),
+		Handler:         handler,
+		AudioHandler:    audioHandler,
+		RealtimeHandler: realtimeHandler,
+		Consumers:       in.Consumers,
+		Probe:           probe,
+		MetricsHandler:  metricsHandler,
 	})
 
 	return &Runtime{

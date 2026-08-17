@@ -27,6 +27,12 @@ type Models = map[string]llmtypes.Provider
 // (it acts the same as a raw model call). Lookup is case-insensitive.
 type Aliases = map[string][]string
 
+// TranscriptionModels maps a model id to the transcription provider that
+// serves it. It is the transcription counterpart of Models; the two are kept
+// as separate maps so a chat-only vendor never needs a stubbed Transcribe.
+// Aliases are shared across both kinds.
+type TranscriptionModels = map[string]llmtypes.TranscriptionProvider
+
 // FallbackPolicy is env-driven Service tuning. CircuitFailures or
 // CircuitOpen <= 0 disables the breaker; CircuitJitter is symmetric
 // (0.2 means ±20%). The total request budget lives in the caller's
@@ -53,11 +59,31 @@ type RouteResult struct {
 // Service routes requests to Providers. Streaming fallback applies
 // only before the first event reaches the client.
 type Service struct {
-	byModel  map[string]llmtypes.Provider
-	aliases  map[string][]string
-	policy   fallbackPolicy
-	log      *slog.Logger
-	breakers *breakerStore
+	byModel      map[string]llmtypes.Provider
+	byTranscribe map[string]llmtypes.TranscriptionProvider
+	aliases      map[string][]string
+	policy       fallbackPolicy
+	log          *slog.Logger
+	breakers     *breakerStore
+}
+
+// Option customizes a Service at construction. Options are applied after the
+// core (chat) wiring so they layer on optional surfaces without changing the
+// existing NewService call sites.
+type Option func(*Service)
+
+// WithTranscription registers transcription providers keyed by model id.
+// Keys are lowercased to match the case-insensitive lookup used elsewhere.
+func WithTranscription(models TranscriptionModels) Option {
+	return func(s *Service) {
+		s.byTranscribe = make(map[string]llmtypes.TranscriptionProvider, len(models))
+		for id, p := range models {
+			if p == nil {
+				continue
+			}
+			s.byTranscribe[strings.ToLower(id)] = p
+		}
+	}
 }
 
 type fallbackPolicy struct {
@@ -75,7 +101,7 @@ type candidate struct {
 // (yaml catalog, in-memory config, …) and produced the Models map +
 // Aliases map. An empty Models map fails fast — there is nothing to
 // route to.
-func NewService(models Models, aliases Aliases, policy FallbackPolicy, log *slog.Logger) (*Service, error) {
+func NewService(models Models, aliases Aliases, policy FallbackPolicy, log *slog.Logger, opts ...Option) (*Service, error) {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -108,13 +134,17 @@ func NewService(models Models, aliases Aliases, policy FallbackPolicy, log *slog
 		internalPolicy.onKinds[llmtypes.ErrorKind(strings.ToLower(k))] = struct{}{}
 	}
 
-	return &Service{
+	svc := &Service{
 		byModel:  byModel,
 		aliases:  aliasMap,
 		policy:   internalPolicy,
 		log:      log,
 		breakers: newBreakerStore(policy.CircuitFailures, policy.CircuitOpen, policy.CircuitMaxOpen, policy.CircuitJitter, log),
-	}, nil
+	}
+	for _, opt := range opts {
+		opt(svc)
+	}
+	return svc, nil
 }
 
 func (r *Service) candidates(model string) ([]candidate, error) {

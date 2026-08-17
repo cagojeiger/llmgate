@@ -39,6 +39,26 @@ type Event struct {
 	Usage      *llmtypes.Usage    `json:"usage,omitempty"`
 	Attempts   []llmtypes.Attempt `json:"attempts,omitempty"`
 
+	// Transcription* carry the full audio request/response for the
+	// transcription surface. They are mutually exclusive with Request/Response
+	// (a finalized event is one surface or the other) and stay omitempty so
+	// chat events serialize byte-identically to before this surface existed.
+	// TranscriptionRequest includes the source audio as base64 so the durable
+	// record is a complete, replayable capture.
+	TranscriptionRequest  *llmtypes.TranscriptionRequest  `json:"transcription_request,omitempty"`
+	TranscriptionResponse *llmtypes.TranscriptionResponse `json:"transcription_response,omitempty"`
+
+	// Realtime* carry the session-level summary for the /v1/realtime WebSocket
+	// surface. A realtime session is brokered frame-by-frame and its per-turn
+	// audio is never buffered, so — unlike the transcription surface — there is
+	// no replayable audio payload here: the durable record is the accumulated
+	// transcript(s), the completed-turn count, and the upstream endpoint. Empty
+	// on every non-realtime event so chat/transcription events serialize
+	// byte-identically to before this surface existed.
+	RealtimeEndpoint    string   `json:"realtime_endpoint,omitempty"`
+	RealtimeTurns       int      `json:"realtime_turns,omitempty"`
+	RealtimeTranscripts []string `json:"realtime_transcripts,omitempty"`
+
 	ModelRequested string `json:"model_requested,omitempty"`
 	ModelUsed      string `json:"model_used,omitempty"`
 	Vendor         string `json:"vendor,omitempty"`

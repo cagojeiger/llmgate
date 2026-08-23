@@ -23,6 +23,8 @@
 
 **압축 단계 추가.** pending → compressed 로 넘길 때 gzip(표준 라이브러리, 새 의존성 0)으로 압축한다. 객체키는 `.jsonl.gz`. 감사 JSONL은 반복 스키마 + 텍스트라 압축이 잘 먹혀, **디스크·업로드 두 천장을 함께 밀어올린다**(파일이 클수록 비율↑). `Compression=none`으로 끌 수 있다.
 
+> **개정 (v0.2.10):** 기본 코덱을 **zstd**(`klauspost/compress`)로 바꾸고 gzip은 선택지로 남겼다. gzip/DEFLATE의 32 KiB 윈도우는 에이전트 트래픽의 반복(매 호출이 직전 대화 전체를 재포함)을 참조하지 못해 ~3.6x에 그쳤으나, zstd의 MB급 윈도우는 각 반복을 back-ref로 접어 실측 **~18x**를 낸다. 대가는 의존성 1개 추가. 인코더는 `WithEncoderConcurrency(1)`로 단일 코어에 고정(위 상태 머신의 "단일 코어 압축" 불변식 유지). 객체키는 `.jsonl.zst`.
+
 **짧은 유지보수 주기 + 병렬 업로드.** 한 유지보수 루프가 **compress → upload → reap**을 순서대로 돌리되 주기를 짧게(기본 30s) 잡아, 업로드·disk-cap 검사가 자주 일어나 물리 디스크를 보호한다. 업로드는 `UploadConcurrency`(기본 4)만큼 병렬로 올려 단일 스트림 천장을 넘긴다.
 
 상태 머신: `active → pending(평문) → compressed(.jsonl.gz) → uploaded(+S3)`. 디렉토리 간 이동은 원자적 rename이라, 각 단계가 서로의 중간 상태를 보지 않는다.

@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
+
 	result "llmgate/internal/domain/llmresult/schema"
 )
 
@@ -40,7 +42,8 @@ func (f *fakeStore) Put(_ context.Context, key, filePath string) error {
 	if err != nil {
 		return err
 	}
-	if strings.HasSuffix(key, ".gz") { // store decompressed so line counts work
+	switch { // store decompressed so line counts work
+	case strings.HasSuffix(key, ".gz"):
 		zr, e := gzip.NewReader(bytes.NewReader(b))
 		if e != nil {
 			return e
@@ -49,6 +52,15 @@ func (f *fakeStore) Put(_ context.Context, key, filePath string) error {
 			return err
 		}
 		_ = zr.Close()
+	case strings.HasSuffix(key, ".zst"):
+		zr, e := zstd.NewReader(bytes.NewReader(b))
+		if e != nil {
+			return e
+		}
+		if b, err = io.ReadAll(zr); err != nil {
+			return err
+		}
+		zr.Close()
 	}
 	f.puts[key] = b
 	return nil
@@ -180,8 +192,8 @@ func TestFileSink_LocalOnlyNoStore(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	// Local-only: file is compressed (as .jsonl.gz) but not uploaded — it
-	// comes to rest in compressed/, the terminal local state.
+	// Local-only: file is compressed (default zstd → .jsonl.zst) but not
+	// uploaded — it comes to rest in compressed/, the terminal local state.
 	if got := len(listFiles(s.dirs.compressed)); got != 1 {
 		t.Fatalf("compressed files = %d, want 1 in local-only mode", got)
 	}
@@ -345,7 +357,7 @@ func TestNextBoundary_ClockAligned(t *testing.T) {
 
 func TestFileSink_GzipObjectKeyAndContent(t *testing.T) {
 	store := newFakeStore()
-	s, err := NewFileSink(Config{Dir: t.TempDir()}, store, "audit", nil)
+	s, err := NewFileSink(Config{Dir: t.TempDir(), Compression: CompressionGzip}, store, "audit", nil)
 	if err != nil {
 		t.Fatalf("NewFileSink: %v", err)
 	}
@@ -364,6 +376,31 @@ func TestFileSink_GzipObjectKeyAndContent(t *testing.T) {
 		}
 	}
 	if store.totalLines() != 3 { // fakeStore decompresses .gz
+		t.Fatalf("decompressed lines = %d, want 3", store.totalLines())
+	}
+}
+
+func TestFileSink_ZstdObjectKeyAndContent(t *testing.T) {
+	store := newFakeStore()
+	s, err := NewFileSink(Config{Dir: t.TempDir(), Compression: CompressionZstd}, store, "audit", nil)
+	if err != nil {
+		t.Fatalf("NewFileSink: %v", err)
+	}
+	for i := 0; i < 3; i++ {
+		s.Emit(context.Background(), event("r"+string(rune('0'+i))))
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if store.count() != 1 {
+		t.Fatalf("object count = %d, want 1", store.count())
+	}
+	for k := range store.puts {
+		if !strings.HasSuffix(k, ".jsonl.zst") {
+			t.Fatalf("object key %q should end .jsonl.zst", k)
+		}
+	}
+	if store.totalLines() != 3 { // fakeStore decompresses .zst
 		t.Fatalf("decompressed lines = %d, want 3", store.totalLines())
 	}
 }

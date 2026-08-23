@@ -192,7 +192,7 @@ func LoadServer() (*Server, error) {
 		AuditUploadInterval:        auditUploadInterval,
 		AuditRetention:             auditRetention,
 		AuditDiskCap:               auditDiskCap,
-		AuditCompression:           orDefault("LLMGATE_AUDIT_COMPRESSION", "gzip"),
+		AuditCompression:           orDefault("LLMGATE_AUDIT_COMPRESSION", "zstd"),
 		AuditUploadConcurrency:     auditUploadConcurrency,
 		AuditS3Endpoint:            orDefault("LLMGATE_AUDIT_S3_ENDPOINT", ""),
 		AuditS3Bucket:              orDefault("LLMGATE_AUDIT_S3_BUCKET", ""),

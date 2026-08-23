@@ -9,6 +9,7 @@ import (
 // Compression codecs for sealed files before upload.
 const (
 	CompressionGzip = "gzip"
+	CompressionZstd = "zstd"
 	CompressionNone = "none"
 )
 
@@ -50,8 +51,13 @@ type Config struct {
 	DiskCap int64
 
 	// Compression codec applied when moving pending → compressed.
-	// CompressionGzip (default) or CompressionNone. Audit JSONL is highly
-	// compressible, so this multiplies both the disk and upload ceilings.
+	// CompressionZstd (default), CompressionGzip, or CompressionNone. Audit
+	// JSONL is highly compressible, so this multiplies both the disk and
+	// upload ceilings. zstd is the default because llmgate's traffic is agent
+	// calls: its multi-MB window captures the cross-event repetition (each
+	// call echoes the prior conversation) that gzip's 32 KiB DEFLATE window
+	// cannot see — in practice ~18x smaller objects than gzip on the same
+	// data. gzip stays available for consumers that need DEFLATE.
 	Compression string
 	// UploadConcurrency caps parallel uploads within one maintenance pass.
 	UploadConcurrency int
@@ -74,7 +80,7 @@ func (c Config) withDefaults() Config {
 		c.DiskCap = 5 << 30 // 5 GiB
 	}
 	if c.Compression == "" {
-		c.Compression = CompressionGzip
+		c.Compression = CompressionZstd
 	}
 	if c.UploadConcurrency <= 0 {
 		c.UploadConcurrency = 4
@@ -93,9 +99,9 @@ func (c Config) validate() error {
 		return fmt.Errorf("audit: DiskCap (%d) must be >= RotateMaxBytes (%d)", c.DiskCap, c.RotateMaxBytes)
 	}
 	switch c.Compression {
-	case CompressionGzip, CompressionNone:
+	case CompressionGzip, CompressionZstd, CompressionNone:
 	default:
-		return fmt.Errorf("audit: Compression %q must be %q or %q", c.Compression, CompressionGzip, CompressionNone)
+		return fmt.Errorf("audit: Compression %q must be %q, %q, or %q", c.Compression, CompressionGzip, CompressionZstd, CompressionNone)
 	}
 	// Buckets are UTC clock-aligned by truncating to RotateInterval, which
 	// anchors at the UTC epoch (a day boundary). Only an interval that

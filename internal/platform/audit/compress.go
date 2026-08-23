@@ -2,14 +2,48 @@ package audit
 
 import (
 	"compress/gzip"
+	"fmt"
 	"io"
 	"os"
+
+	"github.com/klauspost/compress/zstd"
 )
 
-// compressFile gzips src into dst by streaming, so a large file never
-// loads into memory. On any error dst is removed, so a partial .gz is
+// compressedExt is the filename suffix a codec appends to a sealed file.
+// CompressionNone yields "" (the file is staged verbatim, no re-encode).
+func compressedExt(codec string) string {
+	switch codec {
+	case CompressionZstd:
+		return ".zst"
+	case CompressionGzip:
+		return ".gz"
+	default:
+		return ""
+	}
+}
+
+// newCompressWriter wraps out with the codec's streaming encoder. zstd uses a
+// multi-MB window versus gzip/DEFLATE's fixed 32 KiB, which is exactly what
+// captures the cross-event repetition in agent audit JSONL: every call echoes
+// the whole prior conversation, so the same text recurs dozens of times per
+// file. gzip's tiny window can't reference a repeat that started >32 KiB back;
+// zstd collapses each one to a back-ref. SpeedBetterCompression keeps the
+// single-threaded shipper affordable while still landing the window win.
+func newCompressWriter(codec string, out io.Writer) (io.WriteCloser, error) {
+	switch codec {
+	case CompressionGzip:
+		return gzip.NewWriter(out), nil
+	case CompressionZstd:
+		return zstd.NewWriter(out, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
+	default:
+		return nil, fmt.Errorf("audit: unknown compression codec %q", codec)
+	}
+}
+
+// compressFile streams src → dst with the given codec, so a large file never
+// loads into memory. On any error dst is removed, so a partial output is
 // never left behind for the uploader to pick up.
-func compressFile(src, dst string) error {
+func compressFile(codec, src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
@@ -20,14 +54,19 @@ func compressFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	gz := gzip.NewWriter(out)
-	if _, err := io.Copy(gz, in); err != nil {
-		_ = gz.Close()
+	w, err := newCompressWriter(codec, out)
+	if err != nil {
 		_ = out.Close()
 		_ = os.Remove(dst)
 		return err
 	}
-	if err := gz.Close(); err != nil {
+	if _, err := io.Copy(w, in); err != nil {
+		_ = w.Close()
+		_ = out.Close()
+		_ = os.Remove(dst)
+		return err
+	}
+	if err := w.Close(); err != nil {
 		_ = out.Close()
 		_ = os.Remove(dst)
 		return err

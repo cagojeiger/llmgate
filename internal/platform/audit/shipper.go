@@ -94,10 +94,11 @@ func (s *shipper) pass(ctx context.Context) {
 	}
 }
 
-// compressPass moves sealed files from pending/ to compressed/. With gzip
-// it streams pending/<name> → compressed/<name>.gz and drops the
-// plaintext; with CompressionNone it just renames. The atomic hand-off
-// means the uploader never sees a half-compressed file.
+// compressPass moves sealed files from pending/ to compressed/. With a
+// codec it streams pending/<name> → compressed/<name><ext> (.gz for gzip,
+// .zst for zstd) and drops the plaintext; with CompressionNone it just
+// renames. The atomic hand-off means the uploader never sees a
+// half-compressed file.
 //
 // Deliberately single-threaded — do NOT parallelize this. Compression is
 // CPU-bound, and this audit path is a best-effort background concern that
@@ -119,8 +120,8 @@ func (s *shipper) compressPass(ctx context.Context) (done, failed int) {
 			done++
 			continue
 		}
-		dst := filepath.Join(s.compressedDir, f.name+".gz")
-		if err := compressFile(f.path, dst); err != nil {
+		dst := filepath.Join(s.compressedDir, f.name+compressedExt(s.cfg.Compression))
+		if err := compressFile(s.cfg.Compression, f.path, dst); err != nil {
 			s.log.LogAttrs(ctx, slog.LevelWarn, "audit compress failed",
 				slog.String("file", f.name), slog.String("err", err.Error()))
 			failed++
@@ -304,7 +305,7 @@ func sortBySealTime(files []fileInfo) {
 }
 
 // sealTimeOf recovers the authoritative seal instant from the filename
-// (<instance>-<20060102T150405Z>-<rand>.jsonl[.gz]), falling back to the
+// (<instance>-<20060102T150405Z>-<rand>.jsonl[.gz|.zst]), falling back to the
 // file mod time if the name is not one we wrote.
 func sealTimeOf(f fileInfo) time.Time {
 	if t, ok := parseSealTime(f.name); ok {

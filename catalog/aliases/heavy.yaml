@@ -1,0 +1,12 @@
+# heavy — 고성능 추론·코딩·분석 (텍스트 중심). light 의 상위 대응.
+# 권장:  context 256K  /  output 128K       (호출 측 등록 권장값)
+# 상한:  context 1M     /  output 131,072    (체인 min = 실제 천장)
+# 이미지: ⚠️ 부분 지원 — 주력 kimi-k3만 image 입력 지원, 폴백 glm-5.3은 텍스트 전용.
+#         이미지 요청이 glm-5.3 로 폴백되면 실패하므로, 이미지가 필요하면 light 사용.
+#   kimi-k3  context 1,048,576 / output 131,072 / image ✔ (text,image,video) — 플래그십·1M·롱호라이즌 주력
+#   glm-5.3  context 1,000,000 / output 131,072 / image ✗ (text only)         — 오픈코딩최강·보안/취약점 폴백
+# (OpenCode Go 전용, 한도 출처: models.dev provider=opencode-go)
+alias: heavy
+chain:
+  - kimi-k3
+  - glm-5.3

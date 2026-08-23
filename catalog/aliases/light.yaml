@@ -1,0 +1,13 @@
+# light — 범용 경량 기본값 (멀티모달, 이미지 입력 지원).
+# 권장:  context 256K  /  output 64K        (호출 측 등록 권장값)
+# 상한:  context 1M     /  output 128K       (체인 min = 실제 천장)
+# 이미지: 체인 전원 image 입력 지원 → 이미지 요청도 폴백까지 안전.
+#   minimax-m3   context 1,000,000 / output 131,072 / image ✔ (text,image,video)  — 프런티어 만능 주력
+#   gpt-5.6-luna context 1,050,000 / output 128,000 / image ✔ (text,image,pdf)    — 최저가·최속 폴백
+#   mimo-v2.5    context 1,000,000 / output 128,000 / image ✔ (text,image,a/v)    — 무료 폴백
+# (OpenCode Go 전용, 한도 출처: models.dev provider=opencode-go)
+alias: light
+chain:
+  - minimax-m3
+  - gpt-5.6-luna
+  - mimo-v2.5

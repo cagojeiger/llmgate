@@ -34,7 +34,13 @@ func newCompressWriter(codec string, out io.Writer) (io.WriteCloser, error) {
 	case CompressionGzip:
 		return gzip.NewWriter(out), nil
 	case CompressionZstd:
-		return zstd.NewWriter(out, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
+		// WithEncoderConcurrency(1) keeps this on one core: compressPass is
+		// deliberately single-threaded so audit compression never steals
+		// request-serving capacity, but zstd otherwise fans out to GOMAXPROCS
+		// workers — and a file can reach RotateMaxBytes (128 MiB default).
+		return zstd.NewWriter(out,
+			zstd.WithEncoderLevel(zstd.SpeedBetterCompression),
+			zstd.WithEncoderConcurrency(1))
 	default:
 		return nil, fmt.Errorf("audit: unknown compression codec %q", codec)
 	}

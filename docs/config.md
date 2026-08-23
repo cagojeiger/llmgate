@@ -45,14 +45,14 @@ best-effort 업로드한다. `LLMGATE_AUDIT_DIR` 이 비면 비활성. 설계는
 | `LLMGATE_AUDIT_UPLOAD_INTERVAL` | `30s` | 유지보수 주기 (compress → upload → reap) |
 | `LLMGATE_AUDIT_RETENTION` | `168h` | 업로드 후 로컬 보관 기간 (이후 삭제; S3 는 유지) |
 | `LLMGATE_AUDIT_DISK_CAP` | `5368709120` | 로컬 디스크 상한 (초과 시 oldest-uploaded → compressed → pending 순 drop) |
-| `LLMGATE_AUDIT_COMPRESSION` | `gzip` | `gzip` 또는 `none` (단일 코어 압축) |
+| `LLMGATE_AUDIT_COMPRESSION` | `zstd` | `zstd`(기본)·`gzip`·`none` (단일 코어 압축). zstd는 넓은 윈도우로 에이전트 audit의 반복을 잡아 gzip 대비 ~18x 작음 |
 | `LLMGATE_AUDIT_UPLOAD_CONCURRENCY` | `4` | 병렬 업로드 수 |
 | `LLMGATE_AUDIT_S3_ENDPOINT` | `` | 비면 **로컬 전용**(업로드 없음). host:port |
 | `LLMGATE_AUDIT_S3_BUCKET` | `` | **선존재 필수** — 앱은 버킷을 만들지 않음(부재 시 부팅 실패) |
 | `LLMGATE_AUDIT_S3_REGION` | `us-east-1` | S3 리전 |
 | `LLMGATE_AUDIT_S3_ACCESS_KEY` | `` | 액세스 키 (로그엔 안 찍힘) |
 | `LLMGATE_AUDIT_S3_SECRET_KEY` | `` | 시크릿 키 (로그엔 안 찍힘) |
-| `LLMGATE_AUDIT_S3_PREFIX` | `` | 객체키 prefix. 키 = `<prefix>/dt=YYYY-MM-DD/hour=HH/<pod>-<bucket>-<rand>.jsonl.gz` |
+| `LLMGATE_AUDIT_S3_PREFIX` | `` | 객체키 prefix. 키 = `<prefix>/dt=YYYY-MM-DD/hour=HH/<pod>-<bucket>-<rand>.jsonl.zst` (코덱에 따라 `.gz`/`.jsonl`) |
 | `LLMGATE_AUDIT_S3_USE_SSL` | `false` | https 여부 (in-cluster MinIO 는 보통 plain http) |
 | `LLMGATE_AUDIT_S3_PATH_STYLE` | `true` | path-style 주소(MinIO 필수) |
 

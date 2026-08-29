@@ -1,5 +1,5 @@
 event: message_start
-data: {"type":"message_start","message":{"id":"068c3096694853a7787dc0990e4013c1","type":"message","role":"assistant","content":[],"model":"MiniMax-M2.7","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":53,"output_tokens":0}}}
+data: {"type":"message_start","message":{"id":"06dc940747a0b7b527194f58dd32ac0c","type":"message","role":"assistant","stop_reason":null,"stop_sequence":null,"model":"minimax-m2.7","content":[],"usage":{"input_tokens":53,"output_tokens":0}}}
 
 event: ping
 data: {"type":"ping"}
@@ -11,16 +11,13 @@ event: content_block_delta
 data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"The user"}}
 
 event: content_block_delta
-data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" asks: \"Count 1 to 5, one number per line.\" So we need to output numbers 1,2,3,4,5 each on its own line. That's trivial. There's"}}
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" says: \"Count 1 to 5, one number per line.\" So they want a simple output: numbers 1,2,3,4,5 each on separate line."}}
 
 event: content_block_delta
-data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" no policy violation. It's a simple request. Provide output exactly like:\n\n1\n2\n3\n4\n5\n\nWe need to follow"}}
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" Should respond accordingly. No extra commentary needed. Straight answer."}}
 
 event: content_block_delta
-data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" the guidelines: no extra text, just the numbers. Usually, it's fine. Provide as plain text.\n\nThus answer."}}
-
-event: content_block_delta
-data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"c4c9e971225f46cca5e73fe36c100fe3e69b4f1750b45668e91b6636a9744594"}}
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"231832951b392586829bdc06956d7338671212de41af8c87ca6a6a702becb95f"}}
 
 event: content_block_stop
 data: {"type":"content_block_stop","index":0}
@@ -29,16 +26,13 @@ event: content_block_start
 data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}
 
 event: content_block_delta
-data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"1\n2\n"}}
-
-event: content_block_delta
-data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"3\n4\n5"}}
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"1  \n2  \n3  \n4  \n5"}}
 
 event: content_block_stop
 data: {"type":"content_block_stop","index":1}
 
 event: message_delta
-data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":53,"output_tokens":108}}
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":53,"output_tokens":65,"output_tokens_details":{"thinking_tokens":55}}}
 
 event: message_stop
 data: {"type":"message_stop"}

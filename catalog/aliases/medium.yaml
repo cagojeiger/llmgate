@@ -1,0 +1,11 @@
+# medium — 만능 밸런스 티어 (멀티모달). 사이즈 사다리: light < medium < heavy.
+# 권장:  context 256K  /  output 48K        (호출 측 등록 권장값; 512K 컨텍스트도 실측 수용)
+# 상한:  context 1M     /  output 65,536     (체인 min = 실제 천장, qwen3.7-plus 가 병목)
+# 이미지: ✔ 전원 지원. 주력(1순위) text+image 지원.
+#   minimax-m3   context 1,000,000 / output 131,072 / image ✔ (text,image,video) — 만능 주력
+#   qwen3.7-plus context 1,000,000 / output  65,536 / image ✔ (text,image,video) — 멀티모달 폴백 (출력 상한 낮음)
+# (OpenCode Go 전용, 한도 출처: models.dev provider=opencode-go, 512K 컨텍스트 실호출 검증)
+alias: medium
+chain:
+  - minimax-m3
+  - qwen3.7-plus

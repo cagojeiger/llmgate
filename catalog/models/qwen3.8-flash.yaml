@@ -1,0 +1,10 @@
+# Qwen3.8 Flash — Max 대비 저가/고속 티어, Anthropic 프로토콜 (이미지 지원)
+# source: https://models.dev/api.json provider=opencode-go
+# context: 1,000,000 / max output: 131,072 / image ✔ (text,image,video)
+# image input: anthropic 구조화 콘텐츠 변환 경로 사용 (qwen 계열 컨벤션)
+id: qwen3.8-flash
+vendor: opencode
+protocol: anthropic
+base_url: https://opencode.ai/zen/go/v1
+auth_env: LLMGATE_OPENCODE_API_KEY
+auth_scheme: x-api-key

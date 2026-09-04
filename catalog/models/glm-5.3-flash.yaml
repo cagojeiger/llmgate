@@ -1,0 +1,10 @@
+# GLM-5.3-Flash — glm-5.3 저가/고속 티어 (이미지 지원)
+# source: https://models.dev/api.json provider=opencode-go
+# context: 1,000,000 / max output: 131,072 / image ✔ (text,image,video,pdf)
+# 주의: opencode zen 에서 "2x usage" 로 카운트됨 (실질 단가 2배).
+id: glm-5.3-flash
+vendor: opencode
+protocol: openai
+base_url: https://opencode.ai/zen/go/v1
+auth_env: LLMGATE_OPENCODE_API_KEY
+auth_scheme: bearer

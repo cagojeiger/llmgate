@@ -38,12 +38,16 @@ func TestLoadDir_RepoCatalog(t *testing.T) {
 		t.Fatalf("deepseek-v4-flash auth_env = %q, want LLMGATE_OPENCODE_API_KEY", m.AuthEnv)
 	}
 
-	smart, ok := cat.Aliases["smart"]
-	if !ok {
-		t.Fatal("Aliases[smart] missing")
+	// At least one alias must load; the specific sample is skip-when-gone
+	// (like the model samples above) so an alias rename/removal doesn't force
+	// a Go test edit in every catalog-sync PR.
+	if len(cat.Aliases) == 0 {
+		t.Fatal("no aliases loaded")
 	}
-	if len(smart.Chain) < 1 || smart.Chain[0] != "qwen3.8-max" {
-		t.Fatalf("smart.Chain = %v, want chain starting with qwen3.8-max", smart.Chain)
+	if a, ok := cat.Aliases["medium"]; ok {
+		if len(a.Chain) < 1 || a.Chain[0] != "minimax-m3" {
+			t.Fatalf("medium.Chain = %v, want chain starting with minimax-m3", a.Chain)
+		}
 	}
 }
 

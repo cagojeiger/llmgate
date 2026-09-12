@@ -46,6 +46,10 @@ type Summary struct {
 type Request struct {
 	Model    string    `json:"model"`
 	Messages []Message `json:"messages"`
+	// SessionID is request transport metadata, not part of the OpenAI JSON
+	// body. The HTTP edge copies x-opencode-session here so an OpenCode Go
+	// adapter can preserve conversation affinity across routing and fallback.
+	SessionID string `json:"-"`
 
 	MaxTokens   int      `json:"max_tokens,omitempty"`
 	Temperature *float64 `json:"temperature,omitempty"`

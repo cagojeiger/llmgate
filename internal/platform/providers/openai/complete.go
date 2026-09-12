@@ -19,7 +19,7 @@ func (c *Client) Complete(ctx context.Context, req *llmtypes.Request) (*llmtypes
 		return nil, c.badRequest("marshal request", err, nil)
 	}
 
-	httpReq, err := c.newRequest(ctx, "application/json", body)
+	httpReq, err := c.newRequest(ctx, "application/json", body, req.SessionID)
 	if err != nil {
 		return nil, c.badRequest("build request", err, nil)
 	}

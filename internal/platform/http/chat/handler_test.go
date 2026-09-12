@@ -68,6 +68,38 @@ func TestHandler_SingleAttempt_RecordPopulated(t *testing.T) {
 	}
 }
 
+func TestHandler_PreservesOpenCodeSessionHeader(t *testing.T) {
+	var gotSessionID string
+	r := &fakeService{
+		buildResult: func(req *llmtypes.Request) *routing.RouteResult {
+			gotSessionID = req.SessionID
+			return &routing.RouteResult{
+				Response: &llmtypes.Response{
+					Model:   req.Model,
+					Choices: []llmtypes.Choice{{Index: 0, Message: llmtypes.Message{Role: "assistant", Content: "ok"}}},
+				},
+				Vendor:    "opencode",
+				ModelUsed: req.Model,
+				Attempts:  []llmtypes.Attempt{{Vendor: "opencode", Model: req.Model, StatusCode: http.StatusOK}},
+			}
+		},
+	}
+	h := newTestHandler(r, telemetry.NopSink{}, telemetry.NopSink{}, HandlerConfig{})
+
+	body := `{"model":"light","messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("X-OpenCode-Session", "conversation-123")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", w.Code, w.Body.String())
+	}
+	if gotSessionID != "conversation-123" {
+		t.Errorf("SessionID = %q, want conversation-123", gotSessionID)
+	}
+}
+
 func TestHandler_FallbackChain_AttemptsRecorded(t *testing.T) {
 	_, recorder := newCaptureAuditSink()
 	callRec, callSink := newCaptureCallSink()

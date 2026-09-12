@@ -24,6 +24,22 @@ func TestExtraRoundTripRequest(t *testing.T) {
 	roundTripEqual[Request](t, input)
 }
 
+func TestRequestSessionIDIsNotSerialized(t *testing.T) {
+	req := Request{
+		Model:     "light",
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		SessionID: "conversation-123",
+	}
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if bytes.Contains(data, []byte("conversation-123")) || bytes.Contains(data, []byte("session")) {
+		t.Fatalf("transport session metadata leaked into JSON body: %s", data)
+	}
+}
+
 func TestExtraRoundTripMessage(t *testing.T) {
 	input := `{
 		"role":"assistant",

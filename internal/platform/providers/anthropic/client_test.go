@@ -153,3 +153,28 @@ type pipeAddr string
 
 func (a pipeAddr) Network() string { return string(a) }
 func (a pipeAddr) String() string  { return string(a) }
+
+func TestNewRequest_OpenCodeSessionHeader(t *testing.T) {
+	tests := []struct {
+		name         string
+		providerName string
+		sessionID    string
+		want         string
+	}{
+		{name: "opencode forwards", providerName: "opencode", sessionID: "conversation-123", want: "conversation-123"},
+		{name: "other provider drops", providerName: "anthropic", sessionID: "conversation-123"},
+		{name: "empty omitted", providerName: "opencode"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := mustNew(t, Config{BaseURL: "http://example.test", APIKey: "test-key", Name: tt.providerName})
+			req, err := c.newRequest(context.Background(), "application/json", nil, tt.sessionID)
+			if err != nil {
+				t.Fatalf("newRequest() error = %v", err)
+			}
+			if got := req.Header.Get("X-OpenCode-Session"); got != tt.want {
+				t.Errorf("X-OpenCode-Session = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

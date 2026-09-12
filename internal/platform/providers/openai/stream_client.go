@@ -19,7 +19,7 @@ func (c *Client) CompleteStream(ctx context.Context, req *llmtypes.Request) (llm
 		return nil, c.badRequest("marshal request", err, nil)
 	}
 
-	httpReq, err := c.newRequest(ctx, "text/event-stream", body)
+	httpReq, err := c.newRequest(ctx, "text/event-stream", body, req.SessionID)
 	if err != nil {
 		return nil, c.badRequest("build request", err, nil)
 	}

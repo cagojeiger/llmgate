@@ -98,7 +98,7 @@ func (c *Client) marshalRequestWithStream(req *llmtypes.Request) ([]byte, error)
 	return c.marshalRequest(&reqCopy)
 }
 
-func (c *Client) newRequest(ctx context.Context, accept string, body []byte) (*http.Request, error) {
+func (c *Client) newRequest(ctx context.Context, accept string, body []byte, sessionID string) (*http.Request, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -106,6 +106,9 @@ func (c *Client) newRequest(ctx context.Context, accept string, body []byte) (*h
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", accept)
 	httpReq.Header.Set("User-Agent", c.cfg.UserAgent)
+	if strings.EqualFold(c.cfg.Name, "opencode") && sessionID != "" {
+		httpReq.Header.Set("X-OpenCode-Session", sessionID)
+	}
 	switch c.cfg.AuthScheme {
 	case "bearer":
 		httpReq.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)

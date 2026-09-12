@@ -168,6 +168,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		response.WriteError(w, err)
 		return
 	}
+	// Preserve only the provider session-affinity header. A broad header copy
+	// would leak the consumer Authorization credential and hop-by-hop headers
+	// into upstream requests.
+	req.SessionID = r.Header.Get("X-OpenCode-Session")
 	if verr := req.Validate(); verr != nil {
 		adoptError(rec, verr)
 		response.WriteError(w, verr)

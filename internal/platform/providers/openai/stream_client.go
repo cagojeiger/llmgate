@@ -77,11 +77,18 @@ func (s *stream) Recv() (*llmtypes.Event, error) {
 	if event.Model != "" {
 		s.model = event.Model
 	}
-	if event.Usage != nil {
-		s.usage = event.Usage
-	}
 	if cost, ok := event.Extra["cost"]; ok && len(cost) > 0 {
 		s.vendorCost = string(cost)
+		if event.Usage == nil && s.usage != nil {
+			event.Usage = s.usage.Clone()
+		}
+		llmtypes.AttachReportedCost(event.Usage, cost)
+	}
+	if event.Usage != nil {
+		if s.vendorCost != "" {
+			llmtypes.AttachReportedCost(event.Usage, json.RawMessage(s.vendorCost))
+		}
+		s.usage = event.Usage
 	}
 	if len(event.Choices) > 0 && event.Choices[0].FinishReason != "" {
 		s.finishReason = event.Choices[0].FinishReason

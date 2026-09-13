@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"sync/atomic"
@@ -56,6 +57,8 @@ type stream struct {
 	inputTokens    int
 	pendingFinish  *anthropicEnd
 	pendingEmitted bool
+	vendorCost     json.RawMessage
+	costEmitted    bool
 
 	// tool_use accumulator. Anthropic announces each tool call as a
 	// separate content_block_start (type=tool_use) keyed by an index that
@@ -86,10 +89,6 @@ func (s *stream) Recv() (*llmtypes.Event, error) {
 	}
 	if s.pendingFinish != nil && !s.pendingEmitted {
 		return s.emitFinish(), nil
-	}
-	if s.pendingEmitted {
-		s.closed.Store(true)
-		return nil, io.EOF
 	}
 
 	for {
@@ -137,6 +136,10 @@ func (s *stream) emitFinish() *llmtypes.Event {
 func (s *stream) finalize() (*llmtypes.Event, error) {
 	if s.pendingFinish != nil && !s.pendingEmitted {
 		return s.emitFinish(), nil
+	}
+	if s.pendingEmitted {
+		s.closed.Store(true)
+		return nil, io.EOF
 	}
 	return nil, &llmtypes.Error{
 		Kind:     llmtypes.KindUpstream,

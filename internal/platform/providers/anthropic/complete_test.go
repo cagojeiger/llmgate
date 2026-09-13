@@ -52,7 +52,8 @@ func TestComplete_Success(t *testing.T) {
 			"model": "minimax-m2.5",
 			"content": [{"type": "text", "text": "pong"}],
 			"stop_reason": "end_turn",
-			"usage": {"input_tokens": 5, "output_tokens": 1}
+			"usage": {"input_tokens": 5, "output_tokens": 1},
+			"cost": "0.001"
 		}`))
 	}))
 	defer server.Close()
@@ -84,6 +85,12 @@ func TestComplete_Success(t *testing.T) {
 	}
 	if resp.Usage == nil || resp.Usage.TotalTokens != 6 {
 		t.Errorf("usage = %+v, want TotalTokens=6", resp.Usage)
+	}
+	if string(resp.Extra["cost"]) != `"0.001"` {
+		t.Errorf("cost extra = %s, want quoted upstream value", resp.Extra["cost"])
+	}
+	if string(resp.Usage.Extra["cost"]) != "0.001" {
+		t.Errorf("usage cost = %s, want numeric OpenAI-compatible value", resp.Usage.Extra["cost"])
 	}
 }
 

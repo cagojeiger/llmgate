@@ -54,7 +54,7 @@ func (s *stream) dispatch(event *anthropicStreamEvent, payload []byte) streamEve
 	case "message_stop":
 		return emitStreamEvent(s.handleMessageStop())
 	case "ping":
-		return skipStreamEvent()
+		return s.handlePing(event)
 	case "error":
 		return failStreamEvent(errorFromStreamEvent(payload, s.ProviderName))
 	default:
@@ -63,6 +63,31 @@ func (s *stream) dispatch(event *anthropicStreamEvent, payload []byte) streamEve
 		}
 		return skipStreamEvent()
 	}
+}
+
+func (s *stream) handlePing(event *anthropicStreamEvent) streamEventResult {
+	if len(event.Cost) == 0 {
+		return skipStreamEvent()
+	}
+	s.vendorCost = append(json.RawMessage(nil), event.Cost...)
+	if s.pendingFinish == nil || s.costEmitted {
+		return skipStreamEvent()
+	}
+
+	usage := s.buildUsage(s.pendingFinish)
+	if !llmtypes.AttachReportedCost(usage, s.vendorCost) {
+		return skipStreamEvent()
+	}
+	s.costEmitted = true
+	s.RecordEmit()
+	return emitStreamEvent(&llmtypes.Event{
+		ID:      s.msgID,
+		Object:  "chat.completion.chunk",
+		Model:   s.msgModel,
+		Choices: []llmtypes.ChoiceDelta{},
+		Usage:   usage,
+		Extra:   map[string]json.RawMessage{"cost": append(json.RawMessage(nil), event.Cost...)},
+	})
 }
 
 func (s *stream) handleMessageStart(event *anthropicStreamEvent) *llmtypes.Event {
@@ -147,7 +172,8 @@ type anthropicStreamEvent struct {
 		PartialJSON string  `json:"partial_json,omitempty"`
 		StopReason  *string `json:"stop_reason"`
 	} `json:"delta"`
-	Usage anthropicUsage `json:"usage"`
+	Usage anthropicUsage  `json:"usage"`
+	Cost  json.RawMessage `json:"cost,omitempty"`
 }
 
 func parseMaybeStreamError(payload []byte, providerName string) *llmtypes.Error {

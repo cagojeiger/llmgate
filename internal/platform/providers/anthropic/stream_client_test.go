@@ -164,6 +164,49 @@ func TestCompleteStream_PingIgnored(t *testing.T) {
 	}
 }
 
+func TestCompleteStream_CostPingAfterMessageStop(t *testing.T) {
+	server := newAnthropicStreamServer(t, nil,
+		messageStart("msg-1", "minimax-m2.5", 3),
+		messageDelta("end_turn", 2),
+		messageStop(),
+		costPingEvent("0.0001"),
+	)
+	defer server.Close()
+	stream := openAnthropicTestStream(t, server, "minimax-m2.5", "ping")
+	defer stream.Close()
+
+	var costEvent *llmtypes.Event
+	for {
+		event, err := stream.Recv()
+		if errors.Is(err, llmtypes.ErrStreamDone) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Recv() error = %v", err)
+		}
+		if event.Usage != nil && string(event.Usage.Extra["cost"]) == "0.0001" {
+			costEvent = event
+		}
+	}
+
+	if costEvent == nil {
+		t.Fatal("cost-bearing usage event missing")
+	}
+	if len(costEvent.Choices) != 0 {
+		t.Errorf("cost event choices = %+v, want empty usage-only chunk", costEvent.Choices)
+	}
+	if string(costEvent.Extra["cost"]) != `"0.0001"` {
+		t.Errorf("cost event extra = %s, want quoted upstream value", costEvent.Extra["cost"])
+	}
+	sum := stream.Summary()
+	if sum.VendorCost != `"0.0001"` {
+		t.Errorf("summary VendorCost = %q, want quoted upstream value", sum.VendorCost)
+	}
+	if string(sum.Usage.Extra["cost"]) != "0.0001" {
+		t.Errorf("summary usage cost = %s, want numeric OpenAI-compatible value", sum.Usage.Extra["cost"])
+	}
+}
+
 func TestStreamSummary_Success(t *testing.T) {
 	server := newAnthropicStreamServer(t, nil,
 		messageStart("msg-1", "minimax-m2.5", 3),

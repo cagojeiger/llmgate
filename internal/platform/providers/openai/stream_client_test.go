@@ -236,6 +236,9 @@ func TestStreamSummary_Success(t *testing.T) {
 	if sum.VendorCost != `"0.0001"` {
 		t.Errorf("VendorCost = %q, want %q", sum.VendorCost, `"0.0001"`)
 	}
+	if string(sum.Usage.Extra["cost"]) != "0.0001" {
+		t.Errorf("Usage cost = %s, want 0.0001", sum.Usage.Extra["cost"])
+	}
 	if sum.FirstByteAt.IsZero() {
 		t.Error("FirstByteAt is zero, want set after first chunk")
 	}

@@ -69,6 +69,13 @@ func pingEvent() anthropicSSEFixture {
 	return anthropicSSEFixture{event: "ping", payload: `{"type":"ping"}`}
 }
 
+func costPingEvent(cost string) anthropicSSEFixture {
+	return anthropicSSEFixture{
+		event:   "ping",
+		payload: fmt.Sprintf(`{"type":"ping","cost":%q}`, cost),
+	}
+}
+
 func textBlockStart(index int) anthropicSSEFixture {
 	return anthropicSSEFixture{
 		event: "content_block_start",

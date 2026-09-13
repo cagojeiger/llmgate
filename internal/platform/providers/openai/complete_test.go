@@ -91,6 +91,9 @@ func TestComplete_Success(t *testing.T) {
 	if string(resp.Extra["cost"]) != "0.001" {
 		t.Errorf("cost extra = %s, want 0.001", resp.Extra["cost"])
 	}
+	if string(resp.Usage.Extra["cost"]) != "0.001" {
+		t.Errorf("usage cost = %s, want 0.001", resp.Usage.Extra["cost"])
+	}
 	if string(resp.Usage.Extra["prompt_cache_hit_tokens"]) != "4" {
 		t.Errorf("usage extra = %s, want 4", resp.Usage.Extra["prompt_cache_hit_tokens"])
 	}

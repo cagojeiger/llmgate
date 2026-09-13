@@ -59,6 +59,9 @@ func TestLoadDir_RepoCatalog(t *testing.T) {
 	}{
 		{name: "general", want: []string{"minimax-m3", "kimi-k2.7-code", "glm-5.3-flash"}},
 		{name: "coding", want: []string{"kimi-k2.7-code", "minimax-m3", "glm-5.3-flash"}},
+		{name: "ops", want: []string{"glm-5.3-flash"}},
+		{name: "code", want: []string{"kimi-k2.7-code"}},
+		{name: "research", want: []string{"minimax-m3"}},
 	} {
 		a, ok := cat.Aliases[tc.name]
 		if !ok {

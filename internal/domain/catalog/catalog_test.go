@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -47,6 +48,24 @@ func TestLoadDir_RepoCatalog(t *testing.T) {
 	if a, ok := cat.Aliases["medium"]; ok {
 		if len(a.Chain) < 1 || a.Chain[0] != "minimax-m3" {
 			t.Fatalf("medium.Chain = %v, want chain starting with minimax-m3", a.Chain)
+		}
+	}
+
+	// These task-intent aliases are the stable caller contract. Their exact
+	// order is operational policy, so catalog drift must not silently rewrite it.
+	for _, tc := range []struct {
+		name string
+		want []string
+	}{
+		{name: "general", want: []string{"minimax-m3", "kimi-k2.7-code", "glm-5.3-flash"}},
+		{name: "coding", want: []string{"kimi-k2.7-code", "minimax-m3", "glm-5.3-flash"}},
+	} {
+		a, ok := cat.Aliases[tc.name]
+		if !ok {
+			t.Fatalf("Aliases[%q] missing", tc.name)
+		}
+		if !slices.Equal(a.Chain, tc.want) {
+			t.Fatalf("%s.Chain = %v, want %v", tc.name, a.Chain, tc.want)
 		}
 	}
 }

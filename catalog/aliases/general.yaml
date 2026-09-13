@@ -1,0 +1,9 @@
+# general — 범용 대화·리서치·장기 에이전트 작업용 멀티모달 체인.
+# 권장: context 256K / output 128K (체인에서 kimi-k2.7-code가 context 병목)
+# MiniMax M3를 기본으로 쓰고, 고품질 코딩 모델과 저가 Flash 모델로 가용성을 보완한다.
+# 세 모델 모두 OpenCode Go이므로 모델별 제한에는 대응하지만 공급자 전체 장애는 피하지 못한다.
+alias: general
+chain:
+  - minimax-m3
+  - kimi-k2.7-code
+  - glm-5.3-flash

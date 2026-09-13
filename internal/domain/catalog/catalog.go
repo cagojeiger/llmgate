@@ -4,7 +4,7 @@
 // Layout (under the root passed to LoadDir):
 //
 //	models/<id>.yaml          one yaml per model — id + vendor + protocol +
-//	                          base_url + auth_env + auth_scheme. file = model.
+//	                          base_url + auth settings + optional cost. file = model.
 //	aliases/<name>.yaml       one yaml per alias — alias + chain.
 //
 // Each models/*.yaml registers one Model. Two yaml files for the same vendor
@@ -44,20 +44,20 @@ type Catalog struct {
 	Aliases map[string]*Alias
 }
 
-// Model is one registration. The 6 fields below are exactly what the Service
-// needs to route one upstream call. Operator-facing context (description,
-// modality, pricing) lives in yaml comments or in external systems — not here.
+// Model is one registration. Cost is optional runtime metadata used only when
+// an upstream omits a positive provider-reported total.
 type Model struct {
 	ID       string            `yaml:"id"`
 	Vendor   string            `yaml:"vendor"`
 	Protocol llmtypes.Protocol `yaml:"protocol"` // see llmtypes.Protocol consts
 	// API is the invocation surface (chat | transcription). Empty defaults to
 	// chat, so every existing model file keeps working untouched.
-	API        API            `yaml:"api,omitempty"`
-	BaseURL    string         `yaml:"base_url"`
-	AuthEnv    string         `yaml:"auth_env"`             // env var *name*; empty defaults to LLMGATE_<VENDOR>_API_KEY
-	AuthScheme string         `yaml:"auth_scheme"`          // bearer | x-api-key
-	ExtraBody  map[string]any `yaml:"extra_body,omitempty"` // default extra parameters to include in request body
+	API        API                 `yaml:"api,omitempty"`
+	BaseURL    string              `yaml:"base_url"`
+	AuthEnv    string              `yaml:"auth_env"`             // env var *name*; empty defaults to LLMGATE_<VENDOR>_API_KEY
+	AuthScheme string              `yaml:"auth_scheme"`          // bearer | x-api-key
+	ExtraBody  map[string]any      `yaml:"extra_body,omitempty"` // default extra parameters to include in request body
+	Cost       *llmtypes.ModelCost `yaml:"cost,omitempty"`       // USD per one million tokens
 }
 
 // Alias maps a logical name (e.g. "smart") to an ordered list of concrete

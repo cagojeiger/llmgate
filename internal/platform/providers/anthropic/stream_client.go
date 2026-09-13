@@ -42,6 +42,7 @@ func (c *Client) CompleteStream(ctx context.Context, req *llmtypes.Request) (llm
 		},
 		reader:    upstream.NewSSEReader(resp.Body),
 		toolCalls: make(map[int]*streamToolCallState),
+		cost:      c.cfg.Cost,
 	})
 }
 
@@ -58,7 +59,8 @@ type stream struct {
 	pendingFinish  *anthropicEnd
 	pendingEmitted bool
 	vendorCost     json.RawMessage
-	costEmitted    bool
+	costSource     llmtypes.UsageCostSource
+	cost           *llmtypes.ModelCost
 
 	// tool_use accumulator. Anthropic announces each tool call as a
 	// separate content_block_start (type=tool_use) keyed by an index that

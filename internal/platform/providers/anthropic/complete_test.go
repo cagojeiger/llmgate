@@ -94,6 +94,33 @@ func TestComplete_Success(t *testing.T) {
 	}
 }
 
+func TestComplete_EstimatesCostWhenProviderReportsZero(t *testing.T) {
+	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"msg-1","type":"message","role":"assistant","model":"test","content":[],
+			"stop_reason":"end_turn",
+			"usage":{"input_tokens":100000,"output_tokens":50000,"cache_read_input_tokens":800000},
+			"cost":"0"
+		}`))
+	}))
+	defer server.Close()
+
+	c := mustNew(t, Config{
+		BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client,
+		Cost: &llmtypes.ModelCost{Input: 0.30, Output: 1.20, CacheRead: 0.06},
+	})
+	resp, err := c.Complete(context.Background(), &llmtypes.Request{
+		Model: "test", Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("Complete returned error: %v", err)
+	}
+	if got := string(resp.Usage.Extra["cost"]); got != "0.138" {
+		t.Fatalf("usage cost = %s, want 0.138", got)
+	}
+}
+
 func TestComplete_SystemMessageExtracted(t *testing.T) {
 	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)

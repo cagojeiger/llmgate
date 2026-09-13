@@ -104,6 +104,7 @@ func openaiFactory(m *catalog.Model) (llmtypes.Provider, error) {
 		AuthScheme: m.AuthScheme,
 		Name:       m.Vendor,
 		ExtraBody:  m.ExtraBody,
+		Cost:       m.Cost,
 	})
 }
 
@@ -142,6 +143,7 @@ func anthropicFactory(m *catalog.Model) (llmtypes.Provider, error) {
 		APIKey:     apiKey,
 		AuthScheme: m.AuthScheme,
 		Name:       m.Vendor,
+		Cost:       m.Cost,
 	})
 }
 

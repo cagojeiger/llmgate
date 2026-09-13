@@ -67,16 +67,19 @@ func OpenSSE(client *http.Client, req *http.Request, providerName string) (*http
 // need event types should rely on the JSON body shape instead.
 //
 // Termination contract:
-//   - The OpenAI sentinel `[DONE]` is consumed and surfaced as io.EOF
-//     so OpenAI-compatible streams end cleanly.
+//   - The OpenAI sentinel `[DONE]` is normally consumed and surfaced as
+//     io.EOF. The explicit post-DONE constructor instead keeps scanning for
+//     provider metadata until the response body closes.
 //   - A natural EOF (scanner exhausted with no buffered event) also
 //     returns io.EOF — Anthropic doesn't emit `[DONE]` and ends the
 //     stream after the final `message_stop` event.
 //   - A scanner error (mid-stream cut, body read failure) returns a
 //     typed *llmtypes.Error so callers can audit the transport fault.
 type SSEReader struct {
-	scanner *bufio.Scanner
-	done    bool
+	scanner         *bufio.Scanner
+	done            bool
+	allowPostDone   bool
+	sawDoneSentinel bool
 }
 
 // SSE scanner buffer sizing. Reasoning-heavy LLM events (DeepSeek
@@ -93,9 +96,20 @@ const (
 // sseScannerMaxBuf) since reasoning-heavy LLM events can exceed the
 // default 64 KiB cap.
 func NewSSEReader(r io.ReadCloser) *SSEReader {
+	return newSSEReader(r, false)
+}
+
+// NewSSEReaderWithPostDone is for upstreams such as OpenCode Go that append a
+// provider metadata event after the OpenAI [DONE] sentinel. Callers opt in
+// explicitly because ordinary OpenAI streams use [DONE] as the terminal frame.
+func NewSSEReaderWithPostDone(r io.ReadCloser) *SSEReader {
+	return newSSEReader(r, true)
+}
+
+func newSSEReader(r io.ReadCloser, allowPostDone bool) *SSEReader {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, sseScannerInitialBuf), sseScannerMaxBuf)
-	return &SSEReader{scanner: scanner}
+	return &SSEReader{scanner: scanner, allowPostDone: allowPostDone}
 }
 
 // Recv returns the next event's data payload, io.EOF when the stream
@@ -117,8 +131,13 @@ func (r *SSEReader) Recv() (data []byte, err error) {
 			}
 			payload := bytes.Join(parts, sseNewline)
 			if bytes.Equal(payload, sseDoneSentinel) {
-				r.done = true
-				return nil, io.EOF
+				if !r.allowPostDone {
+					r.done = true
+					return nil, io.EOF
+				}
+				r.sawDoneSentinel = true
+				parts = nil
+				continue
 			}
 			return payload, nil
 		}
@@ -134,6 +153,10 @@ func (r *SSEReader) Recv() (data []byte, err error) {
 	}
 
 	if err := r.scanner.Err(); err != nil {
+		if r.sawDoneSentinel {
+			r.done = true
+			return nil, io.EOF
+		}
 		// Even if `parts` is non-empty we intentionally do not flush
 		// them — partial bytes received before a connection drop may
 		// themselves be corrupt, so the error signal is the priority

@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -204,6 +205,45 @@ func TestCompleteStream_CostPingAfterMessageStop(t *testing.T) {
 	}
 	if string(sum.Usage.Extra["cost"]) != "0.0001" {
 		t.Errorf("summary usage cost = %s, want numeric OpenAI-compatible value", sum.Usage.Extra["cost"])
+	}
+}
+
+func TestCompleteStream_EstimatesCostBeforeZeroCostPing(t *testing.T) {
+	server := newAnthropicStreamServer(t, nil,
+		messageStart("msg-1", "minimax-m3", 100000),
+		messageDeltaWithCache("end_turn", 50000, 0, 800000),
+		messageStop(),
+		costPingEvent("0"),
+	)
+	defer server.Close()
+
+	c := mustNew(t, Config{
+		BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client,
+		Name: "opencode", Cost: &llmtypes.ModelCost{Input: 0.30, Output: 1.20, CacheRead: 0.06},
+	})
+	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
+		Model: "minimax-m3", Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("CompleteStream returned error: %v", err)
+	}
+	defer stream.Close()
+
+	var usage *llmtypes.Usage
+	for {
+		event, err := stream.Recv()
+		if errors.Is(err, llmtypes.ErrStreamDone) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Recv returned error: %v", err)
+		}
+		if event.Usage != nil {
+			usage = event.Usage
+		}
+	}
+	if usage == nil || string(usage.Extra["cost"]) != "0.138" {
+		t.Fatalf("usage = %+v, want estimated cost 0.138", usage)
 	}
 }
 

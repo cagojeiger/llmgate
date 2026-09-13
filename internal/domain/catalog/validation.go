@@ -3,6 +3,7 @@ package catalog
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 
 	"llmgate/internal/domain/llmtypes"
@@ -65,6 +66,19 @@ func validateModel(m *Model) error {
 		}
 	default:
 		return fmt.Errorf("model %q: auth_scheme %q must be bearer|x-api-key", m.ID, m.AuthScheme)
+	}
+	if m.Cost != nil {
+		rates := map[string]float64{
+			"input":       m.Cost.Input,
+			"output":      m.Cost.Output,
+			"cache_read":  m.Cost.CacheRead,
+			"cache_write": m.Cost.CacheWrite,
+		}
+		for name, rate := range rates {
+			if rate < 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {
+				return fmt.Errorf("model %q: cost.%s must be a finite non-negative number", m.ID, name)
+			}
+		}
 	}
 	return nil
 }

@@ -98,6 +98,66 @@ func TestCompleteStream_Success(t *testing.T) {
 	}
 }
 
+func TestCompleteStream_EstimatesCostWithoutProviderCost(t *testing.T) {
+	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		writeSSEChunk(t, w, `{"id":"chat-1","choices":[],"usage":{"prompt_tokens":1000000,"completion_tokens":500000,"total_tokens":1500000}}`)
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	c := mustNew(t, Config{
+		BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client,
+		Cost: &llmtypes.ModelCost{Input: 0.15, Output: 0.50},
+	})
+	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
+		Model: "test", Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("CompleteStream returned error: %v", err)
+	}
+	defer stream.Close()
+	event, err := stream.Recv()
+	if err != nil {
+		t.Fatalf("Recv returned error: %v", err)
+	}
+	if got := string(event.Usage.Extra["cost"]); got != "0.4" {
+		t.Fatalf("usage cost = %s, want 0.4", got)
+	}
+}
+
+func TestCompleteStream_ConsumesOpenCodeCostAfterDone(t *testing.T) {
+	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		writeSSEChunk(t, w, `{"id":"chat-1","choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		writeSSEChunk(t, w, `{"choices":[],"cost":"0.0001"}`)
+	}))
+	defer server.Close()
+
+	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
+	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
+		Model: "test", Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("CompleteStream returned error: %v", err)
+	}
+	defer stream.Close()
+	if _, err := stream.Recv(); err != nil {
+		t.Fatalf("usage Recv returned error: %v", err)
+	}
+	costEvent, err := stream.Recv()
+	if err != nil {
+		t.Fatalf("cost Recv returned error: %v", err)
+	}
+	if got := string(costEvent.Usage.Extra["cost"]); got != "0.0001" {
+		t.Fatalf("usage cost = %s, want 0.0001", got)
+	}
+	if got := stream.Summary().VendorCost; got != `"0.0001"` {
+		t.Fatalf("VendorCost = %s, want quoted upstream cost", got)
+	}
+}
+
 func TestCompleteStream_StreamErrorMidFlight(t *testing.T) {
 	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

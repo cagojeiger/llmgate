@@ -52,8 +52,6 @@ func (c *Client) Complete(ctx context.Context, req *llmtypes.Request) (*llmtypes
 			Raw:      upstream.FirstBytes(raw),
 		}
 	}
-	if cost, ok := out.Extra["cost"]; ok {
-		llmtypes.AttachReportedCost(out.Usage, cost)
-	}
+	llmtypes.AttachUsageCost(out.Usage, out.Extra["cost"], c.cfg.Cost)
 	return &out, nil
 }

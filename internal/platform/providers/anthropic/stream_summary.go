@@ -19,7 +19,7 @@ func (s *stream) Summary() *llmtypes.Summary {
 	if s.pendingFinish != nil {
 		summary.FinishReason = s.pendingFinish.finishReason
 		usage := s.buildUsage(s.pendingFinish)
-		llmtypes.AttachReportedCost(usage, s.vendorCost)
+		llmtypes.AttachUsageCost(usage, s.vendorCost, s.cost)
 		summary.Usage = usage
 	} else if s.inputTokens > 0 {
 		// Partial streams still expose prompt token consumption to audit.
@@ -36,9 +36,7 @@ func (s *stream) Summary() *llmtypes.Summary {
 // so a nil end is unreachable and intentionally not defended here.
 func (s *stream) buildFinishEvent(end *anthropicEnd) *llmtypes.Event {
 	usage := s.buildUsage(end)
-	if llmtypes.AttachReportedCost(usage, s.vendorCost) {
-		s.costEmitted = true
-	}
+	s.costSource = llmtypes.AttachUsageCost(usage, s.vendorCost, s.cost)
 	return &llmtypes.Event{
 		ID:     s.msgID,
 		Object: "chat.completion.chunk",

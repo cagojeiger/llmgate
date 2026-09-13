@@ -70,15 +70,16 @@ func (s *stream) handlePing(event *anthropicStreamEvent) streamEventResult {
 		return skipStreamEvent()
 	}
 	s.vendorCost = append(json.RawMessage(nil), event.Cost...)
-	if s.pendingFinish == nil || s.costEmitted {
+	if s.pendingFinish == nil {
 		return skipStreamEvent()
 	}
 
 	usage := s.buildUsage(s.pendingFinish)
-	if !llmtypes.AttachReportedCost(usage, s.vendorCost) {
+	source := llmtypes.AttachUsageCost(usage, s.vendorCost, s.cost)
+	if source == llmtypes.UsageCostNone || source == s.costSource || s.costSource == llmtypes.UsageCostProvider {
 		return skipStreamEvent()
 	}
-	s.costEmitted = true
+	s.costSource = source
 	s.RecordEmit()
 	return emitStreamEvent(&llmtypes.Event{
 		ID:      s.msgID,

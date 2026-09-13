@@ -24,6 +24,7 @@ type Config struct {
 	HTTPClient *http.Client
 	Name       string
 	ExtraBody  map[string]any // default extra parameters to include in request body
+	Cost       *llmtypes.ModelCost
 }
 
 type Client struct {

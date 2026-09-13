@@ -62,5 +62,6 @@ func (c *Client) Complete(ctx context.Context, req *llmtypes.Request) (*llmtypes
 			Raw:      upstream.FirstBytes(raw),
 		}
 	}
+	llmtypes.AttachUsageCost(mapped.Usage, out.Cost, c.cfg.Cost)
 	return mapped, nil
 }

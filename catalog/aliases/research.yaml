@@ -1,0 +1,4 @@
+# research — OpenClaw의 웹·브라우저·장기 조사 역할.
+alias: research
+chain:
+  - minimax-m3

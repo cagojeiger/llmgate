@@ -1,0 +1,4 @@
+# code — OpenClaw의 구현·디버깅·리팩터링 역할.
+alias: code
+chain:
+  - kimi-k2.7-code

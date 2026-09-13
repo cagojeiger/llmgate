@@ -8,3 +8,7 @@ protocol: openai
 base_url: https://opencode.ai/zen/go/v1
 auth_env: LLMGATE_OPENCODE_API_KEY
 auth_scheme: bearer
+cost:
+  input: 0.15
+  output: 0.50
+  cache_read: 0.03

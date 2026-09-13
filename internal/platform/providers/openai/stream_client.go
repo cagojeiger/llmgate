@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/streaming"
@@ -32,12 +33,19 @@ func (c *Client) CompleteStream(ctx context.Context, req *llmtypes.Request) (llm
 		return nil, c.classify(statusErr.Status, statusErr.Body, statusErr.RetryAfter)
 	}
 
+	var reader *upstream.SSEReader
+	if strings.EqualFold(c.cfg.Name, "opencode") {
+		reader = upstream.NewSSEReaderWithPostDone(resp.Body)
+	} else {
+		reader = upstream.NewSSEReader(resp.Body)
+	}
 	return streaming.ValidateStreamStart(ctx, &stream{
 		StreamBase: streaming.StreamBase{
 			Body:         resp.Body,
 			ProviderName: c.cfg.Name,
 		},
-		reader: upstream.NewSSEReader(resp.Body),
+		reader: reader,
+		cost:   c.cfg.Cost,
 	})
 }
 
@@ -51,6 +59,7 @@ type stream struct {
 	finishReason string
 	usage        *llmtypes.Usage
 	vendorCost   string
+	cost         *llmtypes.ModelCost
 }
 
 func (s *stream) Recv() (*llmtypes.Event, error) {
@@ -77,11 +86,16 @@ func (s *stream) Recv() (*llmtypes.Event, error) {
 	if event.Model != "" {
 		s.model = event.Model
 	}
-	if event.Usage != nil {
-		s.usage = event.Usage
-	}
 	if cost, ok := event.Extra["cost"]; ok && len(cost) > 0 {
 		s.vendorCost = string(cost)
+		if event.Usage == nil && s.usage != nil {
+			event.Usage = s.usage.Clone()
+		}
+		llmtypes.AttachUsageCost(event.Usage, cost, s.cost)
+	}
+	if event.Usage != nil {
+		llmtypes.AttachUsageCost(event.Usage, json.RawMessage(s.vendorCost), s.cost)
+		s.usage = event.Usage
 	}
 	if len(event.Choices) > 0 && event.Choices[0].FinishReason != "" {
 		s.finishReason = event.Choices[0].FinishReason

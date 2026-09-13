@@ -12,24 +12,24 @@ type anthropicEnd struct {
 func (s *stream) Summary() *llmtypes.Summary {
 	summary := &llmtypes.Summary{
 		Model:       s.msgModel,
+		VendorCost:  string(s.vendorCost),
 		ChunkCount:  s.ChunkCount,
 		FirstByteAt: s.FirstByteAt,
 	}
 	if s.pendingFinish != nil {
 		summary.FinishReason = s.pendingFinish.finishReason
-		usage := &llmtypes.Usage{
-			PromptTokens:     s.inputTokens,
-			CompletionTokens: s.pendingFinish.outputTokens,
-			TotalTokens:      s.inputTokens + s.pendingFinish.outputTokens,
-		}
-		addCacheUsageExtra(usage, s.pendingFinish.cacheCreationTokens, s.pendingFinish.cacheReadTokens)
+		usage := s.buildUsage(s.pendingFinish)
+		llmtypes.AttachUsageCost(usage, s.vendorCost, s.cost)
 		summary.Usage = usage
 	} else if s.inputTokens > 0 {
 		// Partial streams still expose prompt token consumption to audit.
-		summary.Usage = &llmtypes.Usage{
+		usage := &llmtypes.Usage{
 			PromptTokens: s.inputTokens,
 			TotalTokens:  s.inputTokens,
 		}
+		addCacheUsageExtra(usage, s.cacheCreationTokens, s.cacheReadTokens)
+		llmtypes.AttachUsageCost(usage, s.vendorCost, s.cost)
+		summary.Usage = usage
 	}
 	return summary
 }
@@ -38,12 +38,8 @@ func (s *stream) Summary() *llmtypes.Summary {
 // production callers gate on s.pendingFinish != nil immediately above,
 // so a nil end is unreachable and intentionally not defended here.
 func (s *stream) buildFinishEvent(end *anthropicEnd) *llmtypes.Event {
-	usage := &llmtypes.Usage{
-		PromptTokens:     s.inputTokens,
-		CompletionTokens: end.outputTokens,
-		TotalTokens:      s.inputTokens + end.outputTokens,
-	}
-	addCacheUsageExtra(usage, end.cacheCreationTokens, end.cacheReadTokens)
+	usage := s.buildUsage(end)
+	s.costSource = llmtypes.AttachUsageCost(usage, s.vendorCost, s.cost)
 	return &llmtypes.Event{
 		ID:     s.msgID,
 		Object: "chat.completion.chunk",
@@ -55,4 +51,14 @@ func (s *stream) buildFinishEvent(end *anthropicEnd) *llmtypes.Event {
 		}},
 		Usage: usage,
 	}
+}
+
+func (s *stream) buildUsage(end *anthropicEnd) *llmtypes.Usage {
+	usage := &llmtypes.Usage{
+		PromptTokens:     s.inputTokens,
+		CompletionTokens: end.outputTokens,
+		TotalTokens:      s.inputTokens + end.outputTokens,
+	}
+	addCacheUsageExtra(usage, end.cacheCreationTokens, end.cacheReadTokens)
+	return usage
 }

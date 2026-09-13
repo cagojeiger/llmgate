@@ -8,6 +8,7 @@ import pytest
 from openai import OpenAI
 
 from conftest import (
+    OPENCODE_SESSION_HEADERS,
     assert_streaming_progressive,
     discover_catalog_models,
     field,
@@ -27,7 +28,11 @@ ANTHROPIC_MODEL = _anthropic[0]
 
 @pytest.fixture
 def client(gate_base_url: str) -> OpenAI:
-    return OpenAI(base_url=f"{gate_base_url}/v1", api_key=raw_consumer_key())
+    return OpenAI(
+        base_url=f"{gate_base_url}/v1",
+        api_key=raw_consumer_key(),
+        default_headers=OPENCODE_SESSION_HEADERS,
+    )
 
 
 def test_chat_non_stream(client: OpenAI) -> None:

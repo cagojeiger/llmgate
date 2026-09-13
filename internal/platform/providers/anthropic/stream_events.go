@@ -54,7 +54,7 @@ func (s *stream) dispatch(event *anthropicStreamEvent, payload []byte) streamEve
 	case "message_stop":
 		return emitStreamEvent(s.handleMessageStop())
 	case "ping":
-		return skipStreamEvent()
+		return s.handlePing(event)
 	case "error":
 		return failStreamEvent(errorFromStreamEvent(payload, s.ProviderName))
 	default:
@@ -65,11 +65,39 @@ func (s *stream) dispatch(event *anthropicStreamEvent, payload []byte) streamEve
 	}
 }
 
+func (s *stream) handlePing(event *anthropicStreamEvent) streamEventResult {
+	if len(event.Cost) == 0 {
+		return skipStreamEvent()
+	}
+	s.vendorCost = append(json.RawMessage(nil), event.Cost...)
+	if s.pendingFinish == nil {
+		return skipStreamEvent()
+	}
+
+	usage := s.buildUsage(s.pendingFinish)
+	source := llmtypes.AttachUsageCost(usage, s.vendorCost, s.cost)
+	if source == llmtypes.UsageCostNone || source == s.costSource || s.costSource == llmtypes.UsageCostProvider {
+		return skipStreamEvent()
+	}
+	s.costSource = source
+	s.RecordEmit()
+	return emitStreamEvent(&llmtypes.Event{
+		ID:      s.msgID,
+		Object:  "chat.completion.chunk",
+		Model:   s.msgModel,
+		Choices: []llmtypes.ChoiceDelta{},
+		Usage:   usage,
+		Extra:   map[string]json.RawMessage{"cost": append(json.RawMessage(nil), event.Cost...)},
+	})
+}
+
 func (s *stream) handleMessageStart(event *anthropicStreamEvent) *llmtypes.Event {
 	if event.Message != nil {
 		s.msgID = event.Message.ID
 		s.msgModel = event.Message.Model
 		s.inputTokens = event.Message.Usage.InputTokens
+		s.cacheCreationTokens = event.Message.Usage.CacheCreationInputTokens
+		s.cacheReadTokens = event.Message.Usage.CacheReadInputTokens
 	}
 	s.RecordEmit()
 	return &llmtypes.Event{
@@ -118,11 +146,19 @@ func (s *stream) handleMessageDelta(event *anthropicStreamEvent) {
 	if event.Delta.StopReason != nil {
 		finishReason = mapStopReason(*event.Delta.StopReason)
 	}
+	cacheCreationTokens := event.Usage.CacheCreationInputTokens
+	if cacheCreationTokens == 0 {
+		cacheCreationTokens = s.cacheCreationTokens
+	}
+	cacheReadTokens := event.Usage.CacheReadInputTokens
+	if cacheReadTokens == 0 {
+		cacheReadTokens = s.cacheReadTokens
+	}
 	s.pendingFinish = &anthropicEnd{
 		finishReason:        finishReason,
 		outputTokens:        event.Usage.OutputTokens,
-		cacheCreationTokens: event.Usage.CacheCreationInputTokens,
-		cacheReadTokens:     event.Usage.CacheReadInputTokens,
+		cacheCreationTokens: cacheCreationTokens,
+		cacheReadTokens:     cacheReadTokens,
 	}
 }
 
@@ -147,7 +183,8 @@ type anthropicStreamEvent struct {
 		PartialJSON string  `json:"partial_json,omitempty"`
 		StopReason  *string `json:"stop_reason"`
 	} `json:"delta"`
-	Usage anthropicUsage `json:"usage"`
+	Usage anthropicUsage  `json:"usage"`
+	Cost  json.RawMessage `json:"cost,omitempty"`
 }
 
 func parseMaybeStreamError(payload []byte, providerName string) *llmtypes.Error {

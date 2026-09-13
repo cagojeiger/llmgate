@@ -91,8 +91,40 @@ func TestComplete_Success(t *testing.T) {
 	if string(resp.Extra["cost"]) != "0.001" {
 		t.Errorf("cost extra = %s, want 0.001", resp.Extra["cost"])
 	}
+	if string(resp.Usage.Extra["cost"]) != "0.001" {
+		t.Errorf("usage cost = %s, want 0.001", resp.Usage.Extra["cost"])
+	}
 	if string(resp.Usage.Extra["prompt_cache_hit_tokens"]) != "4" {
 		t.Errorf("usage extra = %s, want 4", resp.Usage.Extra["prompt_cache_hit_tokens"])
+	}
+}
+
+func TestComplete_EstimatesCostWhenProviderReportsZero(t *testing.T) {
+	server := newLocalServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chat-1","model":"test","choices":[],
+			"usage":{"prompt_tokens":1000000,"completion_tokens":500000,"total_tokens":1500000},
+			"cost":"0"
+		}`))
+	}))
+	defer server.Close()
+
+	c := mustNew(t, Config{
+		BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client,
+		Cost: &llmtypes.ModelCost{Input: 0.15, Output: 0.50},
+	})
+	resp, err := c.Complete(context.Background(), &llmtypes.Request{
+		Model: "test", Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("Complete returned error: %v", err)
+	}
+	if got := string(resp.Usage.Extra["cost"]); got != "0.4" {
+		t.Fatalf("usage cost = %s, want 0.4", got)
+	}
+	if got := string(resp.Usage.Extra["cost_source"]); got != `"catalog_estimate"` {
+		t.Fatalf("cost_source = %s, want catalog_estimate", got)
 	}
 }
 

@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"sync/atomic"
@@ -41,6 +42,7 @@ func (c *Client) CompleteStream(ctx context.Context, req *llmtypes.Request) (llm
 		},
 		reader:    upstream.NewSSEReader(resp.Body),
 		toolCalls: make(map[int]*streamToolCallState),
+		cost:      c.cfg.Cost,
 	})
 }
 
@@ -51,11 +53,16 @@ type stream struct {
 	closed atomic.Bool
 
 	// per-stream protocol state (anthropic-specific)
-	msgID          string
-	msgModel       string
-	inputTokens    int
-	pendingFinish  *anthropicEnd
-	pendingEmitted bool
+	msgID               string
+	msgModel            string
+	inputTokens         int
+	cacheCreationTokens int
+	cacheReadTokens     int
+	pendingFinish       *anthropicEnd
+	pendingEmitted      bool
+	vendorCost          json.RawMessage
+	costSource          llmtypes.UsageCostSource
+	cost                *llmtypes.ModelCost
 
 	// tool_use accumulator. Anthropic announces each tool call as a
 	// separate content_block_start (type=tool_use) keyed by an index that
@@ -86,10 +93,6 @@ func (s *stream) Recv() (*llmtypes.Event, error) {
 	}
 	if s.pendingFinish != nil && !s.pendingEmitted {
 		return s.emitFinish(), nil
-	}
-	if s.pendingEmitted {
-		s.closed.Store(true)
-		return nil, io.EOF
 	}
 
 	for {
@@ -137,6 +140,10 @@ func (s *stream) emitFinish() *llmtypes.Event {
 func (s *stream) finalize() (*llmtypes.Event, error) {
 	if s.pendingFinish != nil && !s.pendingEmitted {
 		return s.emitFinish(), nil
+	}
+	if s.pendingEmitted {
+		s.closed.Store(true)
+		return nil, io.EOF
 	}
 	return nil, &llmtypes.Error{
 		Kind:     llmtypes.KindUpstream,

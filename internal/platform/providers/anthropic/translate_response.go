@@ -35,6 +35,7 @@ func toOpenAIResponse(in *anthropicResponse) (*llmtypes.Response, error) {
 		finishReason = mapStopReason(*in.StopReason)
 	}
 	usage := anthropicUsageToOpenAI(in.Usage)
+	llmtypes.AttachReportedCost(usage, in.Cost)
 
 	msg := llmtypes.Message{
 		Role:             "assistant",
@@ -49,7 +50,7 @@ func toOpenAIResponse(in *anthropicResponse) (*llmtypes.Response, error) {
 		msg.Extra = map[string]json.RawMessage{"tool_calls": raw}
 	}
 
-	return &llmtypes.Response{
+	response := &llmtypes.Response{
 		ID:     in.ID,
 		Object: "chat.completion",
 		Model:  in.Model,
@@ -59,7 +60,11 @@ func toOpenAIResponse(in *anthropicResponse) (*llmtypes.Response, error) {
 			FinishReason: finishReason,
 		}},
 		Usage: usage,
-	}, nil
+	}
+	if len(in.Cost) > 0 {
+		response.Extra = map[string]json.RawMessage{"cost": append(json.RawMessage(nil), in.Cost...)}
+	}
+	return response, nil
 }
 
 // extractToolCalls maps Anthropic tool_use content blocks to the OpenAI

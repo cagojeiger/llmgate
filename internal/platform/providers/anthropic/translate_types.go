@@ -74,6 +74,7 @@ type anthropicResponse struct {
 	Content    []anthropicContent `json:"content"`
 	StopReason *string            `json:"stop_reason"`
 	Usage      anthropicUsage     `json:"usage"`
+	Cost       json.RawMessage    `json:"cost,omitempty"`
 }
 
 type anthropicContent struct {

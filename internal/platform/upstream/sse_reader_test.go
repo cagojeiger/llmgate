@@ -125,6 +125,26 @@ func TestSSEReader_TrailerAfterDoneNotDelivered(t *testing.T) {
 	}
 }
 
+func TestSSEReader_PostDoneOptInDeliversTrailer(t *testing.T) {
+	reader := NewSSEReaderWithPostDone(io.NopCloser(strings.NewReader(
+		"data: one\n\n" +
+			"data: [DONE]\n\n" +
+			"data: trailer\n\n",
+	)))
+
+	got, err := reader.Recv()
+	if err != nil || string(got) != "one" {
+		t.Fatalf("first Recv() = %q, %v; want one, nil", got, err)
+	}
+	got, err = reader.Recv()
+	if err != nil || string(got) != "trailer" {
+		t.Fatalf("second Recv() = %q, %v; want trailer, nil", got, err)
+	}
+	if _, err := reader.Recv(); !errors.Is(err, io.EOF) {
+		t.Fatalf("third Recv() error = %v, want io.EOF", err)
+	}
+}
+
 func TestSSEReader_NaturalEOFWithoutDoneIsLenient(t *testing.T) {
 	// Anthropic-style: ends after the final event with no [DONE] sentinel.
 	// The reader must surface the buffered events and then EOF cleanly,

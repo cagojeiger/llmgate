@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -161,6 +162,88 @@ func TestCompleteStream_PingIgnored(t *testing.T) {
 	}
 	if len(event.Choices) != 1 || event.Choices[0].Delta.Role != "assistant" {
 		t.Fatalf("event = %+v, want assistant role after ping", event)
+	}
+}
+
+func TestCompleteStream_CostPingAfterMessageStop(t *testing.T) {
+	server := newAnthropicStreamServer(t, nil,
+		messageStart("msg-1", "minimax-m2.5", 3),
+		messageDelta("end_turn", 2),
+		messageStop(),
+		costPingEvent("0.0001"),
+	)
+	defer server.Close()
+	stream := openAnthropicTestStream(t, server, "minimax-m2.5", "ping")
+	defer stream.Close()
+
+	var costEvent *llmtypes.Event
+	for {
+		event, err := stream.Recv()
+		if errors.Is(err, llmtypes.ErrStreamDone) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Recv() error = %v", err)
+		}
+		if event.Usage != nil && string(event.Usage.Extra["cost"]) == "0.0001" {
+			costEvent = event
+		}
+	}
+
+	if costEvent == nil {
+		t.Fatal("cost-bearing usage event missing")
+	}
+	if len(costEvent.Choices) != 0 {
+		t.Errorf("cost event choices = %+v, want empty usage-only chunk", costEvent.Choices)
+	}
+	if string(costEvent.Extra["cost"]) != `"0.0001"` {
+		t.Errorf("cost event extra = %s, want quoted upstream value", costEvent.Extra["cost"])
+	}
+	sum := stream.Summary()
+	if sum.VendorCost != `"0.0001"` {
+		t.Errorf("summary VendorCost = %q, want quoted upstream value", sum.VendorCost)
+	}
+	if string(sum.Usage.Extra["cost"]) != "0.0001" {
+		t.Errorf("summary usage cost = %s, want numeric OpenAI-compatible value", sum.Usage.Extra["cost"])
+	}
+}
+
+func TestCompleteStream_EstimatesCostBeforeZeroCostPing(t *testing.T) {
+	server := newAnthropicStreamServer(t, nil,
+		messageStartWithCache("msg-1", "minimax-m3", 100000, 0, 800000),
+		messageDelta("end_turn", 50000),
+		messageStop(),
+		costPingEvent("0"),
+	)
+	defer server.Close()
+
+	c := mustNew(t, Config{
+		BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client,
+		Name: "opencode", Cost: &llmtypes.ModelCost{Input: 0.30, Output: 1.20, CacheRead: 0.06},
+	})
+	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
+		Model: "minimax-m3", Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("CompleteStream returned error: %v", err)
+	}
+	defer stream.Close()
+
+	var usage *llmtypes.Usage
+	for {
+		event, err := stream.Recv()
+		if errors.Is(err, llmtypes.ErrStreamDone) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Recv returned error: %v", err)
+		}
+		if event.Usage != nil {
+			usage = event.Usage
+		}
+	}
+	if usage == nil || string(usage.Extra["cost"]) != "0.138" {
+		t.Fatalf("usage = %+v, want estimated cost 0.138", usage)
 	}
 }
 

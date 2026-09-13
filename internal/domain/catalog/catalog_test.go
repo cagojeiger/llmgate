@@ -202,6 +202,37 @@ auth_scheme: oauth
 	}
 }
 
+func TestLoadDir_CostRates(t *testing.T) {
+	dir := writeCatalogDir(t,
+		map[string]string{"priced.yaml": modelYAML("priced") + `cost:
+  input: 0.15
+  output: 0.47
+  cache_read: 0.016
+  cache_write: 0.20
+`},
+		nil)
+	cat, err := LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir error = %v", err)
+	}
+	if got := cat.Models["priced"].Cost; got == nil || got.Input != 0.15 || got.Output != 0.47 || got.CacheRead != 0.016 || got.CacheWrite != 0.20 {
+		t.Fatalf("Cost = %+v, want configured rates", got)
+	}
+}
+
+func TestLoadDir_RejectsNegativeCostRate(t *testing.T) {
+	dir := writeCatalogDir(t,
+		map[string]string{"bad.yaml": modelYAML("bad") + `cost:
+  input: -0.01
+  output: 1
+`},
+		nil)
+	_, err := LoadDir(dir)
+	if err == nil || !strings.Contains(err.Error(), "cost.input") {
+		t.Fatalf("error = %v, want invalid cost.input", err)
+	}
+}
+
 // A transcription model may omit auth entirely (unauthenticated local STT).
 func TestLoadDir_TranscriptionAuthOptional(t *testing.T) {
 	dir := writeCatalogDir(t,

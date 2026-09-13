@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 
+	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/platform/upstream"
 )
 
@@ -22,6 +23,7 @@ type Config struct {
 	HTTPClient       *http.Client
 	Name             string
 	DefaultMaxTokens int
+	Cost             *llmtypes.ModelCost
 }
 
 type Client struct {

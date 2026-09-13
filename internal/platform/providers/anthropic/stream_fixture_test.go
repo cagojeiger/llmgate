@@ -50,6 +50,10 @@ func openAnthropicTestStream(t *testing.T, server *localServer, model, prompt st
 }
 
 func messageStart(id, model string, inputTokens int) anthropicSSEFixture {
+	return messageStartWithCache(id, model, inputTokens, 0, 0)
+}
+
+func messageStartWithCache(id, model string, inputTokens, cacheCreationTokens, cacheReadTokens int) anthropicSSEFixture {
 	return anthropicSSEFixture{
 		event: "message_start",
 		payload: fmt.Sprintf(`{
@@ -59,9 +63,13 @@ func messageStart(id, model string, inputTokens int) anthropicSSEFixture {
 				"type": "message",
 				"role": "assistant",
 				"model": %q,
-				"usage": {"input_tokens": %d}
+				"usage": {
+					"input_tokens": %d,
+					"cache_creation_input_tokens": %d,
+					"cache_read_input_tokens": %d
+				}
 			}
-		}`, id, model, inputTokens),
+		}`, id, model, inputTokens, cacheCreationTokens, cacheReadTokens),
 	}
 }
 

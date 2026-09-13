@@ -210,8 +210,8 @@ func TestCompleteStream_CostPingAfterMessageStop(t *testing.T) {
 
 func TestCompleteStream_EstimatesCostBeforeZeroCostPing(t *testing.T) {
 	server := newAnthropicStreamServer(t, nil,
-		messageStart("msg-1", "minimax-m3", 100000),
-		messageDeltaWithCache("end_turn", 50000, 0, 800000),
+		messageStartWithCache("msg-1", "minimax-m3", 100000, 0, 800000),
+		messageDelta("end_turn", 50000),
 		messageStop(),
 		costPingEvent("0"),
 	)

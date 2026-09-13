@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"llmgate/internal/domain/llmtypes"
 	"llmgate/internal/domain/streaming"
@@ -33,7 +34,7 @@ func (c *Client) CompleteStream(ctx context.Context, req *llmtypes.Request) (llm
 	}
 
 	var reader *upstream.SSEReader
-	if c.cfg.Name == "opencode" {
+	if strings.EqualFold(c.cfg.Name, "opencode") {
 		reader = upstream.NewSSEReaderWithPostDone(resp.Body)
 	} else {
 		reader = upstream.NewSSEReader(resp.Body)

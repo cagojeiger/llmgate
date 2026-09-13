@@ -53,14 +53,16 @@ type stream struct {
 	closed atomic.Bool
 
 	// per-stream protocol state (anthropic-specific)
-	msgID          string
-	msgModel       string
-	inputTokens    int
-	pendingFinish  *anthropicEnd
-	pendingEmitted bool
-	vendorCost     json.RawMessage
-	costSource     llmtypes.UsageCostSource
-	cost           *llmtypes.ModelCost
+	msgID               string
+	msgModel            string
+	inputTokens         int
+	cacheCreationTokens int
+	cacheReadTokens     int
+	pendingFinish       *anthropicEnd
+	pendingEmitted      bool
+	vendorCost          json.RawMessage
+	costSource          llmtypes.UsageCostSource
+	cost                *llmtypes.ModelCost
 
 	// tool_use accumulator. Anthropic announces each tool call as a
 	// separate content_block_start (type=tool_use) keyed by an index that

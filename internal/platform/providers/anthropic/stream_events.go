@@ -96,6 +96,8 @@ func (s *stream) handleMessageStart(event *anthropicStreamEvent) *llmtypes.Event
 		s.msgID = event.Message.ID
 		s.msgModel = event.Message.Model
 		s.inputTokens = event.Message.Usage.InputTokens
+		s.cacheCreationTokens = event.Message.Usage.CacheCreationInputTokens
+		s.cacheReadTokens = event.Message.Usage.CacheReadInputTokens
 	}
 	s.RecordEmit()
 	return &llmtypes.Event{
@@ -144,11 +146,19 @@ func (s *stream) handleMessageDelta(event *anthropicStreamEvent) {
 	if event.Delta.StopReason != nil {
 		finishReason = mapStopReason(*event.Delta.StopReason)
 	}
+	cacheCreationTokens := event.Usage.CacheCreationInputTokens
+	if cacheCreationTokens == 0 {
+		cacheCreationTokens = s.cacheCreationTokens
+	}
+	cacheReadTokens := event.Usage.CacheReadInputTokens
+	if cacheReadTokens == 0 {
+		cacheReadTokens = s.cacheReadTokens
+	}
 	s.pendingFinish = &anthropicEnd{
 		finishReason:        finishReason,
 		outputTokens:        event.Usage.OutputTokens,
-		cacheCreationTokens: event.Usage.CacheCreationInputTokens,
-		cacheReadTokens:     event.Usage.CacheReadInputTokens,
+		cacheCreationTokens: cacheCreationTokens,
+		cacheReadTokens:     cacheReadTokens,
 	}
 }
 

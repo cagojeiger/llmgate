@@ -23,10 +23,13 @@ func (s *stream) Summary() *llmtypes.Summary {
 		summary.Usage = usage
 	} else if s.inputTokens > 0 {
 		// Partial streams still expose prompt token consumption to audit.
-		summary.Usage = &llmtypes.Usage{
+		usage := &llmtypes.Usage{
 			PromptTokens: s.inputTokens,
 			TotalTokens:  s.inputTokens,
 		}
+		addCacheUsageExtra(usage, s.cacheCreationTokens, s.cacheReadTokens)
+		llmtypes.AttachUsageCost(usage, s.vendorCost, s.cost)
+		summary.Usage = usage
 	}
 	return summary
 }

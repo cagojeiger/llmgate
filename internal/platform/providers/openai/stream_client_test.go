@@ -52,7 +52,7 @@ func TestCompleteStream_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "opencode"})
+	c := mustNew(t, Config{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client, Name: "OpenCode"})
 	stream, err := c.CompleteStream(context.Background(), &llmtypes.Request{
 		Model:    "deepseek-v4-flash",
 		Messages: []llmtypes.Message{{Role: "user", Content: "ping"}},

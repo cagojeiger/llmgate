@@ -34,6 +34,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 GATE_PORT = int(os.environ.get("LLMGATE_E2E_PORT", "8080"))
 GATE_BASE_URL = f"http://127.0.0.1:{GATE_PORT}"
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
+OPENCODE_SESSION_HEADERS = {
+    # OpenCode Go accepts UUID-shaped stable conversation identifiers. Keep one
+    # deterministic ID across an e2e run so tool-capable models exercise the
+    # same affinity path as real coding agents.
+    "x-opencode-session": "0fc5f6d5-67d0-4edf-a673-735f1bf3ad9c",
+}
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -298,6 +304,15 @@ def discover_catalog_models(protocol: str | None = None, vendor: str | None = No
         if model_id:
             ids.append(model_id)
     return ids
+
+
+def catalog_model_has_cost(model: str) -> bool:
+    """Whether a catalog model declares response-accounting token rates."""
+    for path in (REPO_ROOT / "catalog" / "models").glob("*.yaml"):
+        text = path.read_text()
+        if _catalog_field(path, "id", text=text) == model:
+            return re.search(r"^cost:\s*$", text, flags=re.MULTILINE) is not None
+    return False
 
 
 def _catalog_field(path: Path, field: str, *, text: str | None = None) -> str:

@@ -4,7 +4,9 @@ mod logs;
 mod profile;
 mod relay;
 mod runtime;
+mod startup;
 mod storage;
+mod ui;
 
 use anyhow::{Context, ensure};
 use clap::{Parser, Subcommand};
@@ -22,7 +24,9 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// 사용 가능한 모델과 입력 모드를 표시합니다.
     Profiles,
+    /// API 키로 모델 사용 권한을 확인하고 이 Mac에 등록합니다.
     Register {
         #[arg(long)]
         url: String,
@@ -35,18 +39,27 @@ enum Command {
         #[arg(long)]
         allow_loopback_http: bool,
     },
+    /// 모델과 전용 Python 환경을 설치합니다.
     Install {
         #[arg(value_enum)]
         profile: Profile,
     },
+    /// 설치 후 모델 준비·Relay 공개까지 기다립니다.
     Start(lifecycle::StartOptions),
     #[command(hide = true)]
     Run(lifecycle::StartOptions),
-    Status,
+    /// 모델·Relay 연결 상태를 확인합니다.
+    Status {
+        /// 자동화용 NDJSON (profile마다 한 줄).
+        #[arg(long)]
+        json: bool,
+    },
+    /// 시작·인증 오류와 모델 로그의 최근 내용을 표시합니다.
     Logs {
         #[arg(value_enum)]
         profile: Profile,
     },
+    /// 워커를 종료하고 전용 실행 환경을 삭제합니다 (캐시는 유지).
     Down {
         #[arg(value_enum)]
         profile: Option<Profile>,
@@ -55,10 +68,12 @@ enum Command {
         #[arg(long, requires = "all")]
         purge: bool,
     },
+    /// 캐시 용량 확인 또는 실행 중이지 않은 캐시 삭제.
     Cache {
         #[command(subcommand)]
         command: CacheCommand,
     },
+    /// 모든 워커를 종료하고 이 Mac의 키·등록 정보를 삭제합니다.
     Unregister,
 }
 #[derive(Subcommand)]
@@ -114,9 +129,10 @@ async fn main() -> anyhow::Result<()> {
             broker::save_key(&home, &key)?;
             home.write("registration.json", &registration)?;
             println!(
-                "registered {} profile(s); API key stored in macOS Keychain",
+                "{}개 profile 등록 완료. API 키는 macOS Keychain에 저장했습니다. 모델은 아직 시작하지 않았습니다.",
                 registration.profiles.len()
             );
+            println!("다음: {}", ui::command(&home, "start --all"));
         }
         Command::Install { profile } => {
             let _p = home.profile_lock(profile)?;
@@ -125,45 +141,19 @@ async fn main() -> anyhow::Result<()> {
             runtime::install::install(&home, profile).await?;
             println!("{} installed", profile.id());
         }
-        Command::Start(opts) => lifecycle::start(&home, opts).await?,
+        Command::Start(opts) => startup::start(&home, opts).await?,
         Command::Run(opts) => {
             let p = opts.profile.context("run requires one profile")?;
-            lifecycle::run(home.clone(), p, opts).await?;
+            lifecycle::run(
+                home.clone(),
+                p,
+                opts,
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await?;
         }
-        Command::Status => {
-            for p in Profile::ALL {
-                match lifecycle::control(&home, p, "status").await {
-                    Ok(state) => {
-                        let mut value: serde_json::Value = serde_json::from_str(&state)?;
-                        if let Ok(memory) = home
-                            .read::<serde_json::Value>(&format!("control/{}-memory.json", p.id()))
-                        {
-                            value["memory"] = memory;
-                        }
-                        println!("{value}");
-                    }
-                    Err(_) => {
-                        let last = home
-                            .read::<lifecycle::State>(&format!("control/{}.json", p.id()))
-                            .ok();
-                        println!(
-                            "{}",
-                            serde_json::json!({"profile":p.id(),"supervisor":"not_running","installed":home.runtime(p).join("installed.json").exists(),"last_state":last})
-                        );
-                    }
-                }
-            }
-        }
-        Command::Logs { profile } => {
-            let path = home.0.join(format!("logs/{}.log", profile.id()));
-            if path.exists() {
-                use std::io::{Seek, SeekFrom};
-                let mut f = fs::File::open(path)?;
-                let length = f.metadata()?.len();
-                f.seek(SeekFrom::Start(length.saturating_sub(64 * 1024)))?;
-                std::io::copy(&mut f, &mut std::io::stdout())?;
-            }
-        }
+        Command::Status { json } => ui::status(&home, json).await?,
+        Command::Logs { profile } => ui::logs(&home, profile)?,
         Command::Down {
             profile,
             all,
@@ -176,7 +166,10 @@ async fn main() -> anyhow::Result<()> {
                 vec![profile.context("missing profile")?]
             } {
                 lifecycle::stop(&home, p).await?;
-                println!("{} stopped and runtime removed", p.id());
+                println!(
+                    "{} 종료·실행 환경 삭제 완료. 캐시는 유지되며 다음 start에서 실행 환경을 다시 설치합니다.",
+                    p.id()
+                );
             }
             if purge {
                 clean_cache(&home)?;

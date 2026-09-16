@@ -15,16 +15,7 @@ scripts/package-macos.sh
 # dist/SHA256SUMS
 ```
 
-GitHub Release에서 두 파일을 같은 디렉터리에 내려받은 뒤:
-
-```sh
-shasum -a 256 -c SHA256SUMS
-tar -xzf llmgate-cli-0.1.0-aarch64-apple-darwin.tar.gz
-mkdir -p ~/.local/bin
-install -m 755 llmgate-cli-0.1.0-aarch64-apple-darwin/llmgate-cli ~/.local/bin/llmgate-cli
-~/.local/bin/llmgate-cli --version
-```
-
-Rust·Python 사전 설치는 사용자에게 요구하지 않는다. 최초 모델 설치는 네트워크와 디스크 공간이 필요하다.
+사용자 설치 절차와 현재 다운로드 경로는 [INSTALL.md](../INSTALL.md)에 있다.
+패키지에도 INSTALL.md를 포함한다. PATH 설정, 등록·시작·상태 확인 및 오류별 다음 행동을 안내한다.
 
 서명은 APPLE_SIGNING_IDENTITY와 인증서/암호 Secret이 구성되면 CI에서 적용한다. 현재 로컬에는 Developer ID가 없어 서명·공증 완료를 주장하지 않는다. 공증된 사용자 배포를 위해서는 별도 Apple 계정 자격 증명과 공증 검증이 필요하다. 서명 설정이 없으면 검토용 unsigned draft만 생성한다.

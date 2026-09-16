@@ -88,12 +88,24 @@ pub async fn grant(
         .bearer_auth(key)
         .json(&serde_json::json!({"protocol_version":1,"profile":p.id(),"profile_version":"1"}))
         .send()
-        .await?;
-    ensure!(
-        response.status().is_success(),
-        "token broker denied request (HTTP {})",
-        response.status().as_u16()
-    );
+        .await
+        .context("등록 서버에 연결하지 못했습니다. 서버 URL·네트워크·TLS 인증서를 확인하세요")?;
+    if !response.status().is_success() {
+        let status = response.status().as_u16();
+        let hint = match status {
+            401 => "API 키가 유효하지 않습니다. 키를 확인하고 register를 다시 실행하세요",
+            403 => {
+                "이 키에 worker 권한이 없습니다. 관리자에게 allowed_worker_profiles 설정을 요청하세요"
+            }
+            404 => {
+                "worker 등록 API가 없습니다. 서버 URL과 서버의 worker 기능 배포 여부를 확인하세요"
+            }
+            400 => "profile 또는 등록 버전이 지원되지 않습니다. CLI·서버 버전을 확인하세요",
+            429 => "등록 요청이 많습니다. 잠시 후 다시 시도하세요",
+            _ => "등록 서버가 요청을 처리하지 못했습니다. 서버 상태를 확인하고 다시 시도하세요",
+        };
+        anyhow::bail!("{hint} (HTTP {status}, profile {})", p.id());
+    }
     let mut body = Vec::new();
     while let Some(chunk) = response.chunk().await? {
         ensure!(

@@ -188,12 +188,19 @@ def main():
             subprocess.run([str(CLI), "register", "--url", base, "--profiles", *PROFILES, "--key-stdin", "--allow-loopback-http", "--ca-file", str(WORK / "ca.pem")], input=key + "\n", text=True, check=True)
             REGISTERED = True
             for p in PROFILES:
-                subprocess.run([str(CLI), "start", p], check=True)
                 STARTED.append(p)
+                subprocess.run([str(CLI), "start", p], check=True)
+                states = [json.loads(line) for line in subprocess.check_output([str(CLI), "status", "--json"], text=True).splitlines()]
+                current = next(state for state in states if state["profile"] == p)
+                assert current.get("runtime") == "ready" and current.get("publish") == "active", current
+                record("start_ready_on_return", profile=p, runtime=current["runtime"], publish=current["publish"])
+            human_status = subprocess.check_output([str(CLI), "status"], text=True)
+            assert human_status.count("서빙 가능") == len(PROFILES), human_status
+            record("human_status", serving_profiles=len(PROFILES))
             deadline = time.monotonic() + 900
             seen = set()
             while time.monotonic() < deadline:
-                states = [json.loads(line) for line in subprocess.check_output([str(CLI), "status"], text=True).splitlines()]
+                states = [json.loads(line) for line in subprocess.check_output([str(CLI), "status", "--json"], text=True).splitlines()]
                 for state in states:
                     if state.get("runtime") == "ready" and state.get("publish") == "active" and state["profile"] not in seen:
                         seen.add(state["profile"])

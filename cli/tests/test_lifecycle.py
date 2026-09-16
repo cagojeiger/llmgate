@@ -69,7 +69,7 @@ Server(('127.0.0.1',int(os.environ['LLMGATE_MODEL_PORT'])),H).serve_forever()
         deadline=time.monotonic()+10
         while time.monotonic()<deadline:
             if p.poll() is not None:self.fail(p.stderr.read().decode())
-            output=self.command('status')
+            output=self.command('status','--json')
             if output.returncode==0:
                 state=json.loads(output.stdout.splitlines()[0])
                 if state.get('runtime')=='ready':
@@ -79,7 +79,7 @@ Server(('127.0.0.1',int(os.environ['LLMGATE_MODEL_PORT'])),H).serve_forever()
             time.sleep(.1)
         log=self.home/'logs/embedding.log'
         engine_file=self.home/'engine.json'
-        diagnostic={'status':self.command('status').stdout,'model_log':log.read_text()[-2000:] if log.exists() else 'no log'}
+        diagnostic={'status':self.command('status','--json').stdout,'model_log':log.read_text()[-2000:] if log.exists() else 'no log'}
         if engine_file.exists():
             engine=json.loads(engine_file.read_text());self.engines.append(engine['pid'])
             diagnostic['engine']=engine

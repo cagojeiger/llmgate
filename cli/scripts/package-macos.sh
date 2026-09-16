@@ -12,6 +12,7 @@ trap 'rm -rf "$stage"' EXIT
 mkdir "$stage/$name"
 install -m 755 target/aarch64-apple-darwin/release/llmgate-cli "$stage/$name/llmgate-cli"
 cp README.md "$stage/$name/README.md"
+cp INSTALL.md "$stage/$name/INSTALL.md"
 if [[ -n "${APPLE_SIGNING_IDENTITY:-}" ]]; then
   codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$stage/$name/llmgate-cli"
   codesign --verify --strict --verbose=2 "$stage/$name/llmgate-cli"

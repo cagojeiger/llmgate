@@ -42,6 +42,7 @@ pub struct State {
 pub struct StartOptions {
     #[arg(value_enum)]
     pub profile: Option<Profile>,
+    /// Start registered profiles (both profiles with --local-only).
     #[arg(long)]
     pub all: bool,
     #[arg(long)]
@@ -54,6 +55,9 @@ pub struct StartOptions {
     pub max_connections: u16,
     #[arg(long,default_value_t=3600,value_parser=clap::value_parser!(u16).range(1..=3600))]
     pub connection_timeout: u16,
+    /// Seconds to wait for model readiness and Relay publication, after installation.
+    #[arg(long, default_value_t=660, value_parser=clap::value_parser!(u16).range(1..=3600))]
+    pub wait_timeout: u16,
 }
 pub async fn control(home: &Home, p: Profile, command: &str) -> anyhow::Result<String> {
     timeout(Duration::from_secs(3), async {
@@ -86,90 +90,13 @@ pub async fn stop(home: &Home, p: Profile) -> anyhow::Result<()> {
     let _ = fs::remove_file(home.socket(p));
     Ok(())
 }
-pub async fn start(home: &Home, opts: StartOptions) -> anyhow::Result<()> {
-    ensure!(
-        opts.all != opts.profile.is_some(),
-        "choose one profile or --all"
-    );
-    ensure!(
-        !opts.all || (!opts.foreground && opts.port.is_none()),
-        "--all requires background mode and automatic ports"
-    );
-    let profiles = if opts.all {
-        Profile::ALL.to_vec()
-    } else {
-        vec![opts.profile.context("missing profile")?]
-    };
-    if !opts.local_only {
-        let _: Registration = home
-            .read("registration.json")
-            .context("run register first, or use --local-only for a local engine test")?;
-    }
-    let mut errors = Vec::new();
-    for p in profiles {
-        if control(home, p, "status").await.is_ok() {
-            println!("{} already running", p.id());
-            continue;
-        }
-        let profile_lock = home.profile_lock(p)?;
-        let engine_lock = ownership::idle(home, p).await?;
-        let cache_lock = home.cache_lock(false)?;
-        install::install(home, p).await?;
-        drop(cache_lock);
-        drop(engine_lock);
-        drop(profile_lock);
-        if opts.foreground {
-            return run(home.clone(), p, opts.clone()).await;
-        }
-        let mut command = std::process::Command::new(std::env::current_exe()?);
-        command.arg("--home").arg(&home.0).args([
-            "run",
-            p.id(),
-            "--max-connections",
-            &opts.max_connections.to_string(),
-            "--connection-timeout",
-            &opts.connection_timeout.to_string(),
-        ]);
-        if opts.local_only {
-            command.arg("--local-only");
-        }
-        if let Some(port) = opts.port {
-            command.args(["--port", &port.to_string()]);
-        }
-        use std::os::unix::process::CommandExt;
-        let output =
-            crate::logs::supervisor_output(home.0.join(format!("logs/{}-supervisor.log", p.id())))?;
-        let mut child = command
-            .stdin(std::process::Stdio::null())
-            .stdout(output.try_clone()?)
-            .stderr(output)
-            .process_group(0)
-            .spawn()?;
-        let mut ready = false;
-        for _ in 0..100 {
-            if let Ok(state) = control(home, p, "status").await {
-                println!("{state}");
-                ready = true;
-                break;
-            }
-            if child.try_wait()?.is_some() {
-                break;
-            }
-            sleep(Duration::from_millis(100)).await;
-        }
-        if !ready {
-            errors.push(p.id());
-        }
-    }
-    ensure!(
-        errors.is_empty(),
-        "profiles failed to start: {} (see supervisor logs)",
-        errors.join(", ")
-    );
-    Ok(())
-}
 
-pub async fn run(home: Home, p: Profile, opts: StartOptions) -> anyhow::Result<()> {
+pub async fn run(
+    home: Home,
+    p: Profile,
+    opts: StartOptions,
+    stop: CancellationToken,
+) -> anyhow::Result<()> {
     let _profile_lock = home.profile_lock(p)?;
     let _cache_lock = home.cache_lock(false)?;
     drop(ownership::idle(&home, p).await?);
@@ -206,7 +133,6 @@ pub async fn run(home: Home, p: Profile, opts: StartOptions) -> anyhow::Result<(
         error: None,
         lease_protected: true,
     }));
-    let stop = CancellationToken::new();
     let ctl_stop = stop.clone();
     let ctl_state = state.clone();
     let _ = fs::remove_file(home.socket(p));

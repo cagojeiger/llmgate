@@ -18,6 +18,8 @@ RelayGate SDK 0.5.1은 crates.io에서 가져온다. CLI 자체는 crates.io에 
 
 ## 사용
 
+처음 사용하는 Mac에서는 [다운로드·PATH 설정·등록 안내](INSTALL.md)를 먼저 따라간다.
+
 ```sh
 llmgate-cli register --url https://llmgate.example --profiles embedding stt
 llmgate-cli start --all
@@ -30,14 +32,16 @@ llmgate-cli cache clean
 
 API 키는 숨김 입력 또는 `register --key-stdin`으로 받고 Keychain에 저장한다. JWT는 내부에서 발급·갱신해 메모리에만 둔다.
 HTTPS+RelayGate TLS가 기본이며 `--allow-loopback-http`는 로컬 테스트용이다.
+`start` 성공은 모델 준비·Relay 공개까지 확인했다는 뜻이다. `logs`는 supervisor와 모델 로그를 함께 보여준다.
 등록 전 서버의 [worker 권한과 issuer 설정](../docs/worker-registration.md)이 필요하다.
 
 | start 옵션 | 의미 |
 | --- | --- |
-| embedding / stt / --all | 선택 profile 또는 두 profile 설치·시작 |
+| embedding / stt / --all | 선택 profile 또는 등록된 모든 profile 설치·시작 |
 | --port N | 포트 지정. 기본 자동 선택, 충돌 시 기존 프로세스 보존 |
 | --max-connections N | Relay Pipe 상한, 기본 4. 추론 동시성과 별개 |
 | --connection-timeout SECONDS | Pipe 수명, 기본/최대 3600초 |
+| --wait-timeout SECONDS | 설치 이후 준비·Relay 공개 대기, 기본 660초. 초과 시 오류를 반환하며 background 워커는 계속 실행 |
 | --foreground | 터미널에서 감독. 기본 background supervisor |
 | --local-only | 등록 없이 로컬 엔진만 실행 |
 | --home PATH | 전용 관리 root 변경. 기본 ~/.llmgate |
@@ -48,7 +52,7 @@ HTTPS+RelayGate TLS가 기본이며 `--allow-loopback-http`는 로컬 테스트�
 - 목표는 두 Python 모델 프로세스와 Rust supervisor의 합산 **4 GiB**다. Docker 서버·개발 도구·설치 작업은 별도다.
 - Darwin physical footprint를 250ms마다 합산한다. 3.5 GiB 이상이면 신규 추론을 거부하고, 4 GiB 초과를 관측하면 모델을 종료한다. MLX cache는 프로세스당 64 MiB다.
 - 이는 OS 강제 상한이 아니다. 샘플 사이의 순간 초과 가능성이 있으며 실제 검증 범위는 [측정 기록](docs/validation-2026-09-16.md)을 따른다.
-- `status`의 memory 필드에 합계·관측 peak·budget이 나온다. PID 재사용은 시작 시각으로 구분한다.
+- `status`는 사람이 읽는 표이며, `status --json`의 memory 필드에 합계·관측 peak·budget이 나온다. PID 재사용은 시작 시각으로 구분한다.
 - `down`은 공개 철회·bounded drain·소유 process group/port 종료 확인 후 전용 Python runtime을 삭제한다.
 - cache는 남는다. 실행/설치 중 `cache clean`은 거부하며 `down --all --purge`는 종료 후 cache도 지운다.
 - `unregister`는 실행을 멈추고 Keychain·등록 설정을 지운다. 서버의 API 키 자체는 폐기하지 않는다.
@@ -66,7 +70,7 @@ python3 -m unittest discover -s tests -v
 scripts/package-macos.sh
 ```
 
-[다운로드·release 절차](docs/distribution.md). PR CI가 tar.gz·SHA256SUMS를 artifact로 제공한다.
+[다운로드·release 절차](docs/distribution.md) · [UX 검증](docs/validation-2026-09-17.md). PR CI가 tar.gz·SHA256SUMS를 artifact로 제공한다.
 
 [통합 검증 스크립트](scripts/e2e_macos.py)는 native MLX·TLS RelayGate와 로컬 Go 소스의 Compose build를 사용한다.
 테스트 전 Mac의 `say`/`afconvert`, Docker, 별도로 빌드한 RelayGate Gateway가 필요하다. Go와 운영 Caller는 Compose에서 함께 빌드한다.

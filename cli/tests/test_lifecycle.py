@@ -26,6 +26,7 @@ class LifecycleTests(unittest.TestCase):
         (self.rt/'embedding_server.py').write_text('''import http.server,json,os,pathlib
 root=pathlib.Path(os.environ['LLMGATE_MANAGED_ROOT'])
 (root/'engine.json').write_text(json.dumps({'pid':os.getpid(),'port':int(os.environ['LLMGATE_MODEL_PORT'])}))
+print('fake engine started',flush=True)
 class H(http.server.BaseHTTPRequestHandler):
  def log_message(self,*a):pass
  def do_GET(self):
@@ -72,7 +73,15 @@ http.server.ThreadingHTTPServer(('127.0.0.1',int(os.environ['LLMGATE_MODEL_PORT'
                     return p,engine
             time.sleep(.1)
         log=self.home/'logs/embedding.log'
-        self.fail('engine did not become ready: '+(log.read_text()[-2000:] if log.exists() else 'no log'))
+        engine_file=self.home/'engine.json'
+        diagnostic={'status':self.command('status').stdout,'model_log':log.read_text()[-2000:] if log.exists() else 'no log'}
+        if engine_file.exists():
+            engine=json.loads(engine_file.read_text());self.engines.append(engine['pid'])
+            diagnostic['engine']=engine
+            for name,argv in [('process',['/bin/ps','-o','pid=,ppid=,pgid=,command=','-p',str(engine['pid'])]),('listeners',['/usr/sbin/lsof','-nP','-t',f"-iTCP:{engine['port']}",'-sTCP:LISTEN'])]:
+                result=subprocess.run(argv,capture_output=True,text=True,timeout=5)
+                diagnostic[name]={'code':result.returncode,'stdout':result.stdout,'stderr':result.stderr}
+        self.fail('engine did not become ready: '+json.dumps(diagnostic))
 
     @staticmethod
     def alive(port):

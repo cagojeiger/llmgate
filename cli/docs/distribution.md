@@ -11,7 +11,7 @@
 ```sh
 cd cli
 scripts/package-macos.sh
-# dist/llmgate-cli-0.1.0-aarch64-apple-darwin.tar.gz
+# dist/llmgate-cli-0.1.1-aarch64-apple-darwin.tar.gz
 # dist/SHA256SUMS
 ```
 

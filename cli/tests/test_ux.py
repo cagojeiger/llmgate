@@ -1,5 +1,6 @@
 """Public command behavior; local fixtures, no model downloads or Keychain writes."""
 from contextlib import contextmanager
+import fcntl
 import http.server
 import json
 from pathlib import Path
@@ -29,6 +30,10 @@ class UXTests(unittest.TestCase):
     def supervisor(self,phase):
         path=self.home/'control/embedding.sock'
         server=socket.socket(socket.AF_UNIX);server.bind(str(path));server.listen();server.settimeout(.1)
+        # Match the real supervisor's ownership even if a status client times out.
+        (self.home/'locks').mkdir(exist_ok=True)
+        lock=(self.home/'locks/embedding.lock').open('a+')
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         stop=threading.Event();began=time.monotonic()
         def serve():
             while not stop.is_set():
@@ -38,10 +43,11 @@ class UXTests(unittest.TestCase):
                     while conn.recv(64):pass
                     runtime,publish=phase(time.monotonic()-began)
                     state={'profile':'embedding','runtime':runtime,'publish':publish,'port':12345,'model':'fixture','revision':'fixture','restarts':0,'dropped_log_chunks':0,'error':None,'lease_protected':True}
-                    conn.sendall(json.dumps(state).encode())
+                    try:conn.sendall(json.dumps(state).encode())
+                    except (BrokenPipeError,ConnectionResetError):pass
         thread=threading.Thread(target=serve);thread.start()
         try:yield
-        finally:stop.set();thread.join(timeout=2);server.close();path.unlink(missing_ok=True)
+        finally:stop.set();thread.join(timeout=2);server.close();path.unlink(missing_ok=True);lock.close()
     def test_start_all_waits_for_both_model_and_publication_and_uses_registered_profiles(self):
         def phase(elapsed):
             if elapsed<1:return 'starting','active'
@@ -54,6 +60,15 @@ class UXTests(unittest.TestCase):
         self.assertIn('서빙 준비 완료',result.stdout)
         self.assertIn('연결 대기',result.stderr)
         self.assertFalse((self.home/'runtimes/stt').exists())
+    def test_disconnected_status_client_does_not_kill_supervisor(self):
+        with self.supervisor(lambda _:('ready','active')):
+            with socket.socket(socket.AF_UNIX) as client:
+                client.connect(str(self.home/'control/embedding.sock'))
+                client.sendall(b'status');client.shutdown(socket.SHUT_RDWR)
+            result=self.command('status','--json')
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertEqual(json.loads(result.stdout.splitlines()[0])['runtime'],'ready')
+
     def test_timeout_is_failure_without_stopping_worker(self):
         with self.supervisor(lambda _:('ready','connecting')):
             result=self.command('start','--all','--wait-timeout','1')

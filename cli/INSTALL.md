@@ -6,21 +6,16 @@ Apple Silicon(M1 이상) · macOS 15+가 필요합니다. Python·Rust는 설치
 
 ## 1. 다운로드·설치
 
-**현재 정식 CLI Release는 미게시입니다.** 지금 내부 시험용으로 받으려면
-[PR #231](https://github.com/cagojeiger/llmgate/pull/231)의 최신 통과한 `cli` Actions 실행에서
-`llmgate-cli-macos-arm64` artifact를 다운로드하고 ZIP을 풉니다. GitHub 로그인이 필요할 수 있습니다.
-안에는 `llmgate-cli-0.1.0-aarch64-apple-darwin.tar.gz`와 `SHA256SUMS`가 있습니다.
-
-정식 게시 후에는 [CLI 0.1.0 Release](https://github.com/cagojeiger/llmgate/releases/tag/cli-v0.1.0)에서
-같은 두 파일을 받을 수 있습니다. 미게시 상태에서는 이 Release 링크를 사용할 수 없습니다.
+[CLI 0.1.1 Release](https://github.com/cagojeiger/llmgate/releases/tag/cli-v0.1.1)에서
+`llmgate-cli-0.1.1-aarch64-apple-darwin.tar.gz`와 `SHA256SUMS`를 받습니다.
 
 두 파일이 있는 디렉터리에서 실행하세요.
 
 ```sh
 shasum -a 256 -c SHA256SUMS
-tar -xzf llmgate-cli-0.1.0-aarch64-apple-darwin.tar.gz
+tar -xzf llmgate-cli-0.1.1-aarch64-apple-darwin.tar.gz
 mkdir -p "$HOME/.local/bin"
-install -m 755 llmgate-cli-0.1.0-aarch64-apple-darwin/llmgate-cli "$HOME/.local/bin/llmgate-cli"
+install -m 755 llmgate-cli-0.1.1-aarch64-apple-darwin/llmgate-cli "$HOME/.local/bin/llmgate-cli"
 export PATH="$HOME/.local/bin:$PATH"
 llmgate-cli --version
 ```

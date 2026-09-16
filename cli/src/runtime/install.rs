@@ -99,6 +99,10 @@ pub async fn install(home: &Home, p: Profile) -> anyhow::Result<Installed> {
     fs::create_dir_all(rt.join("tmp"))?;
     for (name, bytes) in [
         (
+            "runtime_guard.py",
+            &include_bytes!("../../python/runtime_guard.py")[..],
+        ),
+        (
             "embedding_server.py",
             &include_bytes!("../../python/embedding_server.py")[..],
         ),

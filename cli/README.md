@@ -52,6 +52,7 @@ HTTPS+RelayGate TLS가 기본이며 `--allow-loopback-http`는 로컬 테스트�
 - `down`은 공개 철회·bounded drain·소유 process group/port 종료 확인 후 전용 Python runtime을 삭제한다.
 - cache는 남는다. 실행/설치 중 `cache clean`은 거부하며 `down --all --purge`는 종료 후 cache도 지운다.
 - `unregister`는 실행을 멈추고 Keychain·등록 설정을 지운다. 서버의 API 키 자체는 폐기하지 않는다.
+- 모델은 engine/cache 잠금을 상속하며 supervisor가 사라지면 생존 pipe의 EOF로 종료한다. 남은 모델이 있으면 start/install/down/cache clean을 거부한다. 이전 버전의 불명확한 crash 기록은 덮어쓰지 않는다.
 - 모델 장애는 최대 3회 재시작한다. transport 복구는 SDK 책임이다. 모델 로그는 profile당 10 MiB × 5개로 회전한다. supervisor 시작·종료 로그는 실행마다 회전해 최근 5개를 유지한다.
 
 ## 빌드·검증
@@ -68,18 +69,18 @@ scripts/package-macos.sh
 [다운로드·release 절차](docs/distribution.md). PR CI가 tar.gz·SHA256SUMS를 artifact로 제공한다.
 
 [통합 검증 스크립트](scripts/e2e_macos.py)는 native MLX·TLS RelayGate와 로컬 Go 소스의 Compose build를 사용한다.
-테스트 전 Mac의 `say`/`afconvert`, Docker, 별도로 빌드한 RelayGate Gateway가 필요하다.
+테스트 전 Mac의 `say`/`afconvert`, Docker, 별도로 빌드한 RelayGate Gateway가 필요하다. Go와 운영 Caller는 Compose에서 함께 빌드한다.
 
 ```sh
 cargo build --locked
 cargo build --manifest-path tests/relay-bridge/Cargo.toml --locked
 # private test venv에 scripts/test-requirements.txt 설치 후:
-python scripts/e2e_macos.py --verify-limits \
+python scripts/e2e_macos.py --verify-limits --verify-recovery \
   --openclaw-node /path/to/supported/node \
   --openclaw-cli /path/to/openclaw/openclaw.mjs
 ```
 
-`--cli-binary`로 검증할 CLI를, `--gateway-binary`로 Gateway를 지정할 수 있다. Gateway 경로 기본값은 인접 relaygate checkout의 `target/debug/relaygate-server`다. probe는 published SDK를 사용하는 테스트 전용 caller다.
+`--cli-binary`로 검증할 CLI를, `--gateway-binary`로 Gateway를 지정할 수 있다. Gateway 경로 기본값은 인접 relaygate checkout의 `target/debug/relaygate-server`다. probe는 실제 worker bridge의 Pipe 상한을 검증하는 테스트 도구다. 요청 경로는 운영 Caller sidecar를 사용한다.
 OpenClaw 2026.9.4에서 실제 memory index/search와 audio transcribe를 검증했다. [설정 예](docs/openclaw.md).
-운영 namespace/issuer/서버 caller 배선·여러 물리 Mac·launchd·crash 후 자동 orphan 회수는 이 로컬 검증과 별도다.
+운영 namespace/issuer/Secret 배포·여러 물리 Mac·launchd는 이 로컬 검증과 별도다. [서버 Caller](../caller/README.md)의 구현과 Compose 배선은 포함한다.
 MLX embedding은 mlx-embeddings 0.0.5, ASR은 MLX Audio 0.5.4를 사용하며 전이 의존성·모델 revision을 고정한다.

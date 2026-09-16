@@ -3,7 +3,7 @@ use crate::{
     logs::Logger,
     profile::Profile,
     runtime::{
-        install,
+        install, ownership,
         process::{self, ModelProcess},
     },
     storage::Home,
@@ -35,6 +35,8 @@ pub struct State {
     pub restarts: u32,
     pub dropped_log_chunks: u64,
     pub error: Option<String>,
+    #[serde(default)]
+    pub lease_protected: bool,
 }
 #[derive(Clone, clap::Args)]
 pub struct StartOptions {
@@ -76,17 +78,7 @@ pub async fn stop(home: &Home, p: Profile) -> anyhow::Result<()> {
     let _lock = home
         .profile_lock(p)
         .context("profile still running; cleanup not complete")?;
-    // A stale receipt cannot authorize signalling a process. An orphan needs manual review.
-    if let Ok(s) = home.read::<State>(&format!("control/{}.json", p.id())) {
-        ensure!(
-            s.runtime == "stopped" || s.runtime == "cleanup_failed",
-            "unclean supervisor exit; inspect owned process before removing runtime"
-        );
-        ensure!(
-            process::port_closed(s.port).await,
-            "model port remains open; refusing cleanup"
-        );
-    }
+    let _engine = ownership::idle(home, p).await?;
     let rt = home.runtime(p);
     if rt.exists() {
         fs::remove_dir_all(rt)?;
@@ -120,9 +112,11 @@ pub async fn start(home: &Home, opts: StartOptions) -> anyhow::Result<()> {
             continue;
         }
         let profile_lock = home.profile_lock(p)?;
+        let engine_lock = ownership::idle(home, p).await?;
         let cache_lock = home.cache_lock(false)?;
         install::install(home, p).await?;
         drop(cache_lock);
+        drop(engine_lock);
         drop(profile_lock);
         if opts.foreground {
             return run(home.clone(), p, opts.clone()).await;
@@ -178,6 +172,7 @@ pub async fn start(home: &Home, opts: StartOptions) -> anyhow::Result<()> {
 pub async fn run(home: Home, p: Profile, opts: StartOptions) -> anyhow::Result<()> {
     let _profile_lock = home.profile_lock(p)?;
     let _cache_lock = home.cache_lock(false)?;
+    drop(ownership::idle(&home, p).await?);
     let installed = install::load(&home, p)?;
     let mut grant_config = None;
     if !opts.local_only {
@@ -209,6 +204,7 @@ pub async fn run(home: Home, p: Profile, opts: StartOptions) -> anyhow::Result<(
         restarts: 0,
         dropped_log_chunks: 0,
         error: None,
+        lease_protected: true,
     }));
     let stop = CancellationToken::new();
     let ctl_stop = stop.clone();
@@ -315,9 +311,8 @@ async fn supervise(
                 break;
             }
             if process::ready(client, p, port).await && model.owns_port(port).await {
-                let warm =
-                    tokio::select! {_=stop.cancelled()=>break,r=process::warmup(client,p,port)=>r};
-                ready = warm.is_ok();
+                // Python only serves health after loading and warming the model.
+                ready = true;
                 break;
             }
             tokio::select! {_=stop.cancelled()=>break,_=sleep(Duration::from_millis(500))=>{}}

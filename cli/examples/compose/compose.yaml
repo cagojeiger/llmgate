@@ -1,5 +1,4 @@
-# The model engines and both RelayGate SDK endpoints run natively on the Mac.
-# Only LLMGate is containerized, built from the neighbouring local checkout.
+# Models and Gateway run natively on the Mac. Go and production Rust Caller share a network namespace.
 services:
   llmgate:
     build:
@@ -19,6 +18,20 @@ services:
       LLMGATE_REQUEST_TIMEOUT: 300s
       LLMGATE_COMPLETE_TIMEOUT: 180s
       LLMGATE_STREAM_IDLE_TIMEOUT: 120s
+    volumes:
+      - "${LLMGATE_TEST_CONFIG:?test config required}:/fixture:ro"
+    restart: "no"
+
+  caller:
+    build:
+      context: ../../../caller
+    image: llmgate-caller:local-mlx-validation
+    network_mode: service:llmgate
+    depends_on: [llmgate]
+    # Fixture keys are 0600 on the host. Production mounts them for UID 65532.
+    user: "0:0"
+    environment:
+      LLMGATE_CALLER_CONFIG: /fixture/caller.json
     volumes:
       - "${LLMGATE_TEST_CONFIG:?test config required}:/fixture:ro"
     restart: "no"

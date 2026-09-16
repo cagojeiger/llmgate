@@ -3,6 +3,7 @@
 | 경계 | 책임 |
 | --- | --- |
 | Go LLMGate | OpenAI 형식 API, consumer 인증·로그, worker publish JWT 발급 |
+| Rust 서버 Caller | loopback HTTP → Pipe, exact dial JWT 자동 발급·SDK reconnect |
 | Rust CLI | Keychain, profile 설치·시작·준비·Relay 공개·종료 |
 | Python adapter | 모델별 입력 한도·추론·JSON/SSE, 공유 admission·메모리 관측 |
 | RelayGate | local-first Binding 선택·Pipe 전송. SDK 0.5.1 의존 |
@@ -17,3 +18,5 @@
 embedding 요청별 새 연결, 파일 STT의 `new_connection_per_request` 설정으로 새 Pipe를 연다. 전달 후 자동 replay는 하지 않는다.
 
 [CLI·제한·수명주기](../cli/README.md) · [서버 인증 설정](worker-registration.md) · [OpenClaw](../cli/docs/openclaw.md) · [배포](../cli/docs/distribution.md) · [검증](../cli/docs/validation-2026-09-16.md)
+
+[운영 Caller 설정·이미지](../caller/README.md). 모델 warmup은 Python이 소유하고 Rust는 health·소유 포트만 검사한다. 모델이 상속받은 engine/cache lease와 supervisor 생존 pipe가 강제 종료 후 중복 실행·삭제를 방지한다.

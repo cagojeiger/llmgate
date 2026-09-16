@@ -6,8 +6,8 @@ call telemetry와 선택적 result sink를 적용한다. 입력은 문자열 또
 `encoding_format`은 float/base64, `dimensions`는 upstream 전달 및 응답 검증용이다.
 임베딩 응답은 개수, index, 차원, 유한한 수를 확인하고 최대 32 MiB로 제한한다.
 
-[Mac worker CLI](../cli/README.md)로 MLX를 설치·공개한다. 로컬 통합 검증은 CLI의 Compose·caller probe를 사용한다.
-모든 worker와 connect bridge는 같은 Gateway 인스턴스에 연결한다.
+[Mac worker CLI](../cli/README.md)로 MLX를 설치·공개한다. 로컬 통합 검증은 CLI의 Compose와 [서버 Caller](../caller/README.md)를 사용한다.
+이 로컬 검증의 worker와 Caller는 같은 Gateway 인스턴스에 연결한다.
 
 카탈로그에 다음 파일을 추가하고 LLMGate를 재시작한다. 이 예제 파일은 기본
 운영 catalog에 자동 등록하지 않는다.
@@ -18,7 +18,7 @@ id: qwen3-embedding-0.6b
 vendor: local-mlx
 protocol: openai
 api: embeddings
-base_url: http://127.0.0.1:18080/v1
+base_url: http://127.0.0.1:18081/v1
 ```
 
 ```yaml

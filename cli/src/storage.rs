@@ -62,6 +62,9 @@ impl Home {
     pub fn profile_lock(&self, p: Profile) -> anyhow::Result<File> {
         lock(&self.0.join(format!("locks/{}.lock", p.id())), false)
     }
+    pub fn engine_lock(&self, p: Profile) -> anyhow::Result<File> {
+        lock(&self.0.join(format!("locks/{}-engine.lock", p.id())), false)
+    }
     pub fn cache_lock(&self, exclusive: bool) -> anyhow::Result<File> {
         lock(&self.0.join("locks/cache.lock"), !exclusive)
     }

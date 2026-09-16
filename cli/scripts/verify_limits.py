@@ -39,7 +39,7 @@ def verify(base, key, home, fixture):
                 record('shared_admission', profile=profile, status=r.status_code)
         with wave.open(str(fixture/'speech.wav'), 'rb') as wav:
             pcm, rate, channels, width = wav.readframes(wav.getnframes()), wav.getframerate(), wav.getnchannels(), wav.getsampwidth()
-        for seconds, expected in [(60, 200), (61, 413)]:
+        for seconds, expected in [(60, 200), (61, 400), (61, 400), (61, 400)]:
             size = rate * channels * width * seconds
             raw = (pcm * (size // len(pcm) + 1))[:size]
             buffer = io.BytesIO()
@@ -51,7 +51,7 @@ def verify(base, key, home, fixture):
             if expected == 200:
                 assert r.status_code == 200 and r.json()['text'].strip(), (r.status_code, r.text[:200])
             else:
-                assert r.status_code >= 400, (r.status_code, r.text[:200])
+                assert r.status_code == 400, (r.status_code, r.text[:200])
             record('stt_duration_boundary', seconds=seconds, status=r.status_code, elapsed=round(time.monotonic()-began, 2))
         r = client.post('/v1/audio/transcriptions', data={'model': 'stt', 'prompt': ' hello' * 257}, files={'file': ('a.wav', (fixture/'speech.wav').read_bytes(), 'audio/wav')})
         assert r.status_code == 400, (r.status_code,r.text[:120])

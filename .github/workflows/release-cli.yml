@@ -24,6 +24,7 @@ jobs:
           version=$(awk -F '"' '/^version = / {print $2; exit}' Cargo.toml)
           test "$RELEASE_TAG" = "cli-v$version"
           cargo fmt --all --check
+          cargo build --locked
           cargo test --locked
           cargo clippy --all-targets -- -D warnings
           python3 -m unittest discover -s tests -v

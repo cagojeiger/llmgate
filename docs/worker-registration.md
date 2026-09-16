@@ -33,4 +33,4 @@ RelayGate pool을 사용하는 OpenAI transcription model 설정에는
 `new_connection_per_request: true`를 지정한다. 기본 false라 기존 provider 연결 재사용은 유지한다.
 embedding 경로는 이미 요청별 연결을 사용한다.
 
-consumer YAML에 `allowed_worker_profiles: [embedding, stt]`를 명시한다. Gateway에는 같은 namespace·issuer·audience·key_id와 대응 공개키를 별도로 설정한다. 개인키는 LLMGate 서버에만 둔다. 서버 Caller의 dial 권한은 worker publish 권한과 별도로 공급한다. 이 PR의 caller probe는 로컬 검증 도구이며 운영 dial token 갱신 서비스가 아니다.
+consumer YAML에 `allowed_worker_profiles: [embedding, stt]`를 명시한다. Gateway에는 같은 namespace·issuer·audience·key_id와 대응 공개키를 별도로 설정한다. 개인키는 LLMGate 서버에만 둔다. 서버 Caller의 dial 권한은 worker publish 권한과 별도로 공급한다. [서버 Caller](../caller/README.md)는 같은 issuer 설정과 PKCS#8 개인키를 읽고 매 dial마다 새 JWT를 발급한다. Mac CLI는 이 키를 받지 않는다.

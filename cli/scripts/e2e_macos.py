@@ -103,7 +103,7 @@ def fixture():
     ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "LLMGate local test CA")])
     ca = x509.CertificateBuilder().subject_name(ca_name).issuer_name(ca_name).public_key(signing.public_key()).serial_number(x509.random_serial_number()).not_valid_before(now - datetime.timedelta(minutes=1)).not_valid_after(now + datetime.timedelta(days=1)).add_extension(x509.BasicConstraints(ca=True, path_length=None), True).sign(signing, hashes.SHA256())
     leaf_key = ec.generate_private_key(ec.SECP256R1())
-    leaf = x509.CertificateBuilder().subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])).issuer_name(ca_name).public_key(leaf_key.public_key()).serial_number(x509.random_serial_number()).not_valid_before(now - datetime.timedelta(minutes=1)).not_valid_after(now + datetime.timedelta(days=1)).add_extension(x509.BasicConstraints(ca=False, path_length=None), True).add_extension(x509.SubjectAlternativeName([x509.DNSName("localhost")]), False).add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), False).sign(signing, hashes.SHA256())
+    leaf = x509.CertificateBuilder().subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])).issuer_name(ca_name).public_key(leaf_key.public_key()).serial_number(x509.random_serial_number()).not_valid_before(now - datetime.timedelta(minutes=1)).not_valid_after(now + datetime.timedelta(days=1)).add_extension(x509.BasicConstraints(ca=False, path_length=None), True).add_extension(x509.SubjectAlternativeName([x509.DNSName("localhost"), x509.DNSName("host.docker.internal")]), False).add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), False).sign(signing, hashes.SHA256())
     (WORK / "ca.pem").write_bytes(ca.public_bytes(serialization.Encoding.PEM))
     (WORK / "server.pem").write_bytes(leaf.public_bytes(serialization.Encoding.PEM))
     (WORK / "server-key.pem").write_bytes(leaf_key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
@@ -112,16 +112,17 @@ def fixture():
     for directory in ("catalog/models", "catalog/aliases", "consumers"):
         (WORK / directory).mkdir(parents=True, exist_ok=True)
     for p, (model, api) in PROFILES.items():
-        (WORK / f"catalog/models/{p}.yaml").write_text(f"id: {model}\nvendor: local-mlx\nprotocol: openai\napi: {api}\nbase_url: http://host.docker.internal:{callers[p]}/v1\nnew_connection_per_request: true\n")
+        (WORK / f"catalog/models/{p}.yaml").write_text(f"id: {model}\nvendor: local-mlx\nprotocol: openai\napi: {api}\nbase_url: http://127.0.0.1:{callers[p]}/v1\nnew_connection_per_request: true\n")
         (WORK / f"catalog/aliases/{p}.yaml").write_text(f"alias: {p}\nchain: [{model}]\n")
     hashed = hashlib.sha256(api_key.encode()).hexdigest()
     (WORK / "consumers/test.yaml").write_text(f"name: test\nkey_hashes: [sha256:{hashed}]\nallowed_aliases: [embedding, stt]\nallowed_worker_profiles: [embedding, stt]\n")
+    write_json(WORK / "caller.json", {"issuer_config":"/fixture/workers.json", "ca_file":"/fixture/ca.pem", "gateway_endpoint":f"tls://host.docker.internal:{gateway}", "routes":{p:f"127.0.0.1:{callers[p]}" for p in PROFILES}})
     return api_key, signing, gateway, http_port, callers
 
 
-def dial_token(key, profile):
+def operation_token(key, profile, action="dial"):
     header = b64(json.dumps({"alg": "ES256", "kid": "test", "typ": "relaygate-operation+jwt"}).encode())
-    claims = b64(json.dumps({"iss": "local-mlx-test", "aud": "relaygate", "nbf": int(time.time()) - 1, "exp": int(time.time()) + 7200, "permissions": [{"action": "dial", "namespace": "llmgate", "scope": {"kind": "exact", "name": f"{profile}-v1"}}]}).encode())
+    claims = b64(json.dumps({"iss": "local-mlx-test", "aud": "relaygate", "nbf": int(time.time()) - 1, "exp": int(time.time()) + 7200, "permissions": [{"action": action, "namespace": "llmgate", "scope": {"kind": "exact", "name": f"{profile}-v1"}}]}).encode())
     message = (header + "." + claims).encode()
     r, s = decode_dss_signature(key.sign(message, ec.ECDSA(hashes.SHA256())))
     return message.decode() + "." + b64(r.to_bytes(32, "big") + s.to_bytes(32, "big"))
@@ -143,6 +144,7 @@ def main():
     parser.add_argument("--gateway-binary", type=Path, default=RELAY / "target/debug/relaygate-server")
     parser.add_argument("--keep-running", action="store_true")
     parser.add_argument("--verify-limits", action="store_true")
+    parser.add_argument("--verify-recovery", action="store_true")
     parser.add_argument("--openclaw-node")
     parser.add_argument("--openclaw-cli", type=Path)
     args = parser.parse_args()
@@ -157,9 +159,10 @@ def main():
         record("topology", models="native Apple Silicon MLX", api="locally built LLMGate via Docker Compose", workers=len(PROFILES))
         gateway = start("gateway", [str(args.gateway_binary.resolve())], {"RELAYGATE_SDK_TRANSPORT": "tls", "RELAYGATE_BIND_ADDR": f"127.0.0.1:{gateway_port}", "RELAYGATE_AUTH_CONFIG_PATH": str(WORK / "auth.json"), "RELAYGATE_SDK_TLS_CERT_PATH": str(WORK / "server.pem"), "RELAYGATE_SDK_TLS_KEY_PATH": str(WORK / "server-key.pem")})
         ready_port(gateway, gateway_port)
-        for p in PROFILES:
-            proc = start("caller-" + p, [str(ROOT / "tests/relay-bridge/target/aarch64-apple-darwin/debug/llmgate-relay-probe"), "connect"], {"RELAYGATE_ADDR": f"tls://localhost:{gateway_port}", "RELAYGATE_CA_FILE": str(WORK / "ca.pem"), "RELAYGATE_DESTINATION": f"llmgate/{p}-v1", "RELAYGATE_ACCESS_TOKEN": dial_token(signing, p), "BRIDGE_LISTEN": f"127.0.0.1:{callers[p]}", "BRIDGE_CONNECTION_TIMEOUT_SECONDS": "3600"})
-            ready_port(proc, callers[p])
+        subprocess.run([str(ROOT / "tests/relay-bridge/target/aarch64-apple-darwin/debug/llmgate-relay-probe"), "verify-limits"],
+            env={**os.environ,"RELAYGATE_ADDR":f"tls://localhost:{gateway_port}","RELAYGATE_CA_FILE":str(WORK/"ca.pem"),
+                 "PUBLISH_TOKEN":operation_token(signing,"capacity","publish"),"DIAL_TOKEN":operation_token(signing,"capacity")}, check=True, timeout=30)
+        record("worker_pipe_cap", maximum=1, extra_pipe="RESOURCE_EXHAUSTED")
         with open(WORK / "compose-build.log", "w") as build_log:
             subprocess.run(compose + ["up", "--build", "--detach"], env=env, stdout=build_log, stderr=subprocess.STDOUT, check=True)
         base = f"http://127.0.0.1:{http_port}"
@@ -175,6 +178,9 @@ def main():
                 raise TimeoutError("LLMGate health")
             version = subprocess.check_output(compose + ["exec", "-T", "llmgate", "/app/llmgate", "--version"], env=env, text=True).strip()
             record("compose_built_version", version=version)
+            no_worker = client.post("/v1/embeddings", json={"model":"embedding","input":"not yet registered"})
+            assert no_worker.status_code in (502, 503), no_worker.text
+            record("zero_workers", status=no_worker.status_code)
             body = {"protocol_version": 1, "profile": "embedding", "profile_version": "1"}
             assert client.post("/v1/workers/token", json=body, headers={"Authorization": "Bearer invalid"}).status_code == 401
             assert client.post("/v1/workers/token", json={**body, "action": "dial"}).status_code == 400
@@ -197,6 +203,7 @@ def main():
                     break
                 time.sleep(2)
             assert len(seen) == len(PROFILES), "model readiness timeout"
+            published_at = time.monotonic()
             for encoding in ("float", "base64"):
                 result = client.post("/v1/embeddings", json={"model": "embedding", "input": ["hello", "안녕하세요"], "encoding_format": encoding})
                 result.raise_for_status()
@@ -221,6 +228,29 @@ def main():
                 assert len(deltas) > 1 and "hello" in "".join(deltas).lower(), output
                 record("stt_sse", deltas=len(deltas), text="".join(deltas))
             record("all_inference_modes", passed=True)
+            if args.verify_recovery:
+                while time.monotonic() < published_at + 62:
+                    remaining = round(published_at + 62 - time.monotonic())
+                    print(json.dumps({"test":"waiting_for_token_expiry","remaining_seconds":remaining}),flush=True)
+                    time.sleep(min(10, max(0.1, remaining)))
+                renewed = client.post("/v1/embeddings", json={"model":"embedding","input":"caller token after expiry"})
+                renewed.raise_for_status()
+                record("caller_after_token_expiry", status=renewed.status_code)
+                stop(gateway)
+                unavailable = client.post("/v1/embeddings", json={"model":"embedding","input":"Gateway stopped"})
+                assert unavailable.status_code >= 500, unavailable.text
+                gateway = start("gateway-restarted", [str(args.gateway_binary.resolve())], {"RELAYGATE_SDK_TRANSPORT":"tls",
+                    "RELAYGATE_BIND_ADDR":f"127.0.0.1:{gateway_port}","RELAYGATE_AUTH_CONFIG_PATH":str(WORK/"auth.json"),
+                    "RELAYGATE_SDK_TLS_CERT_PATH":str(WORK/"server.pem"),"RELAYGATE_SDK_TLS_KEY_PATH":str(WORK/"server-key.pem")})
+                ready_port(gateway,gateway_port)
+                deadline=time.monotonic()+90
+                while time.monotonic()<deadline:
+                    result=client.post("/v1/embeddings",json={"model":"embedding","input":"after Gateway recovery"})
+                    if result.status_code==200:break
+                    time.sleep(2)
+                result.raise_for_status()
+                record("gateway_restart_after_token_expiry", status=result.status_code, caller_restart=False, worker_restart=False)
+
             if args.verify_limits:
                 from verify_limits import verify
                 verify(base, key, HOME, WORK)

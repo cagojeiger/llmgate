@@ -1,3 +1,15 @@
+mod limits;
+// Minimal observation/clock surface used by the production bridge test.
+mod lifecycle {
+    pub struct State {
+        pub publish: String,
+    }
+}
+mod broker {
+    pub fn now() -> u64 {
+        0
+    }
+}
 mod bridge;
 mod config;
 
@@ -8,6 +20,9 @@ use tokio_util::sync::CancellationToken;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let mode = std::env::args().nth(1).unwrap_or_default();
+    if mode == "verify-limits" {
+        return limits::verify().await;
+    }
     ensure!(
         mode == "connect" && std::env::args().len() == 2,
         "usage: llmgate-relay-probe connect"

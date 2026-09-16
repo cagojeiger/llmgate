@@ -120,6 +120,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Install { profile } => {
             let _p = home.profile_lock(profile)?;
+            let _engine = runtime::ownership::idle(&home, profile).await?;
             let _c = home.cache_lock(false)?;
             runtime::install::install(&home, profile).await?;
             println!("{} installed", profile.id());

@@ -76,3 +76,29 @@ func TestPublishGrantSignatureAndScope(t *testing.T) {
 		t.Fatal("unknown profile accepted")
 	}
 }
+
+func TestCallerAddressDefaultsAndValidation(t *testing.T) {
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	der, _ := x509.MarshalPKCS8PrivateKey(key)
+	path := filepath.Join(t.TempDir(), "key.pem")
+	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Config{Issuer: "test", Audience: "relaygate", KeyID: "test", PrivateKeyFile: path, GatewayEndpoint: "tls://localhost:443", Profiles: map[string]Profile{"embedding": {Destination: "llmgate/e", Version: "1"}}}
+	issuer, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issuer.Profiles()["embedding"].CallerAddress != "127.0.0.1:18081" {
+		t.Fatal("missing default")
+	}
+	if cfg.Profiles["embedding"].CallerAddress != "" {
+		t.Fatal("mutated caller config")
+	}
+	for _, address := range []string{"0.0.0.0:18081", "localhost:18081", "127.0.0.1:0"} {
+		cfg.Profiles["embedding"] = Profile{Destination: "llmgate/e", Version: "1", CallerAddress: address}
+		if _, err := New(cfg); err == nil {
+			t.Fatalf("accepted %s", address)
+		}
+	}
+}

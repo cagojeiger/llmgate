@@ -110,15 +110,16 @@ def fixture():
     (WORK / "server.pem").write_bytes(leaf.public_bytes(serialization.Encoding.PEM))
     (WORK / "server-key.pem").write_bytes(leaf_key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
     (WORK / "server-key.pem").chmod(0o600)
-    write_json(WORK / "workers.json", {"issuer": "local-mlx-test", "audience": "relaygate", "key_id": "test", "private_key_file": "/fixture/issuer.pem", "gateway_endpoint": f"tls://localhost:{gateway}", "ttl_seconds": 60, "profiles": {p: {"destination": f"llmgate/{p}-v1", "version": "1"} for p in PROFILES}})
+    write_json(WORK / "workers.json", {"issuer": "local-mlx-test", "audience": "relaygate", "key_id": "test", "private_key_file": "/fixture/issuer.pem", "gateway_endpoint": f"tls://localhost:{gateway}", "ttl_seconds": 60, "profiles": {p: {"destination": f"llmgate/{p}-v1", "version": "1", "caller_address": f"127.0.0.1:{callers[p]}"} for p in PROFILES}})
     for directory in ("catalog/models", "catalog/aliases", "consumers"):
         (WORK / directory).mkdir(parents=True, exist_ok=True)
-    for p, (model, api) in PROFILES.items():
-        (WORK / f"catalog/models/{p}.yaml").write_text(f"id: {model}\nvendor: local-mlx\nprotocol: openai\napi: {api}\nbase_url: http://127.0.0.1:{callers[p]}/v1\nnew_connection_per_request: true\n")
-        (WORK / f"catalog/aliases/{p}.yaml").write_text(f"alias: {p}\nchain: [{model}]\n")
+    # No model or alias YAML: startup derives both from worker profiles.
+    for p in PROFILES:
+        (WORK / f"catalog/models/{p}.yaml").unlink(missing_ok=True)
+        (WORK / f"catalog/aliases/{p}.yaml").unlink(missing_ok=True)
     hashed = hashlib.sha256(api_key.encode()).hexdigest()
     (WORK / "consumers/test.yaml").write_text(f"name: test\nkey_hashes: [sha256:{hashed}]\nallowed_aliases: [embedding, stt]\nallowed_worker_profiles: [embedding, stt]\n")
-    write_json(WORK / "caller.json", {"issuer_config":"/fixture/workers.json", "ca_file":"/fixture/ca.pem", "gateway_endpoint":f"tls://host.docker.internal:{gateway}", "routes":{p:f"127.0.0.1:{callers[p]}" for p in PROFILES}})
+    write_json(WORK / "caller.json", {"issuer_config":"/fixture/workers.json", "ca_file":"/fixture/ca.pem", "gateway_endpoint":f"tls://host.docker.internal:{gateway}"})
     return api_key, signing, gateway, http_port, callers
 
 

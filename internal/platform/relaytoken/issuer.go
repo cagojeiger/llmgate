@@ -15,6 +15,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"net/netip"
 	"net/url"
 	"os"
 	"regexp"
@@ -23,8 +25,9 @@ import (
 )
 
 type Profile struct {
-	Destination string `json:"destination"`
-	Version     string `json:"version"`
+	CallerAddress string `json:"caller_address,omitempty"`
+	Destination   string `json:"destination"`
+	Version       string `json:"version"`
 }
 type Config struct {
 	Issuer          string             `json:"issuer"`
@@ -90,7 +93,29 @@ func New(cfg Config) (*Issuer, error) {
 	if err != nil || u.Scheme != "tls" || u.Hostname() == "" || u.Port() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" {
 		return nil, errors.New("worker Gateway must be tls://host:port")
 	}
+	cfg.Profiles = maps.Clone(cfg.Profiles)
+	addresses := map[netip.AddrPort]bool{}
 	for name, p := range cfg.Profiles {
+		if p.CallerAddress == "" {
+			switch name {
+			case "embedding":
+				p.CallerAddress = "127.0.0.1:18081"
+			case "stt":
+				p.CallerAddress = "127.0.0.1:18082"
+			default:
+				return nil, fmt.Errorf("unsupported worker profile %q", name)
+			}
+		}
+		address, addressErr := netip.ParseAddrPort(p.CallerAddress)
+		if addressErr != nil || !address.Addr().IsLoopback() || address.Port() == 0 {
+			return nil, fmt.Errorf("worker profile %q requires a numeric loopback caller_address", name)
+		}
+		if addresses[address] {
+			return nil, errors.New("duplicate worker caller_address")
+		}
+		addresses[address] = true
+		cfg.Profiles[name] = p
+
 		parts := strings.SplitN(p.Destination, "/", 2)
 		if name == "" || p.Version != "1" || len(parts) != 2 || !namespace.MatchString(parts[0]) || len(p.Destination) > 1024 {
 			return nil, fmt.Errorf("invalid worker profile %q", name)
@@ -146,3 +171,6 @@ func (i *Issuer) Issue(profile, version string, now time.Time) (*Grant, error) {
 	s.FillBytes(signature[32:])
 	return &Grant{ProtocolVersion: 1, Profile: profile, ProfileVersion: p.Version, Destination: p.Destination, GatewayEndpoint: i.config.GatewayEndpoint, AccessToken: message + "." + b64(signature), ExpiresAt: expires}, nil
 }
+
+// Profiles returns non-secret routing configuration for application wiring.
+func (i *Issuer) Profiles() map[string]Profile { return maps.Clone(i.config.Profiles) }

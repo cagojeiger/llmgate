@@ -59,7 +59,15 @@ func LoadRuntime(ctx context.Context, in LoadInput) (*Runtime, error) {
 	if log == nil {
 		log = slog.Default()
 	}
-	cat, err := catalog.Load()
+	issuer, err := relaytoken.LoadFromEnv()
+	if err != nil {
+		return nil, fmt.Errorf("load worker issuer: %w", err)
+	}
+	defaults, err := workerCatalog(issuer)
+	if err != nil {
+		return nil, err
+	}
+	cat, err := catalog.LoadWithDefaults(defaults)
 	if err != nil {
 		return nil, fmt.Errorf("load catalog: %w", err)
 	}
@@ -74,16 +82,24 @@ func LoadRuntime(ctx context.Context, in LoadInput) (*Runtime, error) {
 	}
 	log.Info("consumers loaded", slog.Int("consumers", consumerStore.Len()))
 
-	return BuildRuntime(ctx, RuntimeInput{
+	return buildRuntime(ctx, RuntimeInput{
 		Config:    in.Config,
 		Catalog:   cat,
 		Consumers: consumerStore,
 		Logger:    log,
 		Version:   in.Version,
-	})
+	}, issuer)
 }
 
 func BuildRuntime(ctx context.Context, in RuntimeInput) (*Runtime, error) {
+	issuer, err := relaytoken.LoadFromEnv()
+	if err != nil {
+		return nil, fmt.Errorf("load worker issuer: %w", err)
+	}
+	return buildRuntime(ctx, in, issuer)
+}
+
+func buildRuntime(ctx context.Context, in RuntimeInput, workerIssuer *relaytoken.Issuer) (*Runtime, error) {
 	if in.Config == nil {
 		return nil, errors.New("gateway runtime config is required")
 	}
@@ -96,9 +112,14 @@ func BuildRuntime(ctx context.Context, in RuntimeInput) (*Runtime, error) {
 	if in.Logger == nil {
 		in.Logger = slog.Default()
 	}
-	workerIssuer, err := relaytoken.LoadFromEnv()
+
+	defaults, err := workerCatalog(workerIssuer)
 	if err != nil {
-		return nil, fmt.Errorf("load worker issuer: %w", err)
+		return nil, err
+	}
+	in.Catalog, err = catalog.WithDefaults(in.Catalog, defaults)
+	if err != nil {
+		return nil, err
 	}
 
 	models, aliases, transcribers, err := buildRouterInputs(in.Catalog, defaultProviderFactories())

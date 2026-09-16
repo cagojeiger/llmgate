@@ -33,7 +33,7 @@ llmgate-cli cache clean
 API 키는 숨김 입력 또는 `register --key-stdin`으로 받고 Keychain에 저장한다. JWT는 내부에서 발급·갱신해 메모리에만 둔다.
 HTTPS+RelayGate TLS가 기본이며 `--allow-loopback-http`는 로컬 테스트용이다.
 `start` 성공은 모델 준비·Relay 공개까지 확인했다는 뜻이다. `logs`는 supervisor와 모델 로그를 함께 보여준다.
-등록 전 서버의 [worker 권한과 issuer 설정](../docs/worker-registration.md)이 필요하다.
+등록 전 서버의 [worker 권한과 issuer 설정](../docs/worker-registration.md)이 필요하다. 서버가 기본 모델·alias를 자동 구성하므로 Mac마다 catalog를 설정할 필요는 없다. 시작 후 호출 모델 이름은 `embedding`과 `stt`다.
 
 | start 옵션 | 의미 |
 | --- | --- |

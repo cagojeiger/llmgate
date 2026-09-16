@@ -17,6 +17,7 @@ pub struct Settings {
     pub issuer_config: PathBuf,
     pub ca_file: Option<PathBuf>,
     pub gateway_endpoint: Option<String>,
+    #[serde(default)]
     pub routes: BTreeMap<String, SocketAddr>,
     #[serde(default = "default_max")]
     pub max_connections: usize,
@@ -50,6 +51,7 @@ fn default_ttl() -> u64 {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Profile {
+    caller_address: Option<SocketAddr>,
     destination: String,
     version: String,
 }
@@ -75,7 +77,7 @@ pub fn bounded_file(path: &Path) -> anyhow::Result<Vec<u8>> {
 
 impl Settings {
     pub fn load(path: &Path) -> anyhow::Result<Prepared> {
-        let settings: Self = serde_json::from_slice(&bounded_file(path)?)?;
+        let mut settings: Self = serde_json::from_slice(&bounded_file(path)?)?;
         ensure!(
             (1..=1024).contains(&settings.max_connections),
             "max_connections must be 1..1024"
@@ -84,11 +86,24 @@ impl Settings {
             (1..=3600).contains(&settings.connection_timeout_seconds),
             "connection timeout must be 1..3600 seconds"
         );
+        let issuer: IssuerConfig = serde_json::from_slice(&bounded_file(&settings.issuer_config)?)?;
+        if settings.routes.is_empty() {
+            for (name, profile) in &issuer.profiles {
+                let default = match name.as_str() {
+                    "embedding" => "127.0.0.1:18081",
+                    "stt" => "127.0.0.1:18082",
+                    _ => anyhow::bail!("unsupported automatic caller profile"),
+                };
+                settings.routes.insert(
+                    name.clone(),
+                    profile.caller_address.unwrap_or(default.parse()?),
+                );
+            }
+        }
         ensure!(
             !settings.routes.is_empty() && settings.routes.len() <= 16,
             "caller needs 1..16 routes"
         );
-        let issuer: IssuerConfig = serde_json::from_slice(&bounded_file(&settings.issuer_config)?)?;
         ensure!(
             (60..=900).contains(&issuer.ttl_seconds),
             "token TTL must be 60..900 seconds"
@@ -123,6 +138,17 @@ impl Settings {
                 .get(&name)
                 .context("unknown caller profile")?;
             ensure!(profile.version == "1", "unsupported caller profile version");
+            let expected = match name.as_str() {
+                "embedding" => Some("127.0.0.1:18081".parse::<SocketAddr>()?),
+                "stt" => Some("127.0.0.1:18082".parse::<SocketAddr>()?),
+                _ => None,
+            };
+            if let Some(expected) = profile.caller_address.or(expected) {
+                ensure!(
+                    address == expected,
+                    "caller route must match workers.json caller_address"
+                );
+            }
             ensure!(
                 !routes.iter().any(|(a, _)| *a == address),
                 "duplicate caller bind address"
@@ -170,6 +196,31 @@ mod tests {
         let mut config = json!({"issuer_config":root.path().join("issuer.json"),"routes":{"embedding":"127.0.0.1:18081"}});
         std::fs::write(&path, serde_json::to_vec(&config)?)?;
         assert!(Settings::load(&path).is_ok());
+        config.as_object_mut().unwrap().remove("routes");
+        std::fs::write(&path, serde_json::to_vec(&config)?)?;
+        let automatic = Settings::load(&path)?;
+        assert_eq!(
+            automatic.routes[0].0,
+            "127.0.0.1:18081".parse::<SocketAddr>()?
+        );
+        let mut custom = issuer.clone();
+        custom["profiles"]["embedding"]["caller_address"] = json!("127.0.0.1:19081");
+        std::fs::write(
+            root.path().join("issuer.json"),
+            serde_json::to_vec(&custom)?,
+        )?;
+        assert_eq!(
+            Settings::load(&path)?.routes[0].0,
+            "127.0.0.1:19081".parse::<SocketAddr>()?
+        );
+        config["routes"] = json!({"embedding":"127.0.0.1:18081"});
+        std::fs::write(&path, serde_json::to_vec(&config)?)?;
+        assert!(Settings::load(&path).is_err());
+        std::fs::write(
+            root.path().join("issuer.json"),
+            serde_json::to_vec(&issuer)?,
+        )?;
+
         config["routes"]["embedding"] = json!("0.0.0.0:18081");
         std::fs::write(&path, serde_json::to_vec(&config)?)?;
         assert!(Settings::load(&path).is_err());

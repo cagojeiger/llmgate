@@ -1,7 +1,8 @@
 # Mac에 설치하고 시작하기
 
 Apple Silicon(M1 이상) · macOS 15+가 필요합니다. Python·Rust는 설치하지 않아도 됩니다.
-관리자가 worker 기능을 배포한 LLMGate URL과, embedding/STT worker 권한이 있는 API 키를 준비하세요.
+관리자가 worker 기능과 Caller를 배포한 LLMGate URL과, embedding/STT worker 권한이 있는 API 키를 준비하세요.
+서버는 worker 설정으로 기본 모델과 `embedding`·`stt` alias를 자동 구성합니다. Mac마다 catalog 파일을 추가하거나 서버를 재시작하지 않습니다. API 호출 권한을 제한한 키라면 관리자가 최초에 이 두 alias도 허용해야 합니다.
 
 ## 1. 다운로드·설치
 
@@ -52,7 +53,7 @@ llmgate-cli status
 시간 초과 또는 Ctrl+C로 **백그라운드 시작 대기**를 중단해도 워커는 계속 실행·재연결합니다.
 `status`로 확인하거나 `down --all`로 종료하세요. `--foreground`에서는 Ctrl+C·준비 시간 초과 시 워커도 종료합니다.
 `--local-only`는 로컬 모델 준비까지만 확인하며 LLMGate에 공개하지 않습니다.
-Relay 연결 완료는 Mac의 모델·Listener 준비 확인이며, 서버 catalog·API 호출 성공까지 검사하는 것은 아닙니다.
+Relay 연결 완료는 Mac의 모델·Listener 준비 확인입니다. 이후 `/v1/embeddings`에 `model=embedding`, `/v1/audio/transcriptions`에 `model=stt`로 호출합니다. start는 실제 API 결과까지 검사하지는 않습니다.
 
 ## 3. 문제가 생기거나 종료할 때
 

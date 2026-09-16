@@ -1,6 +1,6 @@
 # ADR 011: 서버 Caller sidecar가 dial과 토큰 발급을 소유한다
 
-- Status: Accepted
+- Status: Superseded by ADR 012 (공유 profile 설정으로 기본 route·catalog 구성)
 - Date: 2026-09-16
 - Complements: ADR 010. worker API는 계속 publish만 허용한다.
 

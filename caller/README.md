@@ -12,7 +12,6 @@ Client → Go LLMGate(API 키·로그) → loopback Caller → TLS RelayGate →
 ```json
 {
   "issuer_config": "/run/config/workers.json",
-  "routes": {"embedding": "127.0.0.1:18081", "stt": "127.0.0.1:18082"},
   "max_connections": 64,
   "connection_timeout_seconds": 180
 }
@@ -24,9 +23,7 @@ Client → Go LLMGate(API 키·로그) → loopback Caller → TLS RelayGate →
 선택 `ca_file`로 private CA를, `gateway_endpoint`로 Caller 측 Gateway 주소를 지정한다. TLS만 허용한다.
 키 교체는 Gateway 공개키 overlap을 먼저 설정한 뒤 Go와 Caller를 재시작한다.
 
-Go와 Caller는 같은 pod/network namespace를 사용한다. Go catalog의 base_url은
-embedding `http://127.0.0.1:18081/v1`, STT `http://127.0.0.1:18082/v1`이다.
-STT model에는 `new_connection_per_request: true`를 설정한다.
+Go와 Caller는 같은 pod/network namespace를 사용한다. Go의 모델·alias와 Caller의 route는 공유 workers.json에서 자동 구성된다. 기본 주소는 embedding `127.0.0.1:18081`, STT `127.0.0.1:18082`이며 profile의 `caller_address`로 함께 변경한다. STT의 요청별 새 연결도 자동 적용한다. 기존 routes를 명시하면 공유 profile 주소와 일치해야 한다.
 
 - 워커가 없어도 Caller는 대기한다. 요청에 503을 반환하고 다음 요청에서 새 dial을 수행한다.
 - Gateway가 처음부터 없으면 초기 연결을 재시도한다. 연결 후 reconnect는 SDK가 소유한다.

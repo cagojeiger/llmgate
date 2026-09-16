@@ -128,6 +128,8 @@ async fn wait_ready(
     opts: &StartOptions,
     mut child: Option<&mut Child>,
 ) -> anyhow::Result<()> {
+    // Install before progress output so an immediate Ctrl+C cannot use the default handler.
+    let mut interrupt = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
     let began = Instant::now();
     let mut previous = String::new();
     let mut seen = false;
@@ -192,7 +194,7 @@ async fn wait_ready(
             ui::command(home, &format!("logs {}", p.id()))
         );
         tokio::select! {
-            _ = tokio::signal::ctrl_c() => anyhow::bail!("대기를 취소했습니다. {}. {}", if opts.foreground {"foreground 워커를 종료합니다"} else {"백그라운드 워커는 계속 실행합니다"}, ui::command(home, "status")),
+            _ = interrupt.recv() => anyhow::bail!("대기를 취소했습니다. {}. {}", if opts.foreground {"foreground 워커를 종료합니다"} else {"백그라운드 워커는 계속 실행합니다"}, ui::command(home, "status")),
             _ = sleep(Duration::from_millis(250)) => {}
         }
     }

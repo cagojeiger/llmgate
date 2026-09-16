@@ -39,7 +39,11 @@ pub async fn serve(
                         let Some(relay) = current else { unavailable(&mut socket).await; return; };
                         match relay.dial(destination, token).await {
                             Ok(mut pipe) => { let _ = copy_bidirectional_with_sizes(&mut socket, &mut pipe, 64 * 1024, 64 * 1024).await; }
-                            Err(_) => unavailable(&mut socket).await,
+                            Err(error) => {
+                                // Stable categories only: never log credentials or raw diagnostics.
+                                eprintln!("caller dial failed: {:?} ({:?})", error.code(), error.observation());
+                                unavailable(&mut socket).await;
+                            },
                         }
                     }).await;
                 });

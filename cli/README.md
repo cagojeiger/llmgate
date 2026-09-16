@@ -39,7 +39,7 @@ HTTPS+RelayGate TLS가 기본이며 `--allow-loopback-http`는 로컬 테스트�
 | --- | --- |
 | embedding / stt / --all | 선택 profile 또는 등록된 모든 profile 설치·시작 |
 | --port N | 포트 지정. 기본 자동 선택, 충돌 시 기존 프로세스 보존 |
-| --max-connections N | Relay Pipe 상한, 기본 4. 추론 동시성과 별개 |
+| --max-connections N | Relay Pipe 상한, 기본 8. 추론 동시성과 별개 |
 | --connection-timeout SECONDS | Pipe 수명, 기본/최대 3600초 |
 | --wait-timeout SECONDS | 설치 이후 준비·Relay 공개 대기, 기본 660초. 초과 시 오류를 반환하며 background 워커는 계속 실행 |
 | --foreground | 터미널에서 감독. 기본 background supervisor |
@@ -48,16 +48,18 @@ HTTPS+RelayGate TLS가 기본이며 `--allow-loopback-http`는 로컬 테스트�
 
 ## 메모리와 종료
 
-- 같은 home의 모델 load·추론은 공유 파일 lock으로 한 건씩 실행한다. 실행 중 추가 요청은 429다.
-- 목표는 두 Python 모델 프로세스와 Rust supervisor의 합산 **4 GiB**다. Docker 서버·개발 도구·설치 작업은 별도다.
-- Darwin physical footprint를 250ms마다 합산한다. 3.5 GiB 이상이면 신규 추론을 거부하고, 4 GiB 초과를 관측하면 모델을 종료한다. MLX cache는 프로세스당 64 MiB다.
-- 이는 OS 강제 상한이 아니다. 샘플 사이의 순간 초과 가능성이 있으며 실제 검증 범위는 [측정 기록](docs/validation-2026-09-16.md)을 따른다.
-- `status`는 사람이 읽는 표이며, `status --json`의 memory 필드에 합계·관측 peak·budget이 나온다. PID 재사용은 시작 시각으로 구분한다.
+- 모델별 load·추론은 한 건씩 실행한다. **임베딩 1건 + STT 1건은 동시에 처리**한다. 모델별 최대 4건(실행 1 + 대기 3)을 수용하고, 초과 요청 또는 5초 대기 만료는 429다. 대기는 모델 실행 슬롯을 늘리지 않는다. Relay Pipe는 기본 8건으로, 모델 수용 4건에 더해 완료된 연결의 비동기 정리 여유를 둔다. Pipe 상한과 추론 동시성은 다르다.
+- 두 Python 모델 프로세스와 Rust supervisor의 합산 **평균 4 GiB**를 목표로 한다. Docker 서버·개발 도구·설치 작업은 별도다.
+- Darwin physical footprint를 250ms마다 합산하고 최근 60초 표본 평균을 표시한다. 시작 후 60초 미만이면 수집된 기간만 평균한다. 평균 목표 초과만으로 종료하지 않는다.
+- 별도 비상 보호선은 5.5 GiB 이상 신규 추론 거부, 6 GiB 초과 관측 시 모델 종료다. MLX cache는 프로세스당 64 MiB다. 이는 OS 강제 상한이나 호스트 전체 메모리 압력 감지가 아니며 샘플 사이 순간 초과는 가능하다.
+- `status --json`의 memory에는 현재 합계·평균·관측 peak·target_bytes·stop_bytes·observed_seconds가 나온다. PID 재사용은 시작 시각으로 구분한다.
 - `down`은 공개 철회·bounded drain·소유 process group/port 종료 확인 후 전용 Python runtime을 삭제한다.
 - cache는 남는다. 실행/설치 중 `cache clean`은 거부하며 `down --all --purge`는 종료 후 cache도 지운다.
 - `unregister`는 실행을 멈추고 Keychain·등록 설정을 지운다. 서버의 API 키 자체는 폐기하지 않는다.
 - 모델은 engine/cache 잠금을 상속하며 supervisor가 사라지면 생존 pipe의 EOF로 종료한다. 남은 모델이 있으면 start/install/down/cache clean을 거부한다. 이전 버전의 불명확한 crash 기록은 덮어쓰지 않는다.
 - 모델 장애는 최대 3회 재시작한다. transport 복구는 SDK 책임이다. 모델 로그는 profile당 10 MiB × 5개로 회전한다. supervisor 시작·종료 로그는 실행마다 회전해 최근 5개를 유지한다.
+
+[동시 처리·메모리 실측](docs/capacity-2026-09-17.md).
 
 ## 빌드·검증
 

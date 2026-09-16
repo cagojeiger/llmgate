@@ -51,7 +51,7 @@ pub struct StartOptions {
     pub local_only: bool,
     #[arg(long,value_parser=clap::value_parser!(u16).range(1..))]
     pub port: Option<u16>,
-    #[arg(long,default_value_t=4,value_parser=clap::value_parser!(u16).range(1..=64))]
+    #[arg(long,default_value_t=8,value_parser=clap::value_parser!(u16).range(1..=64))]
     pub max_connections: u16,
     #[arg(long,default_value_t=3600,value_parser=clap::value_parser!(u16).range(1..=3600))]
     pub connection_timeout: u16,

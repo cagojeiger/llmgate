@@ -15,11 +15,11 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from mlx_audio.stt.utils import load
 
 from http_limits import BodyLimit
-from resources import Busy, MemoryPressure, admission, configure_mlx, start_monitor
+from resources import RequestCapacity, Busy, MemoryPressure, admission, configure_mlx, start_monitor
 
 NAME = os.environ["LLMGATE_SERVED_MODEL"]
 EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mlx-stt")
-BUSY = False
+CAPACITY = RequestCapacity()
 MODEL = None
 
 
@@ -89,21 +89,21 @@ async def transcribe(
     response_format: str = Form("json"), language: str | None = Form(None),
     prompt: str | None = Form(None), temperature: float = Form(0.0),
 ):
-    global BUSY
     if model != NAME:
         raise HTTPException(400, "unsupported model")
     if response_format != "json":
         raise HTTPException(400, "this profile supports response_format=json only")
     if temperature != 0.0:
         raise HTTPException(400, "this profile supports temperature=0 only")
-    if BUSY:
-        raise HTTPException(429, "model busy", headers={"Retry-After": "1"})
-    BUSY = True
+    try:
+        await CAPACITY.acquire()
+    except Busy as exc:
+        raise HTTPException(429, str(exc), headers={"Retry-After": "1"}) from None
     lease = admission()
     try:
         lease.__enter__()
     except (Busy, MemoryPressure) as exc:
-        BUSY = False
+        CAPACITY.release()
         raise HTTPException(429 if isinstance(exc, Busy) else 503, str(exc)) from None
     try:
         raw = await file.read(5 * 1024 * 1024 + 1)
@@ -113,10 +113,15 @@ async def transcribe(
             raise HTTPException(400, "prompt exceeds 256 tokens")
         if language and len(language) > 64:
             raise HTTPException(400, "invalid language")
-        audio = await asyncio.get_running_loop().run_in_executor(EXECUTOR, decode_audio, raw)
+        decoding = asyncio.get_running_loop().run_in_executor(EXECUTOR, decode_audio, raw)
+        try:
+            audio = await asyncio.shield(decoding)
+        except asyncio.CancelledError:
+            await decoding
+            raise
     except BaseException:
         lease.__exit__(None, None, None)
-        BUSY = False
+        CAPACITY.release()
         raise
     finally:
         await file.close()
@@ -136,10 +141,6 @@ async def transcribe(
                 pass
         future.cancel()
         return False
-
-    def release():
-        global BUSY
-        BUSY = False
 
     def infer():
         try:
@@ -170,7 +171,7 @@ async def transcribe(
             mx.clear_cache()
             lease.__exit__(None, None, None)
             emit(None)
-            loop.call_soon_threadsafe(release)
+            loop.call_soon_threadsafe(CAPACITY.release)
 
     EXECUTOR.submit(infer)
 

@@ -1,4 +1,5 @@
-"""One inference per managed home; measured Mac footprint and bounded MLX cache."""
+"""One inference per profile; average memory target and separate emergency guard."""
+import asyncio
 import ctypes
 import fcntl
 import json
@@ -7,10 +8,13 @@ from pathlib import Path
 import threading
 import time
 from contextlib import contextmanager
+from collections import deque
 
 GIB = 1024 ** 3
-MEMORY_BUDGET = 4 * GIB
-ADMISSION_LIMIT = MEMORY_BUDGET - 512 * 1024 ** 2
+MEMORY_TARGET = 4 * GIB
+MEMORY_STOP = 6 * GIB
+ADMISSION_LIMIT = MEMORY_STOP - 512 * 1024 ** 2
+AVERAGE_WINDOW = 60
 ROOT = Path(os.environ["LLMGATE_MANAGED_ROOT"])
 PROFILE = os.environ["LLMGATE_PROFILE"]
 
@@ -59,16 +63,41 @@ class MemoryPressure(Exception):
     pass
 
 
+class RequestCapacity:
+    """One model call and at most three waiters; no unbounded executor queue."""
+    def __init__(self, limit=4, timeout=5):
+        self.limit, self.timeout = limit, timeout
+        self.pending = 0
+        self.lock = asyncio.Lock()
+
+    async def acquire(self):
+        if self.pending >= self.limit:
+            raise Busy("model request capacity reached")
+        self.pending += 1
+        try:
+            async with asyncio.timeout(self.timeout):
+                await self.lock.acquire()
+        except BaseException as exc:
+            self.pending -= 1
+            if isinstance(exc, TimeoutError):
+                raise Busy("model queue wait exceeded 5 seconds") from None
+            raise
+
+    def release(self):
+        self.pending -= 1
+        self.lock.release()
+
+
 @contextmanager
 def admission(wait=False):
-    with open(ROOT / "locks/inference.lock", "a+b") as lock:
+    with open(ROOT / f"locks/{PROFILE}-inference.lock", "a+b") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
         except BlockingIOError as exc:
-            raise Busy("another local model is processing a request") from exc
+            raise Busy("this model profile is processing a request") from exc
         try:
             if total_memory() >= ADMISSION_LIMIT:
-                raise MemoryPressure("local memory budget has insufficient headroom")
+                raise MemoryPressure("local memory emergency guard has insufficient headroom")
             yield
         finally:
             fcntl.flock(lock, fcntl.LOCK_UN)
@@ -90,25 +119,34 @@ def start_monitor():
 
     def monitor():
         peak = 0
+        samples = deque()
         while not stopped.is_set():
             try:
                 total = total_memory()
                 peak = max(total, peak)
+                now = time.monotonic()
+                samples.append((now, total))
+                while samples[0][0] < now - AVERAGE_WINDOW:
+                    samples.popleft()
                 data = {"processes": owners, "total_bytes": total, "peak_bytes": peak,
-                        "budget_bytes": MEMORY_BUDGET, "sampled_at": time.time()}
+                        "target_bytes": MEMORY_TARGET, "stop_bytes": MEMORY_STOP,
+                        "average_bytes": sum(value for _, value in samples) // len(samples),
+                        "average_window_seconds": AVERAGE_WINDOW,
+                        "observed_seconds": round(now - samples[0][0], 2),
+                        "sampled_at": time.time()}
                 temp = path.with_suffix(f".tmp-{os.getpid()}")
                 temp.write_text(json.dumps(data))
                 temp.chmod(0o600)
                 temp.replace(path)
-                if total > MEMORY_BUDGET:
+                if total > MEMORY_STOP:
                     # The Rust supervisor withdraws and reaps this owned process group.
-                    os.write(2, b"managed memory budget exceeded; stopping model\n")
+                    os.write(2, b"managed memory emergency guard exceeded; stopping model\n")
                     os._exit(75)
             except Exception:
                 os.write(2, b"managed memory accounting failed; stopping model\n")
                 os._exit(75)
             stopped.wait(0.25)
 
-    thread = threading.Thread(target=monitor, daemon=True, name="memory-budget")
+    thread = threading.Thread(target=monitor, daemon=True, name="memory-monitor")
     thread.start()
     return stopped

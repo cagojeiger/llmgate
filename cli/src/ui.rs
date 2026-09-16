@@ -69,16 +69,18 @@ pub async fn status(home: &Home, machine: bool) -> anyhow::Result<()> {
             if let Some(error) = value["error"].as_str() {
                 println!("  오류: {error}");
             }
-            if let (Some(total), Some(budget), Some(sampled)) = (
+            if let (Some(total), Some(target), Some(average), Some(sampled)) = (
                 value["memory"]["total_bytes"].as_u64(),
-                value["memory"]["budget_bytes"].as_u64(),
+                value["memory"]["target_bytes"].as_u64(),
+                value["memory"]["average_bytes"].as_u64(),
                 value["memory"]["sampled_at"].as_f64(),
             ) && (crate::broker::now() as f64 - sampled).abs() <= 5.0
             {
                 println!(
-                    "  관리 모델 합산 메모리: {:.2} / {:.2} GiB (관측 목표)",
+                    "  관리 모델 합산 메모리: 현재 {:.2} GiB · 최근 최대 60초 평균 {:.2} GiB / 목표 {:.2} GiB",
                     total as f64 / 1073741824.0,
-                    budget as f64 / 1073741824.0
+                    average as f64 / 1073741824.0,
+                    target as f64 / 1073741824.0
                 );
             }
         } else {

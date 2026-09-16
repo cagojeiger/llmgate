@@ -25,10 +25,10 @@ def verify(base, key, home, fixture):
             r = client.post('/v1/embeddings', json={'model': 'embedding', 'input': [' hello' * 2047] * count})
             assert r.status_code == expected, (r.status_code, r.text[:120])
             record('embedding_batch_boundary', tokens=count * 2048, status=r.status_code)
-        with open(home / 'locks/inference.lock', 'a+b') as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            # Probe local engines: LLMGate owns its existing 429/fallback mapping separately.
-            for profile in ('embedding', 'stt'):
+        # Each model admits one inference; the other profile remains independent.
+        for profile in ('embedding', 'stt'):
+            with open(home / f'locks/{profile}-inference.lock', 'a+b') as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 state = json.loads((home / f'control/{profile}.json').read_text())
                 endpoint = f"http://127.0.0.1:{state['port']}/v1/"
                 if profile == 'embedding':
@@ -36,7 +36,7 @@ def verify(base, key, home, fixture):
                 else:
                     r = httpx.post(endpoint + 'audio/transcriptions', data={'model': 'qwen3-asr-0.6b'}, files={'file': ('a.wav', (fixture/'speech.wav').read_bytes(), 'audio/wav')})
                 assert r.status_code == 429, r.text
-                record('shared_admission', profile=profile, status=r.status_code)
+                record('profile_admission', profile=profile, status=r.status_code)
         with wave.open(str(fixture/'speech.wav'), 'rb') as wav:
             pcm, rate, channels, width = wav.readframes(wav.getnframes()), wav.getframerate(), wav.getnchannels(), wav.getsampwidth()
         for seconds, expected in [(60, 200), (61, 400), (61, 400), (61, 400)]:
@@ -58,6 +58,6 @@ def verify(base, key, home, fixture):
         record('stt_prompt_boundary', tokens=257, status=r.status_code)
     readings = [json.loads((home / f'control/{p}-memory.json').read_text()) for p in ('embedding', 'stt')]
     peak = max(r['peak_bytes'] for r in readings)
-    assert peak < 4 * 1024**3, peak
-    record('managed_memory', peak_bytes=peak, budget_bytes=4 * 1024**3, measurement='Darwin physical footprint, 250ms sampling')
+    assert peak < 6 * 1024**3, peak
+    record('managed_memory', peak_bytes=peak, target_bytes=4 * 1024**3, stop_bytes=6 * 1024**3, measurement='Darwin physical footprint, 250ms sampling')
     (fixture/'limits-results.json').write_text(json.dumps(results, indent=2))

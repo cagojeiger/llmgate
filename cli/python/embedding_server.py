@@ -12,12 +12,12 @@ from fastapi import FastAPI, HTTPException, Request
 from mlx_embeddings.utils import load
 
 from http_limits import BodyLimit
-from resources import Busy, MemoryPressure, admission, configure_mlx, start_monitor
+from resources import RequestCapacity, Busy, MemoryPressure, admission, configure_mlx, start_monitor
 
 NAME = os.environ['LLMGATE_SERVED_MODEL']
 EXECUTOR = ThreadPoolExecutor(max_workers=1)
 MODEL = TOKENIZER = None
-BUSY = False
+CAPACITY = RequestCapacity()
 MAX_TEXT_TOKENS, MAX_BATCH_TOKENS, MAX_DOCUMENTS = 2048, 8192, 128
 
 
@@ -110,10 +110,10 @@ def embed(body, lock=True):
 
 @app.post('/v1/embeddings')
 async def embeddings(request: Request):
-    global BUSY
-    if BUSY:
-        raise HTTPException(429, 'model busy', headers={'Retry-After': '1'})
-    BUSY = True
+    try:
+        await CAPACITY.acquire()
+    except Busy as exc:
+        raise HTTPException(429, str(exc), headers={'Retry-After': '1'}) from None
     try:
         try:
             body = await request.json()
@@ -129,11 +129,11 @@ async def embeddings(request: Request):
             await task
             raise
     except Busy:
-        raise HTTPException(429, 'another local model is busy', headers={'Retry-After': '1'}) from None
+        raise HTTPException(429, 'model busy', headers={'Retry-After': '1'}) from None
     except MemoryPressure:
-        raise HTTPException(503, 'local memory budget exhausted') from None
+        raise HTTPException(503, 'local memory emergency guard reached') from None
     finally:
-        BUSY = False
+        CAPACITY.release()
 
 
 if __name__ == '__main__':

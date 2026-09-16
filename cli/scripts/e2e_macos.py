@@ -91,6 +91,8 @@ def write_json(path, value):
 def fixture():
     WORK.mkdir(parents=True, exist_ok=True)
     WORK.chmod(0o700)
+    for name in ("results.json", "benchmark.json", "capacity-results.json", "limits-results.json"):
+        (WORK / name).unlink(missing_ok=True)
     api_key = secrets.token_urlsafe(32)
     signing = ec.generate_private_key(ec.SECP256R1())
     public = signing.public_key().public_numbers()
@@ -143,6 +145,10 @@ def main():
     parser.add_argument("--cli-binary", type=Path, default=CLI)
     parser.add_argument("--gateway-binary", type=Path, default=RELAY / "target/debug/relaygate-server")
     parser.add_argument("--keep-running", action="store_true")
+    parser.add_argument("--soak-concurrency", type=int, choices=(2,4,8), default=2)
+    parser.add_argument("--soak-seconds", type=int, default=0)
+    parser.add_argument("--allow-benchmark-rejections", action="store_true")
+    parser.add_argument("--benchmark", action="store_true")
     parser.add_argument("--verify-limits", action="store_true")
     parser.add_argument("--verify-recovery", action="store_true")
     parser.add_argument("--openclaw-node")
@@ -258,6 +264,12 @@ def main():
                 result.raise_for_status()
                 record("gateway_restart_after_token_expiry", status=result.status_code, caller_restart=False, worker_restart=False)
 
+            if args.benchmark:
+                from benchmark_macos import run
+                run(base, key, HOME, WORK, allow_rejections=args.allow_benchmark_rejections)
+            if args.soak_seconds > 0:
+                from verify_capacity import run
+                run(base, key, HOME, WORK, args.soak_seconds, args.soak_concurrency)
             if args.verify_limits:
                 from verify_limits import verify
                 verify(base, key, HOME, WORK)

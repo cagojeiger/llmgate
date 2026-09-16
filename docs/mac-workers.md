@@ -5,7 +5,7 @@
 | Go LLMGate | OpenAI 형식 API, consumer 인증·로그, worker publish JWT 발급 |
 | Rust 서버 Caller | loopback HTTP → Pipe, exact dial JWT 자동 발급·SDK reconnect |
 | Rust CLI | Keychain, profile 설치·시작·준비·Relay 공개·종료 |
-| Python adapter | 모델별 입력 한도·추론·JSON/SSE, 공유 admission·메모리 관측 |
+| Python adapter | 모델별 입력 한도·추론·JSON/SSE, 모델별 admission·합산 메모리 관측 |
 | RelayGate | local-first Binding 선택·Pipe 전송. SDK 0.5.1 의존 |
 
 ```text

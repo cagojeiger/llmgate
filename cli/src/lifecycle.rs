@@ -238,6 +238,8 @@ pub async fn run(home: Home, p: Profile, opts: StartOptions) -> anyhow::Result<(
     });
     let log = Logger::start(home.0.join(format!("logs/{}.log", p.id())));
     let client = reqwest::Client::builder()
+        // Engine health is always local, regardless of operator proxy settings.
+        .no_proxy()
         .timeout(Duration::from_secs(3))
         .build()?;
     let result = supervise(

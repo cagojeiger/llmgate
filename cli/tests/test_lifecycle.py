@@ -23,7 +23,7 @@ class LifecycleTests(unittest.TestCase):
         self.rt.mkdir(parents=True)
         (self.rt/'runtime_guard.py').write_bytes((ROOT/'python/runtime_guard.py').read_bytes())
         (self.rt/'installed.json').write_text(json.dumps({'python':sys.executable,'model':str(self.home),'fingerprint':'fixture'}))
-        (self.rt/'embedding_server.py').write_text('''import http.server,json,os,pathlib
+        (self.rt/'embedding_server.py').write_text('''import http.server,json,os,pathlib,socketserver
 root=pathlib.Path(os.environ['LLMGATE_MANAGED_ROOT'])
 (root/'engine.json').write_text(json.dumps({'pid':os.getpid(),'port':int(os.environ['LLMGATE_MODEL_PORT'])}))
 print('fake engine started',flush=True)
@@ -33,7 +33,12 @@ class H(http.server.BaseHTTPRequestHandler):
   self.send_response(200);self.end_headers();self.wfile.write(b'{"ready":true}')
  def do_POST(self):
   (root/'unexpected-warmup').touch();self.send_response(429);self.end_headers()
-http.server.ThreadingHTTPServer(('127.0.0.1',int(os.environ['LLMGATE_MODEL_PORT'])),H).serve_forever()
+class Server(http.server.ThreadingHTTPServer):
+ def server_bind(self):
+  # HTTPServer's default getfqdn blocks on reverse DNS on hosted Mac runners.
+  socketserver.TCPServer.server_bind(self)
+  self.server_name='localhost';self.server_port=self.server_address[1]
+Server(('127.0.0.1',int(os.environ['LLMGATE_MODEL_PORT'])),H).serve_forever()
 ''')
         self.processes = []
         self.engines = []
@@ -58,8 +63,8 @@ http.server.ThreadingHTTPServer(('127.0.0.1',int(os.environ['LLMGATE_MODEL_PORT'
     def command(self,*args):
         return subprocess.run([str(BINARY),'--home',str(self.home),*args],capture_output=True,text=True,timeout=35)
 
-    def launch(self):
-        p=subprocess.Popen([str(BINARY),'--home',str(self.home),'run','embedding','--local-only'],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+    def launch(self,extra_env=None):
+        p=subprocess.Popen([str(BINARY),'--home',str(self.home),'run','embedding','--local-only'],env={**os.environ,**(extra_env or {})},stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
         self.processes.append(p)
         deadline=time.monotonic()+10
         while time.monotonic()<deadline:
@@ -123,7 +128,7 @@ http.server.ThreadingHTTPServer(('127.0.0.1',int(os.environ['LLMGATE_MODEL_PORT'
         self.assertFalse(self.rt.exists())
 
     def test_health_ready_does_not_call_busy_inference(self):
-        supervisor,_=self.launch()
+        supervisor,_=self.launch({'HTTP_PROXY':'http://127.0.0.1:9','HTTPS_PROXY':'http://127.0.0.1:9','ALL_PROXY':'http://127.0.0.1:9','NO_PROXY':''})
         time.sleep(.3)
         self.assertIsNone(supervisor.poll())
         self.assertFalse((self.home/'unexpected-warmup').exists())

@@ -19,12 +19,14 @@ const (
 	// base_url and is brokered by /v1/realtime rather than routed through the
 	// circuit-breaker Service — the gateway relays event frames verbatim.
 	APIRealtime API = "realtime"
+	// APIEmbeddings serves text-to-vector inference.
+	APIEmbeddings API = "embeddings"
 )
 
 // allAPIs lists every accepted API value, in declaration order, so
 // validation and operator-facing errors quote one source of truth.
 func allAPIs() []API {
-	return []API{APIChat, APITranscription, APIRealtime}
+	return []API{APIChat, APITranscription, APIRealtime, APIEmbeddings}
 }
 
 // Valid reports whether a is one of the registered API constants.

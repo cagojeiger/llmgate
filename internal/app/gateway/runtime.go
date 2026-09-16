@@ -20,9 +20,12 @@ import (
 	"llmgate/internal/platform/config"
 	httpaudio "llmgate/internal/platform/http/audio"
 	httpchat "llmgate/internal/platform/http/chat"
+	httpembeddings "llmgate/internal/platform/http/embeddings"
 	httpprobe "llmgate/internal/platform/http/probe"
 	httprealtime "llmgate/internal/platform/http/realtime"
 	"llmgate/internal/platform/http/server"
+	httpworkers "llmgate/internal/platform/http/workers"
+	"llmgate/internal/platform/relaytoken"
 	promtelemetry "llmgate/internal/platform/telemetry/prometheus"
 	slogtelemetry "llmgate/internal/platform/telemetry/slog"
 )
@@ -93,6 +96,10 @@ func BuildRuntime(ctx context.Context, in RuntimeInput) (*Runtime, error) {
 	if in.Logger == nil {
 		in.Logger = slog.Default()
 	}
+	workerIssuer, err := relaytoken.LoadFromEnv()
+	if err != nil {
+		return nil, fmt.Errorf("load worker issuer: %w", err)
+	}
 
 	models, aliases, transcribers, err := buildRouterInputs(in.Catalog, defaultProviderFactories())
 	if err != nil {
@@ -107,7 +114,11 @@ func BuildRuntime(ctx context.Context, in RuntimeInput) (*Runtime, error) {
 		CircuitJitter:   in.Config.CircuitJitter,
 		CompleteTimeout: in.Config.CompleteTimeout,
 	}
-	svc, err := routing.NewService(models, aliases, policy, in.Logger, routing.WithTranscription(transcribers))
+	embedders, err := buildEmbeddingModels(in.Catalog)
+	if err != nil {
+		return nil, err
+	}
+	svc, err := routing.NewService(models, aliases, policy, in.Logger, routing.WithTranscription(transcribers), routing.WithEmbeddings(embedders))
 	if err != nil {
 		return nil, err
 	}
@@ -161,6 +172,14 @@ func BuildRuntime(ctx context.Context, in RuntimeInput) (*Runtime, error) {
 		Environment:    in.Config.Environment,
 		ResultSink:     results,
 	})
+	embeddingHandler := httpembeddings.NewHandler(svc, in.Logger, events, httpembeddings.HandlerConfig{
+		RequestTimeout:    in.Config.RequestTimeout,
+		MaxRequestBytes:   in.Config.MaxRequestBytes,
+		ServiceVersion:    in.Version,
+		Environment:       in.Config.Environment,
+		LifecycleObserver: metricsRecorder,
+		ResultSink:        results,
+	})
 	probe := httpprobe.NewState()
 	var metricsHandler http.Handler
 	if in.Config.MetricsEnabled {
@@ -169,15 +188,21 @@ func BuildRuntime(ctx context.Context, in RuntimeInput) (*Runtime, error) {
 			Timeout:             5 * time.Second,
 		})
 	}
+	var workerHandler http.Handler
+	if workerIssuer != nil {
+		workerHandler = httpworkers.New(workerIssuer, events, in.Version, in.Config.Environment)
+	}
 	srv := server.NewWithOptions(server.ServerOptions{
-		Config:          in.Config,
-		Log:             in.Logger.With(slog.String("log", "access")),
-		Handler:         handler,
-		AudioHandler:    audioHandler,
-		RealtimeHandler: realtimeHandler,
-		Consumers:       in.Consumers,
-		Probe:           probe,
-		MetricsHandler:  metricsHandler,
+		Config:             in.Config,
+		Log:                in.Logger.With(slog.String("log", "access")),
+		Handler:            handler,
+		AudioHandler:       audioHandler,
+		RealtimeHandler:    realtimeHandler,
+		EmbeddingHandler:   embeddingHandler,
+		WorkerTokenHandler: workerHandler,
+		Consumers:          in.Consumers,
+		Probe:              probe,
+		MetricsHandler:     metricsHandler,
 	})
 
 	return &Runtime{

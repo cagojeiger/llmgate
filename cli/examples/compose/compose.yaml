@@ -1,0 +1,24 @@
+# The model engines and both RelayGate SDK endpoints run natively on the Mac.
+# Only LLMGate is containerized, built from the neighbouring local checkout.
+services:
+  llmgate:
+    build:
+      context: ../../..
+      args:
+        VERSION: local-mlx-validation
+    image: llmgate:local-mlx-validation
+    # Test-only process: temporary signing key stays 0600 on the host mount.
+    user: "0:0"
+    ports:
+      - "127.0.0.1:${LLMGATE_TEST_PORT:?test port required}:8080"
+    environment:
+      LLMGATE_ADDR: 0.0.0.0:8080
+      LLMGATE_CATALOG: /fixture/catalog
+      LLMGATE_CONSUMERS: /fixture/consumers
+      LLMGATE_WORKERS_CONFIG: /fixture/workers.json
+      LLMGATE_REQUEST_TIMEOUT: 300s
+      LLMGATE_COMPLETE_TIMEOUT: 180s
+      LLMGATE_STREAM_IDLE_TIMEOUT: 120s
+    volumes:
+      - "${LLMGATE_TEST_CONFIG:?test config required}:/fixture:ro"
+    restart: "no"

@@ -50,14 +50,15 @@ type Model struct {
 	ID       string            `yaml:"id"`
 	Vendor   string            `yaml:"vendor"`
 	Protocol llmtypes.Protocol `yaml:"protocol"` // see llmtypes.Protocol consts
-	// API is the invocation surface (chat | transcription). Empty defaults to
+	// API is the invocation surface (chat | transcription | realtime | embeddings). Empty defaults to
 	// chat, so every existing model file keeps working untouched.
-	API        API                 `yaml:"api,omitempty"`
-	BaseURL    string              `yaml:"base_url"`
-	AuthEnv    string              `yaml:"auth_env"`             // env var *name*; empty defaults to LLMGATE_<VENDOR>_API_KEY
-	AuthScheme string              `yaml:"auth_scheme"`          // bearer | x-api-key
-	ExtraBody  map[string]any      `yaml:"extra_body,omitempty"` // default extra parameters to include in request body
-	Cost       *llmtypes.ModelCost `yaml:"cost,omitempty"`       // USD per one million tokens
+	API                     API                 `yaml:"api,omitempty"`
+	NewConnectionPerRequest bool                `yaml:"new_connection_per_request,omitempty"`
+	BaseURL                 string              `yaml:"base_url"`
+	AuthEnv                 string              `yaml:"auth_env"`             // env var *name*; empty defaults to LLMGATE_<VENDOR>_API_KEY
+	AuthScheme              string              `yaml:"auth_scheme"`          // bearer | x-api-key
+	ExtraBody               map[string]any      `yaml:"extra_body,omitempty"` // default extra parameters to include in request body
+	Cost                    *llmtypes.ModelCost `yaml:"cost,omitempty"`       // USD per one million tokens
 }
 
 // Alias maps a logical name (e.g. "smart") to an ordered list of concrete

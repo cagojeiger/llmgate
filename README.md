@@ -30,6 +30,10 @@ caller ──┐                          ┌── openai
   [docs/adr/000-identity.md](docs/adr/000-identity.md) for the
   scope decision and the explicit non-goals.
 
+## Mac MLX workers
+
+Qwen3 Embedding and file STT workers: [architecture and setup](docs/mac-workers.md), [CLI](cli/README.md).
+
 ## Run locally
 
 ```bash

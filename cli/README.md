@@ -1,0 +1,85 @@
+# llmgate-cli
+
+Apple Silicon macOS 15+에서 Qwen3 Embedding·Qwen3 ASR 파일 STT를 LLMGate에 연결한다.
+LLMGate와 같은 저장소에서 리뷰하되 Rust 바이너리·Python 실행 환경은 Go 서버와 독립적이다.
+RelayGate SDK 0.5.1은 crates.io에서 가져온다. CLI 자체는 crates.io에 게시하지 않는다.
+
+## 모델과 제한
+
+| profile | 고정 모델 | 제한 |
+| --- | --- | --- |
+| embedding | Qwen3 Embedding 0.6B 8bit | 문서당 2,048토큰, 요청 합계 8,192토큰, 최대 128개 문자열, 1024차원 |
+| stt | Qwen3 ASR 0.6B 4bit | 파일 5 MiB·60초, prompt 256토큰, 출력 합계 1,024토큰 |
+
+- 임베딩은 실제 tokenizer로 특수 토큰까지 계산한다. 초과 입력을 자동으로 자르지 않는다. float/base64를 지원한다.
+- 파일 STT는 JSON 또는 `stream=true` SSE다. 실시간 음성 입력은 제외한다. `response_format=json`, `temperature=0`을 지원한다.
+- STT는 30초 단위로 순차 추론한다. 출력 한도에 도달하면 불완전한 결과를 성공으로 처리하지 않는다.
+- 음성은 miniaudio 지원 형식을 받으며 WAV로 실증했다. 모델 규격의 query instruction은 호출자가 구성한다.
+
+## 사용
+
+```sh
+llmgate-cli register --url https://llmgate.example --profiles embedding stt
+llmgate-cli start --all
+llmgate-cli status
+llmgate-cli logs stt
+llmgate-cli down stt
+llmgate-cli cache list
+llmgate-cli cache clean
+```
+
+API 키는 숨김 입력 또는 `register --key-stdin`으로 받고 Keychain에 저장한다. JWT는 내부에서 발급·갱신해 메모리에만 둔다.
+HTTPS+RelayGate TLS가 기본이며 `--allow-loopback-http`는 로컬 테스트용이다.
+등록 전 서버의 [worker 권한과 issuer 설정](../docs/worker-registration.md)이 필요하다.
+
+| start 옵션 | 의미 |
+| --- | --- |
+| embedding / stt / --all | 선택 profile 또는 두 profile 설치·시작 |
+| --port N | 포트 지정. 기본 자동 선택, 충돌 시 기존 프로세스 보존 |
+| --max-connections N | Relay Pipe 상한, 기본 4. 추론 동시성과 별개 |
+| --connection-timeout SECONDS | Pipe 수명, 기본/최대 3600초 |
+| --foreground | 터미널에서 감독. 기본 background supervisor |
+| --local-only | 등록 없이 로컬 엔진만 실행 |
+| --home PATH | 전용 관리 root 변경. 기본 ~/.llmgate |
+
+## 메모리와 종료
+
+- 같은 home의 모델 load·추론은 공유 파일 lock으로 한 건씩 실행한다. 실행 중 추가 요청은 429다.
+- 목표는 두 Python 모델 프로세스와 Rust supervisor의 합산 **4 GiB**다. Docker 서버·개발 도구·설치 작업은 별도다.
+- Darwin physical footprint를 250ms마다 합산한다. 3.5 GiB 이상이면 신규 추론을 거부하고, 4 GiB 초과를 관측하면 모델을 종료한다. MLX cache는 프로세스당 64 MiB다.
+- 이는 OS 강제 상한이 아니다. 샘플 사이의 순간 초과 가능성이 있으며 실제 검증 범위는 [측정 기록](docs/validation-2026-09-16.md)을 따른다.
+- `status`의 memory 필드에 합계·관측 peak·budget이 나온다. PID 재사용은 시작 시각으로 구분한다.
+- `down`은 공개 철회·bounded drain·소유 process group/port 종료 확인 후 전용 Python runtime을 삭제한다.
+- cache는 남는다. 실행/설치 중 `cache clean`은 거부하며 `down --all --purge`는 종료 후 cache도 지운다.
+- `unregister`는 실행을 멈추고 Keychain·등록 설정을 지운다. 서버의 API 키 자체는 폐기하지 않는다.
+- 모델 장애는 최대 3회 재시작한다. transport 복구는 SDK 책임이다. 모델 로그는 profile당 10 MiB × 5개로 회전한다. supervisor 시작·종료 로그는 실행마다 회전해 최근 5개를 유지한다.
+
+## 빌드·검증
+
+```sh
+cd cli
+cargo fmt --all --check
+cargo test --locked
+cargo clippy --all-targets -- -D warnings
+python3 -m unittest discover -s tests -v
+scripts/package-macos.sh
+```
+
+[다운로드·release 절차](docs/distribution.md). PR CI가 tar.gz·SHA256SUMS를 artifact로 제공한다.
+
+[통합 검증 스크립트](scripts/e2e_macos.py)는 native MLX·TLS RelayGate와 로컬 Go 소스의 Compose build를 사용한다.
+테스트 전 Mac의 `say`/`afconvert`, Docker, 별도로 빌드한 RelayGate Gateway가 필요하다.
+
+```sh
+cargo build --locked
+cargo build --manifest-path tests/relay-bridge/Cargo.toml --locked
+# private test venv에 scripts/test-requirements.txt 설치 후:
+python scripts/e2e_macos.py --verify-limits \
+  --openclaw-node /path/to/supported/node \
+  --openclaw-cli /path/to/openclaw/openclaw.mjs
+```
+
+`--cli-binary`로 검증할 CLI를, `--gateway-binary`로 Gateway를 지정할 수 있다. Gateway 경로 기본값은 인접 relaygate checkout의 `target/debug/relaygate-server`다. probe는 published SDK를 사용하는 테스트 전용 caller다.
+OpenClaw 2026.9.4에서 실제 memory index/search와 audio transcribe를 검증했다. [설정 예](docs/openclaw.md).
+운영 namespace/issuer/서버 caller 배선·여러 물리 Mac·launchd·crash 후 자동 orphan 회수는 이 로컬 검증과 별도다.
+MLX embedding은 mlx-embeddings 0.0.5, ASR은 MLX Audio 0.5.4를 사용하며 전이 의존성·모델 revision을 고정한다.

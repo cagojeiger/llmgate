@@ -298,7 +298,7 @@ func TestLoadDir_BadAPI(t *testing.T) {
 	dir := writeCatalogDir(t,
 		map[string]string{"bad.yaml": `id: bad
 vendor: x
-api: embeddings
+api: unknown-surface
 protocol: openai
 base_url: https://example.test/v1
 auth_scheme: bearer

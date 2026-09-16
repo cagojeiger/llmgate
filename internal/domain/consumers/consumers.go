@@ -52,9 +52,10 @@ const (
 // AllowedAliases is an optional allowlist for requested model names, usually
 // operator-defined aliases. Empty means unrestricted.
 type Consumer struct {
-	Name           string   `yaml:"name"`
-	KeyHashes      []string `yaml:"key_hashes"`
-	AllowedAliases []string `yaml:"allowed_aliases,omitempty"`
+	Name                  string   `yaml:"name"`
+	KeyHashes             []string `yaml:"key_hashes"`
+	AllowedAliases        []string `yaml:"allowed_aliases,omitempty"`
+	AllowedWorkerProfiles []string `yaml:"allowed_worker_profiles,omitempty"`
 }
 
 // Store is the runtime view of the consumers directory: an O(1) hash → consumer
@@ -65,9 +66,10 @@ type Store struct {
 }
 
 type LookupResult struct {
-	Name           string
-	KeyID          string
-	AllowedAliases []string
+	Name                  string
+	KeyID                 string
+	AllowedAliases        []string
+	AllowedWorkerProfiles []string
 }
 
 // LoadDir reads every *.yaml / *.yml file under dir and builds a Store.
@@ -130,6 +132,7 @@ func loadFS(fsys fs.FS, label string) (*Store, error) {
 		stored := c
 		stored.KeyHashes = append([]string(nil), c.KeyHashes...)
 		stored.AllowedAliases = append([]string(nil), c.AllowedAliases...)
+		stored.AllowedWorkerProfiles = append([]string(nil), c.AllowedWorkerProfiles...)
 		store.byName[c.Name] = &stored
 
 		for _, h := range stored.KeyHashes {
@@ -177,9 +180,10 @@ func (s *Store) LookupInfo(rawKey string) (LookupResult, bool) {
 		return LookupResult{}, false
 	}
 	return LookupResult{
-		Name:           c.Name,
-		KeyID:          hex.EncodeToString(sum[:keyIDLen/2]),
-		AllowedAliases: append([]string(nil), c.AllowedAliases...),
+		Name:                  c.Name,
+		KeyID:                 hex.EncodeToString(sum[:keyIDLen/2]),
+		AllowedAliases:        append([]string(nil), c.AllowedAliases...),
+		AllowedWorkerProfiles: append([]string(nil), c.AllowedWorkerProfiles...),
 	}, true
 }
 

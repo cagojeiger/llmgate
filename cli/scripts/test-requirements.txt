@@ -1,0 +1,2 @@
+cryptography==46.0.5
+httpx==0.28.1

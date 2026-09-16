@@ -61,6 +61,7 @@ type RouteResult struct {
 type Service struct {
 	byModel      map[string]llmtypes.Provider
 	byTranscribe map[string]llmtypes.TranscriptionProvider
+	byEmbedding  EmbeddingModels
 	aliases      map[string][]string
 	policy       fallbackPolicy
 	log          *slog.Logger
@@ -99,14 +100,10 @@ type candidate struct {
 // NewService builds a Service from already-instantiated providers.
 // The caller is expected to have walked whatever data source it uses
 // (yaml catalog, in-memory config, …) and produced the Models map +
-// Aliases map. An empty Models map fails fast — there is nothing to
-// route to.
+// Aliases map. At least one chat, transcription, or embedding provider is required.
 func NewService(models Models, aliases Aliases, policy FallbackPolicy, log *slog.Logger, opts ...Option) (*Service, error) {
 	if log == nil {
 		log = slog.Default()
-	}
-	if len(models) == 0 {
-		return nil, errors.New("llmrouter: no models registered")
 	}
 
 	byModel := make(map[string]llmtypes.Provider, len(models))
@@ -143,6 +140,9 @@ func NewService(models Models, aliases Aliases, policy FallbackPolicy, log *slog
 	}
 	for _, opt := range opts {
 		opt(svc)
+	}
+	if len(svc.byModel)+len(svc.byTranscribe)+len(svc.byEmbedding) == 0 {
+		return nil, errors.New("llmrouter: no models registered")
 	}
 	return svc, nil
 }

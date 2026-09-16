@@ -47,6 +47,8 @@ type Event struct {
 	// record is a complete, replayable capture.
 	TranscriptionRequest  *llmtypes.TranscriptionRequest  `json:"transcription_request,omitempty"`
 	TranscriptionResponse *llmtypes.TranscriptionResponse `json:"transcription_response,omitempty"`
+	EmbeddingRequest      *llmtypes.EmbeddingRequest      `json:"embedding_request,omitempty"`
+	EmbeddingResponse     *llmtypes.EmbeddingResponse     `json:"embedding_response,omitempty"`
 
 	// Realtime* carry the session-level summary for the /v1/realtime WebSocket
 	// surface. A realtime session is brokered frame-by-frame and its per-turn

@@ -21,12 +21,13 @@ import (
 // commonly unauthenticated, so an empty APIKey sends no Authorization header
 // rather than failing construction the way the chat Client does.
 type TranscriptionConfig struct {
-	BaseURL    string
-	APIKey     string // optional; empty means the upstream is unauthenticated
-	AuthScheme string // bearer | x-api-key; only consulted when APIKey is set
-	UserAgent  string
-	HTTPClient *http.Client
-	Name       string
+	NewConnectionPerRequest bool
+	BaseURL                 string
+	APIKey                  string // optional; empty means the upstream is unauthenticated
+	AuthScheme              string // bearer | x-api-key; only consulted when APIKey is set
+	UserAgent               string
+	HTTPClient              *http.Client
+	Name                    string
 }
 
 // TranscriptionClient adapts an OpenAI-compatible speech-to-text upstream to
@@ -86,6 +87,7 @@ func (c *TranscriptionClient) Transcribe(ctx context.Context, req *llmtypes.Tran
 		return nil, c.badRequest("build request", err)
 	}
 	httpReq.Header.Set("Content-Type", contentType)
+	httpReq.Close = c.cfg.NewConnectionPerRequest
 	httpReq.Header.Set("Accept", "application/json")
 	httpReq.Header.Set("User-Agent", c.cfg.UserAgent)
 	if c.cfg.APIKey != "" {

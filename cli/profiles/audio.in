@@ -1,0 +1,2 @@
+mlx-audio[stt,server]==0.5.4
+httpx==0.28.1

@@ -17,3 +17,6 @@ tests/
 scripts/
 README.md
 *.md
+
+# Native Mac worker source, private test fixtures and model/build caches are not server image input.
+cli/

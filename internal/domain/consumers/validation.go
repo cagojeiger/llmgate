@@ -36,6 +36,13 @@ func validateConsumer(c *Consumer) error {
 		seen[h] = struct{}{}
 	}
 	seenAliases := make(map[string]struct{}, len(c.AllowedAliases))
+	seenProfiles := make(map[string]bool)
+	for _, profile := range c.AllowedWorkerProfiles {
+		if !aliasRule.MatchString(profile) || seenProfiles[profile] {
+			return fmt.Errorf("consumer %q: invalid or duplicate worker profile %q", c.Name, profile)
+		}
+		seenProfiles[profile] = true
+	}
 	for _, alias := range c.AllowedAliases {
 		if !aliasRule.MatchString(alias) {
 			return fmt.Errorf("consumer %q: allowed_alias %q must match %s", c.Name, alias, aliasRule.String())

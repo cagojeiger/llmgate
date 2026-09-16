@@ -1,5 +1,14 @@
 mod limits;
 // Minimal observation/clock surface used by the production bridge test.
+mod logs {
+    #[derive(Clone)]
+    pub struct Logger;
+    impl Logger {
+        pub fn event(&self, event: &'static str) {
+            eprintln!("{event}");
+        }
+    }
+}
 mod lifecycle {
     pub struct State {
         pub publish: String,

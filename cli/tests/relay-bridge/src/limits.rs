@@ -31,6 +31,7 @@ pub async fn verify() -> anyhow::Result<()> {
         Duration::from_secs(30),
         state.clone(),
         stop.clone(),
+        crate::logs::Logger,
     ));
     let outcome = async {
         timeout(Duration::from_secs(10), async {

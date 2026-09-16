@@ -54,11 +54,9 @@ func buildRouterInputs(cat *catalog.Catalog, factories routerFactories) (routing
 	transcribers := make(routing.TranscriptionModels)
 	for id, m := range cat.Models {
 		switch m.API {
-		case catalog.APIRealtime:
-			// Realtime models are not routed through the circuit-breaker
-			// Service: the /v1/realtime WS handler resolves them straight from
-			// the catalog and brokers the session frame-by-frame. So they build
-			// no chat/transcription provider here and are simply skipped.
+		case catalog.APIRealtime, catalog.APIEmbeddings:
+			// Realtime resolves in its WebSocket handler; embeddings are built
+			// separately by buildEmbeddingModels. Neither is a chat provider.
 			continue
 		case catalog.APITranscription:
 			f, ok := factories.transcription[m.Protocol]
@@ -122,10 +120,11 @@ func openaiTranscriptionFactory(m *catalog.Model) (llmtypes.TranscriptionProvide
 		apiKey = ""
 	}
 	return openai.NewTranscription(openai.TranscriptionConfig{
-		BaseURL:    m.BaseURL,
-		APIKey:     apiKey,
-		AuthScheme: m.AuthScheme,
-		Name:       m.Vendor,
+		NewConnectionPerRequest: m.NewConnectionPerRequest,
+		BaseURL:                 m.BaseURL,
+		APIKey:                  apiKey,
+		AuthScheme:              m.AuthScheme,
+		Name:                    m.Vendor,
 	})
 }
 

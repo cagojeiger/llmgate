@@ -61,7 +61,7 @@ func validateModel(m *Model) error {
 		// local STT server on the pod network), so an empty scheme is allowed
 		// there. Chat models always front a credentialed vendor, so the scheme
 		// stays mandatory for them.
-		if m.API != APITranscription && m.API != APIRealtime {
+		if m.API != APITranscription && m.API != APIRealtime && m.API != APIEmbeddings {
 			return fmt.Errorf("model %q: auth_scheme is required", m.ID)
 		}
 	default:

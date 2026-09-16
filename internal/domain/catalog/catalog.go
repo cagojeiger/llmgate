@@ -50,14 +50,15 @@ type Model struct {
 	ID       string            `yaml:"id"`
 	Vendor   string            `yaml:"vendor"`
 	Protocol llmtypes.Protocol `yaml:"protocol"` // see llmtypes.Protocol consts
-	// API is the invocation surface (chat | transcription). Empty defaults to
+	// API is the invocation surface (chat | transcription | realtime | embeddings). Empty defaults to
 	// chat, so every existing model file keeps working untouched.
-	API        API                 `yaml:"api,omitempty"`
-	BaseURL    string              `yaml:"base_url"`
-	AuthEnv    string              `yaml:"auth_env"`             // env var *name*; empty defaults to LLMGATE_<VENDOR>_API_KEY
-	AuthScheme string              `yaml:"auth_scheme"`          // bearer | x-api-key
-	ExtraBody  map[string]any      `yaml:"extra_body,omitempty"` // default extra parameters to include in request body
-	Cost       *llmtypes.ModelCost `yaml:"cost,omitempty"`       // USD per one million tokens
+	API                     API                 `yaml:"api,omitempty"`
+	NewConnectionPerRequest bool                `yaml:"new_connection_per_request,omitempty"`
+	BaseURL                 string              `yaml:"base_url"`
+	AuthEnv                 string              `yaml:"auth_env"`             // env var *name*; empty defaults to LLMGATE_<VENDOR>_API_KEY
+	AuthScheme              string              `yaml:"auth_scheme"`          // bearer | x-api-key
+	ExtraBody               map[string]any      `yaml:"extra_body,omitempty"` // default extra parameters to include in request body
+	Cost                    *llmtypes.ModelCost `yaml:"cost,omitempty"`       // USD per one million tokens
 }
 
 // Alias maps a logical name (e.g. "smart") to an ordered list of concrete
@@ -80,15 +81,20 @@ func LoadDir(dir string) (*Catalog, error) {
 
 // Load returns the catalog at LLMGATE_CATALOG (a directory path) or from
 // cwd's ./catalog when the env is unset.
-func Load() (*Catalog, error) {
+func Load() (*Catalog, error) { return LoadWithDefaults(nil) }
+
+// LoadWithDefaults combines operator YAML with application-provided model data.
+func LoadWithDefaults(defaults *Catalog) (*Catalog, error) {
 	dir := os.Getenv("LLMGATE_CATALOG")
 	if dir == "" {
 		dir = defaultDir
 	}
-	return LoadDir(dir)
+	return loadFSDefaults(os.DirFS(dir), defaults)
 }
 
-func loadFS(fsys fs.FS) (*Catalog, error) {
+func loadFS(fsys fs.FS) (*Catalog, error) { return loadFSDefaults(fsys, nil) }
+
+func loadFSDefaults(fsys fs.FS, defaults *Catalog) (*Catalog, error) {
 	cat := &Catalog{
 		Models:  make(map[string]*Model),
 		Aliases: make(map[string]*Alias),
@@ -109,6 +115,9 @@ func loadFS(fsys fs.FS) (*Catalog, error) {
 		cat.Models[key] = &m
 		return nil
 	}); err != nil {
+		return nil, err
+	}
+	if err := addDefaultModels(cat, defaults); err != nil {
 		return nil, err
 	}
 	if len(cat.Models) == 0 {
@@ -148,5 +157,8 @@ func loadFS(fsys fs.FS) (*Catalog, error) {
 		return nil, err
 	}
 
+	if err := addDefaultAliases(cat, defaults); err != nil {
+		return nil, err
+	}
 	return cat, nil
 }

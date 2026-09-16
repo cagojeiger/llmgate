@@ -38,12 +38,13 @@ func classifyError(name string, status int, body []byte, retryAfterHeader string
 	kind := kindFromOpenAIError(status, env)
 
 	return &llmtypes.Error{
-		Kind:       kind,
-		Provider:   name,
-		Message:    upstream.PublicProviderMessage(kind, message),
-		StatusCode: status,
-		RetryAfter: upstream.ParseRetryAfter(retryAfterHeader),
-		Raw:        upstream.FirstBytes(body),
+		WorkerCapacity: status == http.StatusTooManyRequests && env.Type == "worker_capacity",
+		Kind:           kind,
+		Provider:       name,
+		Message:        upstream.PublicProviderMessage(kind, message),
+		StatusCode:     status,
+		RetryAfter:     upstream.ParseRetryAfter(retryAfterHeader),
+		Raw:            upstream.FirstBytes(body),
 	}
 }
 

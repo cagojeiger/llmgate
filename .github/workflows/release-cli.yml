@@ -1,0 +1,61 @@
+name: release CLI
+
+on:
+  push:
+    tags: ['cli-v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: cli
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate version and code
+        run: |
+          version=$(awk -F '"' '/^version = / {print $2; exit}' Cargo.toml)
+          test "$RELEASE_TAG" = "cli-v$version"
+          cargo fmt --all --check
+          cargo build --locked
+          cargo test --locked
+          cargo clippy --all-targets -- -D warnings
+          python3 -m unittest discover -s tests -v
+      - name: Import optional Developer ID
+        if: env.APPLE_SIGNING_IDENTITY != ''
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+        run: |
+          umask 077
+          test -n "$APPLE_CERTIFICATE_BASE64"
+          test -n "$KEYCHAIN_PASSWORD"
+          printf '%s' "$APPLE_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/cli-signing.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$RUNNER_TEMP/cli-signing.keychain-db"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$RUNNER_TEMP/cli-signing.keychain-db"
+          security import "$RUNNER_TEMP/cli-signing.p12" -k "$RUNNER_TEMP/cli-signing.keychain-db" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$RUNNER_TEMP/cli-signing.keychain-db"
+          security list-keychains -d user -s "$RUNNER_TEMP/cli-signing.keychain-db" login.keychain-db
+      - name: Package
+        run: scripts/package-macos.sh
+      - name: Create reviewable draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$RELEASE_TAG" dist/*.tar.gz dist/SHA256SUMS \
+            --verify-tag --draft --title "$RELEASE_TAG" --notes-file docs/release-notes.md
+      - name: Remove signing material
+        if: always()
+        run: |
+          if test -f "$RUNNER_TEMP/cli-signing.keychain-db"; then
+            security delete-keychain "$RUNNER_TEMP/cli-signing.keychain-db"
+          fi
+          rm -f "$RUNNER_TEMP/cli-signing.p12"

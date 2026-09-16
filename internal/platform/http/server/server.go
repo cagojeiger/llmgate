@@ -15,14 +15,16 @@ import (
 )
 
 type ServerOptions struct {
-	Config          *config.Server
-	Log             *slog.Logger
-	Handler         http.Handler
-	AudioHandler    http.Handler
-	RealtimeHandler http.Handler
-	Consumers       *consumers.Store
-	Probe           *httpprobe.State
-	MetricsHandler  http.Handler
+	Config             *config.Server
+	Log                *slog.Logger
+	Handler            http.Handler
+	AudioHandler       http.Handler
+	RealtimeHandler    http.Handler
+	EmbeddingHandler   http.Handler
+	WorkerTokenHandler http.Handler
+	Consumers          *consumers.Store
+	Probe              *httpprobe.State
+	MetricsHandler     http.Handler
 }
 
 func New(cfg *config.Server, log *slog.Logger, h http.Handler, store *consumers.Store, probe *httpprobe.State) *http.Server {
@@ -79,6 +81,12 @@ func NewWithOptions(opts ServerOptions) *http.Server {
 		r.Group(func(r chi.Router) {
 			r.Use(httpauth.Middleware(store))
 			r.Post("/v1/chat/completions", h.ServeHTTP)
+			if opts.WorkerTokenHandler != nil {
+				r.Post("/v1/workers/token", opts.WorkerTokenHandler.ServeHTTP)
+			}
+			if opts.EmbeddingHandler != nil {
+				r.Post("/v1/embeddings", opts.EmbeddingHandler.ServeHTTP)
+			}
 			if opts.AudioHandler != nil {
 				r.Post("/v1/audio/transcriptions", opts.AudioHandler.ServeHTTP)
 			}

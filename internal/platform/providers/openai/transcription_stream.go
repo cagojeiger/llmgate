@@ -39,6 +39,7 @@ func (c *TranscriptionClient) TranscribeStream(ctx context.Context, req *llmtype
 		return nil, c.badRequest("build request", err)
 	}
 	httpReq.Header.Set("Content-Type", contentType)
+	httpReq.Close = c.cfg.NewConnectionPerRequest
 	httpReq.Header.Set("Accept", "text/event-stream")
 	httpReq.Header.Set("User-Agent", c.cfg.UserAgent)
 	if c.cfg.APIKey != "" {

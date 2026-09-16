@@ -1,0 +1,57 @@
+name: cli
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: macOS CLI
+    runs-on: macos-15
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v7
+      - name: Rust checks
+        run: |
+          cargo fmt --all --check
+          cargo build --locked
+          cargo test --locked
+          cargo clippy --all-targets -- -D warnings
+      - name: Request and resource boundaries
+        run: python3 -m unittest discover -s tests -v
+      - name: Published SDK probe
+        run: |
+          cargo fmt --manifest-path tests/relay-bridge/Cargo.toml --check
+          cargo test --manifest-path tests/relay-bridge/Cargo.toml --locked
+          cargo clippy --manifest-path tests/relay-bridge/Cargo.toml --all-targets -- -D warnings
+      - name: Build download package
+        run: scripts/package-macos.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: llmgate-cli-macos-arm64
+          path: cli/dist/*
+          if-no-files-found: error
+
+  caller:
+    name: Server caller
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: caller
+    steps:
+      - uses: actions/checkout@v7
+      - name: Rust checks
+        run: |
+          cargo fmt --all --check
+          cargo test --locked
+          cargo clippy --locked --all-targets -- -D warnings
+      - name: Build server sidecar
+        run: docker build -t llmgate-caller:ci .

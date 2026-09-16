@@ -1,6 +1,6 @@
 # ADR 003: 호출자 인증은 consumers 디렉토리와 해시 키로만 처리한다
 
-- Status: Accepted
+- Status: Superseded by [ADR 010](010-worker-operation-token.md). 기존 caller 인증은 유지하고 worker operation token 발급 경계를 추가한다.
 - Date: 2026-05-03
 - 관련: 000, 001, 002
 

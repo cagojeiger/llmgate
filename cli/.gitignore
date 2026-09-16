@@ -1,0 +1,9 @@
+/target
+/.local
+.local-*.log
+__pycache__/
+*.pyc
+
+/dist/
+
+/tests/relay-bridge/target

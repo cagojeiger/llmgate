@@ -1,0 +1,25 @@
+[package]
+name = "llmgate-caller"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96.1"
+publish = false
+
+[dependencies]
+anyhow = "1"
+relaygate-sdk = "=0.5.1"
+relaygate-token-issuer = "=0.5.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+
+[dev-dependencies]
+tempfile = "3"
+p256 = { version = "0.13", features = ["pem"] }
+
+[profile.release]
+strip = true
+
+[lints.rust]
+unsafe_code = "forbid"

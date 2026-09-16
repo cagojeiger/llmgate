@@ -70,6 +70,6 @@ allowed_aliases:
 데이터 / 정책 / 코드가 세 자리에 산다 — yaml = 운영 데이터, env = 인프라·시크릿, 코드 = 알고리즘.
 
 - **catalog**: 별명 호출만 chain 폴백 (raw model id 호출은 chain 길이 1, 폴백 발동 자체 없음). `extra_body` 는 모델별 기본 request body extra 이며 호출자 요청 값이 우선한다. 모르는 필드 → 부팅 fail. 결정 근거 [ADR 002](adr/002-catalog-shape.md).
-- **consumers**: `scripts/gen-consumer.sh` 가 raw 키 발급 → sha256 만 yaml 에 박음. multi-key 활성 가능 (회전 윈도우). `allowed_aliases` 가 비어 있으면 unrestricted, 값이 있으면 요청 `model` 이 그 목록에 있어야 한다. 부재 / 빈 디렉토리 → 부팅 fail (닫힘 default). 결정 근거 [ADR 003](adr/003-consumers.md).
+- **consumers**: `scripts/gen-consumer.sh` 가 raw 키 발급 → sha256 만 yaml 에 박음. multi-key 활성 가능 (회전 윈도우). `allowed_aliases` 가 비어 있으면 unrestricted, 값이 있으면 요청 `model` 이 그 목록에 있어야 한다. 부재 / 빈 디렉토리 → 부팅 fail (닫힘 default). worker 등록은 별도 `allowed_worker_profiles: [embedding, stt]` 허용 목록을 사용하며 미설정이면 거부한다. 결정 근거 [ADR 010](adr/010-worker-operation-token.md).
 - **OpenCode Go session**: 호출자가 `x-opencode-session` 을 보내면 `vendor: opencode` 모델의 upstream 요청에만 전달한다. 같은 대화의 후속 호출·도구 호출·재시도에는 같은 값을 사용해야 하며, 값이 없을 때 게이트웨이가 요청별 임의 ID를 만들지 않는다.
 - **비용 확장 필드**: upstream 이 응답 최상위 `cost` 를 양수 숫자 또는 숫자 문자열로 보고하면 OpenAI 호환 응답의 `usage.cost` 에 숫자로 함께 싣는다. OpenAI 표준 필드는 아니지만 OpenClaw 같은 호출자가 비용을 토큰 사용량과 함께 보존할 수 있다. upstream 이 비용을 누락하거나 `0` 으로 보고하고 모델에 `cost` 단가가 있으면 토큰 사용량으로 근사하며, 이 경우 `usage.cost_source` 는 `catalog_estimate` 다. 카탈로그 단가는 USD/100만 토큰이고 운영자가 upstream 가격 변경에 맞춰 갱신한다.

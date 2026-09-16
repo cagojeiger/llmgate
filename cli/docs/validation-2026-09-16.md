@@ -14,7 +14,7 @@ LLMGate 소스의 Docker Compose build → 서버 Caller sidecar → TLS RelayGa
 | embedding 경계 | 2048토큰 성공 / 2049 거부, batch 8192 성공 / 10240 거부 |
 | STT 경계 | 60초 성공 / 61초 3회 연속 400, prompt 257토큰 400 |
 | 공유 추론 lock | embedding·STT 각각 다른 추론 점유 시 429 |
-| 메모리 | 두 모델·Rust supervisor 합산 peak 3,052,523,600 bytes ≈ 2.84 GiB (경계값 테스트) |
+| 메모리 | 두 모델·Rust supervisor 합산 peak 2,955,710,400 bytes ≈ 2.75 GiB (경계값 테스트) |
 | 연결·복구 | max_connections=1의 추가 Pipe 거부, TTL 60초 만료 후 호출·Gateway 재시작 후 재공개/호출 성공 |
 | 종료 | down 후 runtime 삭제·port 종료, unregister 후 credential·등록 설정 제거 |
 
@@ -38,7 +38,7 @@ OpenClaw는 임시 state/config를 사용했고 WAV 파일을 호출했다. OGG/
 - Go: go test -race ./..., go vet ./..., golangci-lint 0 issues, govulncheck 호출 가능한 취약점 없음.
 - Cassette E2E: 25 passed, 29 skipped. 모델 유형별 skip이며 전부 실행한 것으로 계산하지 않는다.
 - Rust: fmt/check/test/clippy, published SDK probe build/clippy.
-- Python: 기존 경계 5개 + 실제 CLI 프로세스의 강제 종료·lease 보존·busy readiness·legacy receipt 보존 4개, 합계 9개 테스트.
+- Python: 기존 경계 5개 + 실제 CLI 프로세스의 강제 종료·lease 보존·busy/proxy readiness·legacy receipt 보존 4개, 합계 9개 테스트.
 - 배포 package: arm64 release build, --version, tar.gz와 SHA256SUMS 확인. 압축에서 추출한 release 바이너리로 실제 추론·경계값·OpenClaw·종료를 재검증했다.
 
 실행 코드: [e2e_macos.py](../scripts/e2e_macos.py), [verify_limits.py](../scripts/verify_limits.py), [verify_openclaw.py](../scripts/verify_openclaw.py).
@@ -47,4 +47,4 @@ OpenClaw는 임시 state/config를 사용했고 WAV 파일을 호출했다. OGG/
 운영 namespace/issuer/Secret의 실제 배포, 여러 물리 Mac/Gateway, launchd 자동 시작, Developer ID 서명·notarization은 이 검증에 포함하지 않는다.
 서버 Caller는 구현·Compose 검증에 포함한다. supervisor SIGKILL은 모델의 생존 pipe로 종료하며, guardian이 멈춘 경우 상속 lease로 재시작·설치·삭제를 차단한다. 오래된 unclean receipt는 자동 덮어쓰지 않는다.
 
-검증한 tar.gz SHA-256: `489488760cbc081ba6445253179cd62b6d4bbebaa9f040cfcb3e5964eb40a59b`. CI에서 새로 빌드한 파일은 별도 SHA256SUMS를 따른다.
+검증한 tar.gz SHA-256: `f9e3ccf495c2befbc80f6f89c98aecf2a365de5a42f9ce4646e18a656f89d238`. CI에서 새로 빌드한 파일은 별도 SHA256SUMS를 따른다.

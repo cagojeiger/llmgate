@@ -9,6 +9,7 @@ import mlx.core as mx
 import numpy as np
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from mlx_embeddings.utils import load
 
 from http_limits import BodyLimit
@@ -47,7 +48,7 @@ app.add_middleware(BodyLimit, limit=256 * 1024)
 
 @app.get('/health')
 async def health():
-    return {'ready': MODEL is not None}
+    return {'ready': MODEL is not None and CAPACITY.healthy()}
 
 
 @app.get('/v1/models')
@@ -113,7 +114,7 @@ async def embeddings(request: Request):
     try:
         await CAPACITY.acquire()
     except Busy as exc:
-        raise HTTPException(429, str(exc), headers={'Retry-After': '1'}) from None
+        return JSONResponse({"error": {"type": "worker_capacity", "message": str(exc)}}, status_code=429, headers={"Retry-After": "1"})
     try:
         try:
             body = await request.json()
@@ -121,19 +122,18 @@ async def embeddings(request: Request):
             raise HTTPException(400, 'invalid JSON') from None
         if not isinstance(body, dict):
             raise HTTPException(400, 'expected JSON object')
-        # Keep admission until the worker really finishes, even if the HTTP client leaves.
-        task = asyncio.get_running_loop().run_in_executor(EXECUTOR, embed, body)
-        try:
-            return await asyncio.shield(task)
-        except asyncio.CancelledError:
-            await task
-            raise
+    except BaseException:
+        CAPACITY.release()
+        raise
+    # Only the executor completion callback returns the slot, including repeated cancellation.
+    task = CAPACITY.submit(EXECUTOR, embed, body)
+    try:
+        return await asyncio.shield(task)
     except Busy:
-        raise HTTPException(429, 'model busy', headers={'Retry-After': '1'}) from None
+        return JSONResponse({"error": {"type": "worker_capacity", "message": "model busy"}}, status_code=429, headers={"Retry-After": "1"})
     except MemoryPressure:
         raise HTTPException(503, 'local memory emergency guard reached') from None
-    finally:
-        CAPACITY.release()
+
 
 
 if __name__ == '__main__':

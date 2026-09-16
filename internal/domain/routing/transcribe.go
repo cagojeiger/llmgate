@@ -80,7 +80,7 @@ func (r *Service) Transcribe(ctx context.Context, req *llmtypes.TranscriptionReq
 		result.ModelUsed = candidate.model
 		lastErr = err
 
-		if !r.fallbackEligible(att.Kind) {
+		if llmtypes.IsWorkerCapacity(err) || !r.fallbackEligible(att.Kind) {
 			return result, err
 		}
 		r.breakers.recordFailure(candidate.model)
@@ -154,7 +154,7 @@ func (r *Service) finalizeTranscribeStreamFailure(result *TranscribeResult, cand
 	result.Vendor = candidate.provider.Name()
 	result.ModelUsed = candidate.model
 
-	if !r.fallbackEligible(att.Kind) {
+	if llmtypes.IsWorkerCapacity(err) || !r.fallbackEligible(att.Kind) {
 		return err
 	}
 	r.breakers.recordFailure(candidate.model)

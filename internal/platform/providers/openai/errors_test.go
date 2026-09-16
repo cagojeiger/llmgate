@@ -108,3 +108,20 @@ func TestClassify_UpstreamMessageSanitizedPreservesRaw(t *testing.T) {
 // rather than a synthesized "missing [DONE]" error. This keeps the
 // SSE reader interoperable with vendors (Anthropic) that don't emit
 // `[DONE]` at all.
+
+func TestWorkerCapacityMarkerIsNarrow(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		body   string
+		want   bool
+	}{
+		{429, `{"error":{"type":"worker_capacity","message":"busy"}}`, true},
+		{429, `{"error":{"type":"rate_limit","message":"quota"}}`, false},
+		{503, `{"error":{"type":"worker_capacity","message":"broken"}}`, false},
+	} {
+		err := classifyError("worker", tc.status, []byte(tc.body), "1")
+		if got := llmtypes.IsWorkerCapacity(err); got != tc.want {
+			t.Fatalf("marker=%v want %v", got, tc.want)
+		}
+	}
+}

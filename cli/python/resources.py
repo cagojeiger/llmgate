@@ -69,6 +69,8 @@ class RequestCapacity:
         self.limit, self.timeout = limit, timeout
         self.pending = 0
         self.lock = asyncio.Lock()
+        self.started = None
+        self.overdue_reported = False
 
     async def acquire(self):
         if self.pending >= self.limit:
@@ -77,13 +79,39 @@ class RequestCapacity:
         try:
             async with asyncio.timeout(self.timeout):
                 await self.lock.acquire()
+                self.started = time.monotonic()
+                self.overdue_reported = False
         except BaseException as exc:
             self.pending -= 1
             if isinstance(exc, TimeoutError):
                 raise Busy("model queue wait exceeded 5 seconds") from None
             raise
 
+    def healthy(self):
+        # Rust polls this endpoint independently and terminates the process group.
+        healthy = self.started is None or time.monotonic() - self.started < 120
+        if not healthy and not self.overdue_reported:
+            self.overdue_reported = True
+            os.write(2, f"{int(time.time())} inference_timeout\n".encode())
+        return healthy
+
+    def submit(self, executor, function, *args):
+        """Transfer slot ownership to actual work, independent of HTTP cancellation."""
+        try:
+            future = asyncio.get_running_loop().run_in_executor(executor, function, *args)
+        except BaseException:
+            self.release()
+            raise
+        def completed(done):
+            self.release()
+            # Retrieve failures even when the client has already disconnected.
+            if not done.cancelled():
+                done.exception()
+        future.add_done_callback(completed)
+        return future
+
     def release(self):
+        self.started = None
         self.pending -= 1
         self.lock.release()
 

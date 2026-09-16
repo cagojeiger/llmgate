@@ -91,7 +91,7 @@ pub async fn stop(home: &Home, p: Profile) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn run(
+async fn run_inner(
     home: Home,
     p: Profile,
     opts: StartOptions,
@@ -103,6 +103,10 @@ pub async fn run(
     let installed = install::load(&home, p)?;
     let mut grant_config = None;
     if !opts.local_only {
+        crate::logs::supervisor_event(
+            home.0.join(format!("logs/{}-supervisor.log", p.id())),
+            "worker_auth_start",
+        )?;
         let registration: Registration = home.read("registration.json")?;
         ensure!(registration.profiles.contains(&p), "profile not registered");
         let client = broker::client(&registration)?;
@@ -231,6 +235,10 @@ async fn supervise(
             s.restarts = attempt;
             home.write(&format!("control/{}.json", p.id()), &*s)?;
         }
+        crate::logs::supervisor_event(
+            home.0.join(format!("logs/{}-supervisor.log", p.id())),
+            "model_start",
+        )?;
         let mut model = ModelProcess::launch(home, p, installed, port, log)?;
         let began = tokio::time::Instant::now();
         let mut ready = false;
@@ -250,6 +258,10 @@ async fn supervise(
         let mut publishing = None;
         if ready && !stop.is_cancelled() {
             state.lock().await.runtime = "ready".into();
+            crate::logs::supervisor_event(
+                home.0.join(format!("logs/{}-supervisor.log", p.id())),
+                "model_ready",
+            )?;
             if let Some((sdk, dest, token)) = &grant {
                 publishing = Some(tokio::spawn(crate::relay::publish(
                     (sdk.clone(), dest.clone(), token.clone()),
@@ -258,6 +270,7 @@ async fn supervise(
                     Duration::from_secs(opts.connection_timeout as u64),
                     state.clone(),
                     published_stop.clone(),
+                    log.clone(),
                 )));
             }
             let mut health = tokio::time::interval(Duration::from_secs(10));
@@ -266,7 +279,10 @@ async fn supervise(
                     _=stop.cancelled()=>break,
                     _=model.child.wait()=>break,
                     _=health.tick()=>{
-                        if !process::ready(client,p,port).await{break}
+                        if !process::ready(client,p,port).await{
+                            let _ = crate::logs::supervisor_event(home.0.join(format!("logs/{}-supervisor.log",p.id())), "model_health_failed");
+                            break
+                        }
                         let mut s=state.lock().await;s.dropped_log_chunks=log.dropped.load(Ordering::Relaxed);home.write(&format!("control/{}.json",p.id()),&*s)?;
                     }
                 }
@@ -289,11 +305,46 @@ async fn supervise(
             return Ok(());
         }
         state.lock().await.runtime = "unhealthy".into();
-        log.message(b"model unavailable; bounded restart\n");
+        let _ = crate::logs::supervisor_event(
+            home.0.join(format!("logs/{}-supervisor.log", p.id())),
+            "model_restart",
+        );
         if opts.port.is_some() && !ready {
             anyhow::bail!("model startup failed; inspect profile log")
         }
         tokio::select! {_=stop.cancelled()=>return Ok(()),_=sleep(Duration::from_secs(1<<attempt))=>{}}
     }
     anyhow::bail!("model restart budget exhausted; inspect profile log")
+}
+
+// Keep lifecycle diagnostics bounded and free of raw token/provider errors.
+pub async fn run(
+    home: Home,
+    p: Profile,
+    opts: StartOptions,
+    stop: CancellationToken,
+) -> anyhow::Result<()> {
+    let path = home.0.join(format!("logs/{}-supervisor.log", p.id()));
+    crate::logs::supervisor_event(path.clone(), "supervisor_start")?;
+    let result = run_inner(home, p, opts, stop).await;
+    if let Err(error) = &result
+        && let Some(rejected) = error.downcast_ref::<crate::broker::GrantRejected>()
+    {
+        let _ = crate::logs::supervisor_event(
+            path.clone(),
+            &format!(
+                "worker_auth_rejected http_status={} action=check_key_and_worker_permissions",
+                rejected.status
+            ),
+        );
+    }
+    let event = if result.is_ok() {
+        "supervisor_stopped"
+    } else {
+        "supervisor_failed"
+    };
+    if crate::logs::supervisor_event(path, event).is_err() {
+        eprintln!("supervisor_log_write_failed");
+    }
+    result
 }

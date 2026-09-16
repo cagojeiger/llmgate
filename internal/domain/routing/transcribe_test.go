@@ -190,3 +190,25 @@ func TestService_Transcribe_PropagatesProviderError(t *testing.T) {
 		t.Errorf("attempts = %+v, want one upstream attempt", result.Attempts)
 	}
 }
+
+func TestWorkerCapacityDoesNotOpenTranscriptionCircuit(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		tr := &fakeTranscriber{name: "worker", err: &llmtypes.Error{Kind: llmtypes.KindRateLimit, StatusCode: 429, WorkerCapacity: true}}
+		svc := newTranscribeService(t, TranscriptionModels{"qwen-asr": tr})
+		for i := 0; i < 5; i++ {
+			req := &llmtypes.TranscriptionRequest{Model: "stt", Audio: []byte("data")}
+			var err error
+			if stream {
+				_, err = svc.TranscribeStream(context.Background(), req)
+			} else {
+				_, err = svc.Transcribe(context.Background(), req)
+			}
+			if !llmtypes.IsWorkerCapacity(err) {
+				t.Fatalf("request %d: %v", i, err)
+			}
+		}
+		if svc.breakers.isOpen("qwen-asr") || tr.calls != 5 {
+			t.Fatal("capacity opened circuit")
+		}
+	}
+}

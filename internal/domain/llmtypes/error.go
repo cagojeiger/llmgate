@@ -26,13 +26,15 @@ const (
 )
 
 type Error struct {
-	Kind       ErrorKind
-	Provider   string
-	Message    string
-	StatusCode int
-	RetryAfter time.Duration
-	Cause      error
-	Raw        []byte
+	// WorkerCapacity marks a healthy worker rejecting excess concurrent work.
+	WorkerCapacity bool
+	Kind           ErrorKind
+	Provider       string
+	Message        string
+	StatusCode     int
+	RetryAfter     time.Duration
+	Cause          error
+	Raw            []byte
 }
 
 func (e *Error) Error() string {
@@ -137,4 +139,10 @@ func StampProvider(err error, name string) error {
 	stamped := *perr
 	stamped.Provider = name
 	return &stamped
+}
+
+// IsWorkerCapacity preserves ordinary provider rate-limit policy.
+func IsWorkerCapacity(err error) bool {
+	var e *Error
+	return errors.As(err, &e) && e.WorkerCapacity && e.StatusCode == 429
 }

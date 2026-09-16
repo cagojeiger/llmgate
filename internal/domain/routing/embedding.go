@@ -65,7 +65,7 @@ func (r *Service) Embed(ctx context.Context, req *llmtypes.EmbeddingRequest) (*E
 	result.Vendor, result.ModelUsed = provider.Name(), model
 	if err != nil {
 		att.Kind, att.StatusCode = llmtypes.ErrorKindOf(err), llmtypes.StatusCodeOf(err)
-		if r.fallbackEligible(att.Kind) {
+		if r.fallbackEligible(att.Kind) && !llmtypes.IsWorkerCapacity(err) {
 			r.breakers.recordFailure(model)
 		}
 	} else {

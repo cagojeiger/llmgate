@@ -49,7 +49,7 @@ app.add_middleware(BodyLimit, limit=6 * 1024 * 1024)
 
 @app.get("/health")
 async def health():
-    return {"ready": MODEL is not None}
+    return {"ready": MODEL is not None and CAPACITY.healthy()}
 
 
 @app.get("/v1/models")
@@ -98,33 +98,21 @@ async def transcribe(
     try:
         await CAPACITY.acquire()
     except Busy as exc:
-        raise HTTPException(429, str(exc), headers={"Retry-After": "1"}) from None
-    lease = admission()
+        return JSONResponse({"error": {"type": "worker_capacity", "message": str(exc)}}, status_code=429, headers={"Retry-After": "1"})
     try:
-        lease.__enter__()
-    except (Busy, MemoryPressure) as exc:
-        CAPACITY.release()
-        raise HTTPException(429 if isinstance(exc, Busy) else 503, str(exc)) from None
-    try:
-        raw = await file.read(5 * 1024 * 1024 + 1)
-        if len(raw) > 5 * 1024 * 1024:
-            raise HTTPException(413, "audio upload too large")
-        if prompt and (len(prompt) > 8192 or len(MODEL._tokenizer.encode(prompt)) > 256):
-            raise HTTPException(400, "prompt exceeds 256 tokens")
-        if language and len(language) > 64:
-            raise HTTPException(400, "invalid language")
-        decoding = asyncio.get_running_loop().run_in_executor(EXECUTOR, decode_audio, raw)
         try:
-            audio = await asyncio.shield(decoding)
-        except asyncio.CancelledError:
-            await decoding
-            raise
+            raw = await file.read(5 * 1024 * 1024 + 1)
+            if len(raw) > 5 * 1024 * 1024:
+                raise HTTPException(413, "audio upload too large")
+            if prompt and (len(prompt) > 8192 or len(MODEL._tokenizer.encode(prompt)) > 256):
+                raise HTTPException(400, "prompt exceeds 256 tokens")
+            if language and len(language) > 64:
+                raise HTTPException(400, "invalid language")
+        finally:
+            await file.close()
     except BaseException:
-        lease.__exit__(None, None, None)
         CAPACITY.release()
         raise
-    finally:
-        await file.close()
     loop = asyncio.get_running_loop()
     queue = asyncio.Queue(maxsize=32)
     cancelled = threading.Event()
@@ -144,36 +132,46 @@ async def transcribe(
 
     def infer():
         try:
-            kwargs = dict(max_tokens=1024, language=language, verbose=False, chunk_duration=30.0)
-            if prompt:
-                kwargs["system_prompt"] = prompt
-            if stream:
-                text = []
-                for chunk in MODEL.stream_transcribe(audio, **kwargs):
-                    if cancelled.is_set():
-                        break
-                    if chunk.text:
-                        text.append(chunk.text)
-                        if not emit({"type": "transcript.text.delta", "delta": chunk.text}):
-                            break
-                if chunk.generation_tokens >= 1024:
-                    raise ValueError("transcription output limit reached")
-                emit({"type": "transcript.text.done", "text": "".join(text)})
-            else:
-                result = MODEL.generate(audio, **kwargs)
-                if result.generation_tokens >= 1024:
-                    raise ValueError("transcription output limit reached")
-                emit({"text": result.text})
+            with admission():
+                try:
+                    audio = decode_audio(raw)
+                    kwargs = dict(max_tokens=1024, language=language, verbose=False, chunk_duration=30.0)
+                    if prompt:
+                        kwargs["system_prompt"] = prompt
+                    if stream:
+                        if not emit({"ready": True}):
+                            return
+                        text, tokens = [], 0
+                        for chunk in MODEL.stream_transcribe(audio, **kwargs):
+                            if cancelled.is_set():
+                                return
+                            tokens = chunk.generation_tokens
+                            if chunk.text:
+                                text.append(chunk.text)
+                                if not emit({"type": "transcript.text.delta", "delta": chunk.text}):
+                                    return
+                        result = {"type": "transcript.text.done", "text": "".join(text)}
+                    else:
+                        output = MODEL.generate(audio, **kwargs)
+                        tokens = output.generation_tokens
+                        result = {"text": output.text}
+                    if tokens >= 1024:
+                        raise ValueError("transcription output limit reached")
+                finally:
+                    mx.clear_cache()
+            emit(result)
+        except HTTPException as exc:
+            emit({"error": {"message": exc.detail, "type": "invalid_request_error"}, "status": exc.status_code})
+        except (Busy, MemoryPressure) as exc:
+            emit({"error": {"message": str(exc), "type": "worker_capacity" if isinstance(exc, Busy) else "upstream_error"},
+                  "status": 429 if isinstance(exc, Busy) else 503})
         except Exception:
-            # Audio or prompt contents must not escape through traceback logs.
+            # Never include audio, prompt, or library exception contents in logs.
             emit({"error": {"message": "local transcription failed", "type": "upstream_error"}})
         finally:
-            mx.clear_cache()
-            lease.__exit__(None, None, None)
             emit(None)
-            loop.call_soon_threadsafe(CAPACITY.release)
 
-    EXECUTOR.submit(infer)
+    CAPACITY.submit(EXECUTOR, infer)
 
     async def events():
         try:
@@ -186,11 +184,17 @@ async def transcribe(
         finally:
             cancelled.set()
 
-    if stream:
+    try:
+        first = await queue.get()
+    except BaseException:
+        cancelled.set()
+        raise
+    if stream and first.get("ready"):
         return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-store"})
     try:
-        result = await queue.get()
-        return JSONResponse(result, status_code=502 if "error" in result else 200)
+        result = first
+        status = result.pop("status", 502 if "error" in result else 200)
+        return JSONResponse(result, status_code=status, headers={"Retry-After": "1"} if status == 429 else None)
     finally:
         cancelled.set()
 

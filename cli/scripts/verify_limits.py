@@ -37,6 +37,20 @@ def verify(base, key, home, fixture):
                     r = httpx.post(endpoint + 'audio/transcriptions', data={'model': 'qwen3-asr-0.6b'}, files={'file': ('a.wav', (fixture/'speech.wav').read_bytes(), 'audio/wav')})
                 assert r.status_code == 429, r.text
                 record('profile_admission', profile=profile, status=r.status_code)
+                # Healthy capacity rejection must not open the model circuit.
+                for _ in range(5):
+                    if profile == 'embedding':
+                        r = client.post('/v1/embeddings', json={'model':'embedding', 'input':'busy'})
+                    else:
+                        r = client.post('/v1/audio/transcriptions', data={'model':'stt'}, files={'file':('a.wav',(fixture/'speech.wav').read_bytes(),'audio/wav')})
+                    assert r.status_code == 429 and r.headers.get('Retry-After') == '1', (r.status_code, r.text[:120])
+            if profile == 'embedding':
+                r = client.post('/v1/embeddings', json={'model':'embedding','input':'recovered'})
+            else:
+                r = client.post('/v1/audio/transcriptions', data={'model':'stt'}, files={'file':('a.wav',(fixture/'speech.wav').read_bytes(),'audio/wav')})
+            assert r.status_code == 200, (r.status_code, r.text[:120])
+            record('capacity_no_circuit', profile=profile, rejections=5, recovery_status=r.status_code)
+
         with wave.open(str(fixture/'speech.wav'), 'rb') as wav:
             pcm, rate, channels, width = wav.readframes(wav.getnframes()), wav.getframerate(), wav.getnchannels(), wav.getsampwidth()
         for seconds, expected in [(60, 200), (61, 400), (61, 400), (61, 400)]:

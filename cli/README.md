@@ -90,3 +90,11 @@ python scripts/e2e_macos.py --verify-limits --verify-recovery \
 OpenClaw 2026.9.4에서 실제 memory index/search와 audio transcribe를 검증했다. [설정 예](docs/openclaw.md).
 운영 namespace/issuer/Secret 배포·여러 물리 Mac·launchd는 이 로컬 검증과 별도다. [서버 Caller](../caller/README.md)의 구현과 Compose 배선은 포함한다.
 MLX embedding은 mlx-embeddings 0.0.5, ASR은 MLX Audio 0.5.4를 사용하며 전이 의존성·모델 revision을 고정한다.
+
+### 장애 복구와 로그
+
+- 모델별 요청 슬롯 점유가 120초를 넘으면 health가 실패한다. Rust가 10초 간격(HTTP 제한 3초)으로 확인하여 Relay 등록을 철회하고 모델 프로세스 그룹을 종료·재시작한다. 120초는 즉시 강제 종료 시각이 아니며 연결 정리·프로세스 종료 대기 시간이 추가된다.
+- 호출자가 취소해도 실제 추론 작업 종료 전에는 슬롯을 반환하지 않는다. 정리 중 예외·executor 제출 실패에도 슬롯을 반환한다.
+- 워커 용량 부족은 `429`, `Retry-After: 1`, `error.type=worker_capacity`로 반환한다. Go의 embedding/STT 경로는 이를 모델 장애로 집계하거나 다른 모델로 자동 재시도하지 않는다. 외부 제공자의 일반 429 정책은 유지한다.
+- 기본 로그는 `~/.llmgate/logs/`에 저장한다. 모델 출력과 supervisor 이벤트 모두 파일당 10MiB, 현재 파일 + 이전 4개를 보관한다. `down`은 로그를 보존한다.
+- Supervisor는 시간과 고정 이벤트 코드만 기록한다. 연결 오류 이벤트는 초당 최대 한 번 기록하며, 모델 로그 큐 포화·쓰기 실패는 `status --json`의 `dropped_log_chunks`로 확인한다. 모델 라이브러리 stdout/stderr 전체에 대한 비밀정보 필터를 보장하지는 않는다.

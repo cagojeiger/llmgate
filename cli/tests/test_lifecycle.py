@@ -30,7 +30,7 @@ print('fake engine started',flush=True)
 class H(http.server.BaseHTTPRequestHandler):
  def log_message(self,*a):pass
  def do_GET(self):
-  self.send_response(200);self.end_headers();self.wfile.write(b'{"ready":true}')
+  self.send_response(200);self.end_headers();self.wfile.write(json.dumps({'ready': not ((root/'unhealthy').exists() and (root/'unhealthy').read_text()==str(os.getpid()))}).encode())
  def do_POST(self):
   (root/'unexpected-warmup').touch();self.send_response(429);self.end_headers()
 class Server(http.server.ThreadingHTTPServer):
@@ -126,6 +126,23 @@ Server(('127.0.0.1',int(os.environ['LLMGATE_MODEL_PORT'])),H).serve_forever()
         result=self.command('down','embedding')
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertFalse(self.rt.exists())
+
+    def test_unhealthy_active_engine_is_replaced(self):
+        self.launch()
+        first = json.loads((self.home/'engine.json').read_text())['pid']
+        (self.home/'unhealthy').write_text(str(first))
+        deadline = time.monotonic() + 25
+        while time.monotonic() < deadline:
+            current = json.loads((self.home/'engine.json').read_text())['pid']
+            if current != first:
+                self.engines.append(current)
+                break
+            time.sleep(.2)
+        else:
+            self.fail('unhealthy engine was not replaced')
+        log = (self.home/'logs/embedding-supervisor.log').read_text()
+        self.assertIn('model_health_failed', log)
+        self.assertIn('model_restart', log)
 
     def test_health_ready_does_not_call_busy_inference(self):
         supervisor,_=self.launch({'HTTP_PROXY':'http://127.0.0.1:9','HTTPS_PROXY':'http://127.0.0.1:9','ALL_PROXY':'http://127.0.0.1:9','NO_PROXY':''})

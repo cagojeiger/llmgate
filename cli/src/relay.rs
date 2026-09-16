@@ -17,6 +17,7 @@ pub async fn publish(
     budget: Duration,
     state: Arc<Mutex<State>>,
     stop: CancellationToken,
+    log: crate::logs::Logger,
 ) {
     let (config, destination, token) = route;
     let config = config.with_resource_limits(
@@ -46,7 +47,13 @@ pub async fn publish(
                         _=tasks.join_next(),if !tasks.is_empty()=>{},
                         result=listener.accept(),if tasks.len()<max=>{
                             match result {
-                                Ok(mut pipe)=>{tasks.spawn(async move{let _=timeout(budget,async{let mut upstream=TcpStream::connect(address).await?;copy_bidirectional_with_sizes(&mut pipe,&mut upstream,64*1024,64*1024).await}).await;});},
+                                Ok(mut pipe)=>{let log=log.clone();tasks.spawn(async move{
+                                    match timeout(budget,async{let mut upstream=TcpStream::connect(address).await?;copy_bidirectional_with_sizes(&mut pipe,&mut upstream,64*1024,64*1024).await}).await {
+                                        Err(_)=>log.event("pipe_timeout"),
+                                        Ok(Err(_))=>log.event("pipe_io_failed"),
+                                        Ok(Ok(_))=>{},
+                                    }
+                                });},
                                 Err(_)=>break,
                             }
                         }
@@ -67,6 +74,7 @@ pub async fn publish(
             break;
         }
         state.lock().await.publish = "retrying".into();
+        log.event("relay_retry");
         tokio::select! {_=stop.cancelled()=>break,_=sleep(Duration::from_millis(delay*1000+crate::broker::now()%500))=>{}}
         delay = (delay * 2).min(30);
     }

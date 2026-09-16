@@ -111,12 +111,10 @@ pub async fn start(home: &Home, opts: StartOptions) -> anyhow::Result<()> {
             command.args(["--port", &port.to_string()]);
         }
         use std::os::unix::process::CommandExt;
-        let output =
-            crate::logs::supervisor_output(home.0.join(format!("logs/{}-supervisor.log", p.id())))?;
         let mut child = command
             .stdin(std::process::Stdio::null())
-            .stdout(output.try_clone()?)
-            .stderr(output)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .process_group(0)
             .spawn()?;
         wait_ready(home, p, &opts, Some(&mut child)).await?;

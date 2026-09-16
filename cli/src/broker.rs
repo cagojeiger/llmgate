@@ -77,6 +77,25 @@ pub fn client(r: &Registration) -> anyhow::Result<reqwest::Client> {
     }
     Ok(b.build()?)
 }
+#[derive(Debug)]
+pub struct GrantRejected {
+    pub status: u16,
+    hint: &'static str,
+    profile: Profile,
+}
+impl std::fmt::Display for GrantRejected {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} (HTTP {}, profile {})",
+            self.hint,
+            self.status,
+            self.profile.id()
+        )
+    }
+}
+impl std::error::Error for GrantRejected {}
+
 pub async fn grant(
     client: &reqwest::Client,
     r: &Registration,
@@ -104,7 +123,12 @@ pub async fn grant(
             429 => "등록 요청이 많습니다. 잠시 후 다시 시도하세요",
             _ => "등록 서버가 요청을 처리하지 못했습니다. 서버 상태를 확인하고 다시 시도하세요",
         };
-        anyhow::bail!("{hint} (HTTP {status}, profile {})", p.id());
+        return Err(GrantRejected {
+            status,
+            hint,
+            profile: p,
+        }
+        .into());
     }
     let mut body = Vec::new();
     while let Some(chunk) = response.chunk().await? {

@@ -42,4 +42,6 @@ docker build -t llmgate-caller:local .
 [실제 Compose 배선](../cli/examples/compose/compose.yaml)은 이 Dockerfile로 Caller를 빌드하며
 `network_mode: service:llmgate`로 Go와 loopback을 공유한다. fixture의 root user는 로컬 시험 전용이다.
 서버 release workflow는 `ghcr.io/cagojeiger/llmgate-caller:<서버 VERSION>`을 함께 빌드·게시한다.
-이 PR에서 운영 배포나 release 게시를 실행하지 않는다.
+amd64는 `ubuntu-24.04`, arm64는 `ubuntu-24.04-arm`에서 에뮬레이션 없이 각각 빌드한다.
+`<VERSION>-amd64`·`<VERSION>-arm64` 이미지의 native 실행 검사까지 통과한 뒤 `<VERSION>`과 `latest` multi-architecture manifest를 게시한다.
+Mac용 CLI는 별도 `cli-v*` release이며 서버 이미지에 포함되지 않는다.

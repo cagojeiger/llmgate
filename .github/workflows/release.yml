@@ -1,100 +1,136 @@
 name: release
 
-# Triggers when VERSION lands on main. To release: open a PR titled
-# `chore: release vX.Y.Z` that bumps VERSION, merge — this workflow
-# builds the multi-arch image, pushes to GHCR, tags, and publishes
-# a GitHub Release. CLAUDE.md has the full procedure.
 on:
   push:
     branches: [main]
     paths: [VERSION]
 
 permissions:
-  contents: write   # tag + GitHub Release
-  packages: write   # GHCR push
+  contents: write
+  packages: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
   IMAGE: ${{ github.repository }}
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
     steps:
       - uses: actions/checkout@v7
-
-      - name: Read VERSION
+      - name: Read VERSION and reject existing release
         id: ver
         run: |
           version=$(tr -d '[:space:]' < VERSION)
-          if [ -z "$version" ]; then
-            echo "::error::VERSION file is empty"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          existing=$(git ls-remote --tags origin "refs/tags/v$version")
+          if [ -n "$existing" ]; then
+            echo "::error::tag v$version already exists; bump VERSION"
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "tag=v$version" >> "$GITHUB_OUTPUT"
 
-      - name: Guard against duplicate tag
-        run: |
-          tag="${{ steps.ver.outputs.tag }}"
-          if git rev-parse "$tag" >/dev/null 2>&1; then
-            echo "::error::tag $tag already exists; bump VERSION before merging"
-            exit 1
-          fi
-
-      - uses: docker/setup-qemu-action@v4
+  build:
+    needs: version
+    name: Build ${{ matrix.arch }} images
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            machine: x86_64
+            runner: ubuntu-24.04
+          - arch: arm64
+            machine: aarch64
+            runner: ubuntu-24.04-arm
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      ARCH: ${{ matrix.arch }}
+      MACHINE: ${{ matrix.machine }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Require native architecture
+        run: test "$(uname -m)" = "$MACHINE"
       - uses: docker/setup-buildx-action@v4
-
       - uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push image
+      - name: Build and push server image
         uses: docker/build-push-action@v7
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/${{ matrix.arch }}
           push: true
-          build-args: |
-            VERSION=${{ steps.ver.outputs.version }}
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ steps.ver.outputs.version }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE }}:latest
-
-      - name: Build and push caller sidecar
+          build-args: VERSION=${{ env.VERSION }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ env.VERSION }}-${{ matrix.arch }}
+      - name: Build and push caller image
         uses: docker/build-push-action@v7
         with:
           context: caller
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/${{ matrix.arch }}
           push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE }}-caller:${{ steps.ver.outputs.version }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE }}-caller:latest
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE }}-caller:${{ env.VERSION }}-${{ matrix.arch }}
+      - name: Run both images on their native runner
+        run: |
+          for image in "$REGISTRY/$IMAGE" "$REGISTRY/$IMAGE-caller"; do
+            docker run --rm --platform "linux/$ARCH" "$image:$VERSION-$ARCH" --version
+            test "$(docker image inspect "$image:$VERSION-$ARCH" --format '{{.Architecture}}')" = "$ARCH"
+          done
 
+  publish:
+    needs: [version, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Deployable tags are created only after both native builds and smoke tests pass.
+      - name: Publish multi-architecture manifests
+        run: |
+          for image in "$REGISTRY/$IMAGE" "$REGISTRY/$IMAGE-caller"; do
+            docker buildx imagetools create \
+              --tag "$image:$VERSION" --tag "$image:latest" \
+              "$image:$VERSION-amd64" "$image:$VERSION-arm64"
+            docker buildx imagetools inspect "$image:$VERSION"
+          done
       - name: Tag and create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          tag="${{ steps.ver.outputs.tag }}"
-          git tag "$tag"
-          git push origin "$tag"
-          gh release create "$tag" --title "$tag" --generate-notes
+          git tag "v$VERSION"
+          git push origin "v$VERSION"
+          gh release create "v$VERSION" --title "v$VERSION" --generate-notes
 
-      # Slack fires on failure only. Successful releases announce themselves
-      # via the GitHub Release page + GHCR tag + ArgoCD auto-sync — Slack is
-      # reserved for "image / tag / release may be in a partial state, look".
+  notify-failure:
+    needs: [version, build, publish]
+    if: failure()
+    runs-on: ubuntu-24.04
+    steps:
       - name: Notify Slack
-        if: failure() && env.SLACK_WEBHOOK_URL != ''
+        if: env.SLACK_WEBHOOK_URL != ''
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          VERSION: ${{ steps.ver.outputs.version }}
+          VERSION: ${{ needs.version.outputs.version }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           NL=$'\n'
-          ver="${VERSION:-?}"
-          text=":x: *llmgate release* — v${ver} failed${NL}${RUN_URL}"
+          text=":x: *llmgate release* — v${VERSION:-?} failed${NL}${RUN_URL}"
           jq -nc --arg t "$text" '{text:$t}' \
             | curl -fsS -X POST -H 'Content-Type: application/json' --data @- "$SLACK_WEBHOOK_URL"

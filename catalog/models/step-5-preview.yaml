@@ -1,0 +1,7 @@
+# Step 5 Preview via OpenCode Go.
+id: step-5-preview
+vendor: opencode
+protocol: openai
+base_url: https://opencode.ai/zen/go/v1
+auth_env: LLMGATE_OPENCODE_API_KEY
+auth_scheme: bearer

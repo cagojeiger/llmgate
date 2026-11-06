@@ -35,8 +35,8 @@ func TestLoadDir_RepoCatalog(t *testing.T) {
 	if m, ok := cat.Models["minimax-m3"]; ok && m.Protocol != "anthropic" {
 		t.Fatalf("minimax-m3 protocol = %q, want anthropic", m.Protocol)
 	}
-	if m, ok := cat.Models["deepseek-v4.1-flash"]; ok && m.AuthEnv != "LLMGATE_OPENCODE_API_KEY" {
-		t.Fatalf("deepseek-v4.1-flash auth_env = %q, want LLMGATE_OPENCODE_API_KEY", m.AuthEnv)
+	if m, ok := cat.Models["kimi-k3.1-pro"]; ok && m.AuthEnv != "LLMGATE_OPENCODE_API_KEY" {
+		t.Fatalf("kimi-k3.1-pro auth_env = %q, want LLMGATE_OPENCODE_API_KEY", m.AuthEnv)
 	}
 
 	// At least one alias must load; the specific sample is skip-when-gone

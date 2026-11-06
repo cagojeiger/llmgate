@@ -1,0 +1,8 @@
+# Crouton Alpha Free via OpenCode Go.
+# OpenCode translates its native API to Chat Completions.
+id: crouton-alpha-free
+vendor: opencode
+protocol: openai
+base_url: https://opencode.ai/inference/go/openai/v1
+auth_env: LLMGATE_OPENCODE_API_KEY
+auth_scheme: bearer

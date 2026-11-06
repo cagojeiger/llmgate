@@ -12,8 +12,14 @@ from bs4 import BeautifulSoup
 from runtime import tool
 
 OPENCODE_DOC = "https://opencode.ai/docs/go"
-OPENCODE_MODELS_API = "https://opencode.ai/zen/go/v1/models"
+OPENCODE_GO_INFERENCE_URL = "https://opencode.ai/inference/go"
+OPENCODE_MODELS_API = f"{OPENCODE_GO_INFERENCE_URL}/v1/models"
 OPENCODE_GO_BASE_URL = "https://opencode.ai/zen/go/v1"
+_OPENCODE_GO_BASE_URLS = {
+    OPENCODE_GO_BASE_URL,
+    f"{OPENCODE_GO_INFERENCE_URL}/openai/v1",
+    f"{OPENCODE_GO_INFERENCE_URL}/anthropic/v1",
+}
 MODELS_DEV_API = "https://models.dev/api.json"
 HTTP_HEADERS = {"User-Agent": "llmgate/catalog-drift", "Accept": "application/json,text/html"}
 REPO = pathlib.Path(__file__).resolve().parents[2]
@@ -120,7 +126,7 @@ def _local_model_ids() -> set[str]:
         if data.get("vendor") != "opencode":
             continue
         base_url = str(data.get("base_url") or "").rstrip("/")
-        if base_url != OPENCODE_GO_BASE_URL:
+        if base_url not in _OPENCODE_GO_BASE_URLS:
             continue
         model_id = data.get("id")
         if isinstance(model_id, str) and model_id:

@@ -49,7 +49,7 @@ base_url: http://127.0.0.1:8001
 alias: smart
 chain:
   - kimi-k2.7-code
-  - deepseek-v4-pro
+  - minimax-m3
   - qwen3.8-flash
 ```
 

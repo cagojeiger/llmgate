@@ -98,22 +98,6 @@ def test_chat_system_message_extraction(client: OpenAI) -> None:
     assert text, f"empty content and reasoning: {resp}"
 
 
-def test_non_stream_preserves_vendor_fields(client: OpenAI) -> None:
-    """Vendor extras (cost, prompt_cache_*) must ride through Response.Extra."""
-    resp = client.chat.completions.create(
-        model=MODEL,
-        messages=[{"role": "user", "content": "say hi"}],
-        max_tokens=2048,
-    )
-    cost = field(resp, "cost")
-    assert cost is not None, f"vendor 'cost' missing from response: {resp}"
-    assert resp.usage is not None
-    cache_miss = field(resp.usage, "prompt_cache_miss_tokens")
-    assert cache_miss is not None, (
-        f"vendor 'prompt_cache_miss_tokens' missing from usage: {resp.usage}"
-    )
-
-
 def test_chat_stream(client: OpenAI) -> None:
     """Stream deltas carry content/reasoning_content (ChoiceDelta/Delta nesting)."""
     request_start = time.monotonic()

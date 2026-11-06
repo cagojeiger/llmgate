@@ -1,0 +1,10 @@
+data: {"id":"chatcmpl-fca4085cb050403fa51ffa45b5344f58","object":"chat.completion.chunk","created":1793977021,"model":"gemini-4-argon","choices":[{"index":0,"delta":{"role":"assistant","content":"1\n2\n"},"logprobs":null,"finish_reason":null}],"usage":null}
+
+data: {"id":"chatcmpl-fca4085cb050403fa51ffa45b5344f58","object":"chat.completion.chunk","created":1793977021,"model":"gemini-4-argon","choices":[{"index":0,"delta":{"content":"3\n4\n5"},"logprobs":null,"finish_reason":null}],"usage":null}
+
+data: {"id":"chatcmpl-fca4085cb050403fa51ffa45b5344f58","object":"chat.completion.chunk","created":1793977021,"model":"gemini-4-argon","choices":[{"index":0,"delta":{},"logprobs":null,"finish_reason":"stop"}],"usage":null}
+
+data: {"id":"chatcmpl-fca4085cb050403fa51ffa45b5344f58","object":"chat.completion.chunk","created":1793977021,"model":"gemini-4-argon","choices":[],"usage":{"prompt_tokens":44,"completion_tokens":13,"total_tokens":57,"cost":0,"opencode":{"billing_source":"go","list_cost":0.000218,"allowance":0.000436,"tokens":{"input":44,"output":13,"reasoning":0,"cache_read":0,"cache_write_5m":0,"cache_write_1h":0}}}}
+
+data: [DONE]
+

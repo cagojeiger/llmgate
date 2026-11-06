@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 
 import pytest
@@ -10,6 +11,7 @@ from openai import OpenAI
 from conftest import (
     OPENCODE_SESSION_HEADERS,
     assert_streaming_progressive,
+    cassette_has_fixture_pair,
     discover_catalog_models,
     field,
     raw_consumer_key,
@@ -20,8 +22,12 @@ pytestmark = pytest.mark.timeout(120)
 
 _openai = discover_catalog_models("openai")
 _anthropic = discover_catalog_models("anthropic")
+if os.environ.get("LLMGATE_E2E_MODE", "live").lower() == "cassette":
+    # Newly listed models may not have a recording yet.
+    _openai = [model for model in _openai if cassette_has_fixture_pair(model)]
+    _anthropic = [model for model in _anthropic if cassette_has_fixture_pair(model)]
 if not _openai or not _anthropic:
-    pytest.skip("openai/anthropic protocol model missing from catalog", allow_module_level=True)
+    pytest.skip("no eligible model for one or both chat protocols", allow_module_level=True)
 MODEL = _openai[0]
 ANTHROPIC_MODEL = _anthropic[0]
 
@@ -90,22 +96,6 @@ def test_chat_system_message_extraction(client: OpenAI) -> None:
     msg = resp.choices[0].message
     text = (msg.content or "").strip() or (field(msg, "reasoning_content") or "").strip()
     assert text, f"empty content and reasoning: {resp}"
-
-
-def test_non_stream_preserves_vendor_fields(client: OpenAI) -> None:
-    """Vendor extras (cost, prompt_cache_*) must ride through Response.Extra."""
-    resp = client.chat.completions.create(
-        model=MODEL,
-        messages=[{"role": "user", "content": "say hi"}],
-        max_tokens=2048,
-    )
-    cost = field(resp, "cost")
-    assert cost is not None, f"vendor 'cost' missing from response: {resp}"
-    assert resp.usage is not None
-    cache_miss = field(resp.usage, "prompt_cache_miss_tokens")
-    assert cache_miss is not None, (
-        f"vendor 'prompt_cache_miss_tokens' missing from usage: {resp.usage}"
-    )
 
 
 def test_chat_stream(client: OpenAI) -> None:

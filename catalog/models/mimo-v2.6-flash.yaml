@@ -1,0 +1,11 @@
+# MiMo V2.6 Flash replaces MiMo V2.5 as the low-cost multimodal fallback.
+id: mimo-v2.6-flash
+vendor: opencode
+protocol: openai
+base_url: https://opencode.ai/zen/go/v1
+auth_env: LLMGATE_OPENCODE_API_KEY
+auth_scheme: bearer
+cost:
+  input: 0.14
+  output: 0.28
+  cache_read: 0.0028

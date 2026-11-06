@@ -1,0 +1,18 @@
+data: {"id":"chatcmpl-6d4dfd667e690e0f60695c25f1415e6b","object":"chat.completion.chunk","created":1793977059,"model":"glm-5.3-flash","choices":[{"index":0,"finish_reason":null,"logprobs":null,"delta":{"role":"assistant","content":""}}]}
+
+data: {"id":"chatcmpl-6d4dfd667e690e0f60695c25f1415e6b","object":"chat.completion.chunk","created":1793977059,"model":"glm-5.3-flash","choices":[{"index":0,"finish_reason":null,"logprobs":null,"delta":{"reasoning_content":"Simple"}}]}
+
+data: {"id":"chatcmpl-6d4dfd667e690e0f60695c25f1415e6b","object":"chat.completion.chunk","created":1793977059,"model":"glm-5.3-flash","choices":[{"index":0,"finish_reason":null,"logprobs":null,"delta":{"reasoning_content":" request"}}]}
+
+data: {"id":"chatcmpl-6d4dfd667e690e0f60695c25f1415e6b","object":"chat.completion.chunk","created":1793977059,"model":"glm-5.3-flash","choices":[{"index":0,"finish_reason":null,"logprobs":null,"delta":{"content":"1","reasoning_content":"."}}]}
+
+data: {"id":"chatcmpl-6d4dfd667e690e0f60695c25f1415e6b","object":"chat.completion.chunk","created":1793977059,"model":"glm-5.3-flash","choices":[{"index":0,"finish_reason":null,"logprobs":null,"delta":{"content":"\n2\n"}}]}
+
+data: {"id":"chatcmpl-6d4dfd667e690e0f60695c25f1415e6b","object":"chat.completion.chunk","created":1793977059,"model":"glm-5.3-flash","choices":[{"index":0,"finish_reason":null,"logprobs":null,"delta":{"content":"3\n4"}}]}
+
+data: {"id":"chatcmpl-6d4dfd667e690e0f60695c25f1415e6b","object":"chat.completion.chunk","created":1793977059,"model":"glm-5.3-flash","choices":[{"index":0,"finish_reason":"stop","logprobs":null,"delta":{"content":"\n5"}}]}
+
+data: {"id":"chatcmpl-6d4dfd667e690e0f60695c25f1415e6b","object":"chat.completion.chunk","created":1793977059,"model":"glm-5.3-flash","choices":[],"usage":{"prompt_tokens":25,"completion_tokens":14,"total_tokens":39,"prompt_tokens_details":{"cached_tokens":0},"completion_tokens_details":{"reasoning_tokens":3},"cost":0,"opencode":{"billing_source":"go","list_cost":0.00001075,"allowance":0.00001075,"tokens":{"input":25,"output":14,"reasoning":3,"cache_read":0,"cache_write_5m":0,"cache_write_1h":0}}}}
+
+data: [DONE]
+

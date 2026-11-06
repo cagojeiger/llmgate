@@ -1,0 +1,7 @@
+# Claude Haiku 5.5 via OpenCode Go.
+id: claude-haiku-5-5
+vendor: opencode
+protocol: anthropic
+base_url: https://opencode.ai/zen/go/v1
+auth_env: LLMGATE_OPENCODE_API_KEY
+auth_scheme: x-api-key

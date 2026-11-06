@@ -1,0 +1,32 @@
+data: {"id":"43418274-8089-4137-b5b7-6a042278077f","object":"chat.completion.chunk","created":1793977065,"model":"kimi-k3","choices":[{"index":0,"finish_reason":null,"delta":{"role":"assistant"}}]}
+
+data: {"id":"43418274-8089-4137-b5b7-6a042278077f","object":"chat.completion.chunk","created":1793977065,"model":"kimi-k3","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning":"The","reasoning_details":[{"format":"unknown","index":0,"text":"The","type":"reasoning.text"}]}}]}
+
+data: {"id":"43418274-8089-4137-b5b7-6a042278077f","object":"chat.completion.chunk","created":1793977065,"model":"kimi-k3","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning":" user wants me","reasoning_details":[{"format":"unknown","index":0,"text":" user wants me","type":"reasoning.text"}]}}]}
+
+data: {"id":"43418274-8089-4137-b5b7-6a042278077f","object":"chat.completion.chunk","created":1793977065,"model":"kimi-k3","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning":" to count from ","reasoning_details":[{"format":"unknown","index":0,"text":" to count from ","type":"reasoning.text"}]}}]}
+
+data: {"id":"43418274-8089-4137-b5b7-6a042278077f","object":"chat.completion.chunk","created":1793977065,"model":"kimi-k3","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning":"1 to 5","reasoning_details":[{"format":"unknown","index":0,"text":"1 to 5","type":"reasoning.text"}]}}]}
+
+data: {"id":"43418274-8089-4137-b5b7-6a042278077f","object":"chat.completion.chunk","created":1793977065,"model":"kimi-k3","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning":", one number per","reasoning_details":[{"format":"unknown","index":0,"text":", one number per","type":"reasoning.text"}]}}]}
+
+data: {"id":"43418274-8089-4137-b5b7-6a042278077f","object":"chat.completion.chunk","created":1793977065,"model":"kimi-k3","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning":" line. This is","reasoning_details":[{"format":"unknown","index":0,"text":" line. This is","type":"reasoning.text"}]}}]}
+
+data: {"id":"43418274-8089-4137-b5b7-6a042278077f","object":"chat.completion.chunk","created":1793977065,"model":"kimi-k3","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning":" simple","reasoning_details":[{"format":"unknown","index":0,"text":" simple","type":"reasoning.text"}]}}]}
+
+data: {"id":"43418274-8089-4137-b5b7-6a042278077f","object":"chat.completion.chunk","created":1793977065,"model":"kimi-k3","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning":".","reasoning_details":[{"format":"unknown","index":0,"text":".","type":"reasoning.text"}]}}]}
+
+data: {"id":"43418274-8089-4137-b5b7-6a042278077f","object":"chat.completion.chunk","created":1793977065,"model":"kimi-k3","choices":[{"index":0,"finish_reason":null,"delta":{"content":"1\n2"}}]}
+
+data: {"id":"43418274-8089-4137-b5b7-6a042278077f","object":"chat.completion.chunk","created":1793977065,"model":"kimi-k3","choices":[{"index":0,"finish_reason":null,"delta":{"content":"\n3\n4"}}]}
+
+data: {"id":"43418274-8089-4137-b5b7-6a042278077f","object":"chat.completion.chunk","created":1793977065,"model":"kimi-k3","choices":[{"index":0,"finish_reason":null,"delta":{"content":"\n5"}}]}
+
+data: {"id":"43418274-8089-4137-b5b7-6a042278077f","object":"chat.completion.chunk","created":1793977065,"model":"kimi-k3","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning":null}}]}
+
+data: {"id":"43418274-8089-4137-b5b7-6a042278077f","object":"chat.completion.chunk","created":1793977065,"model":"kimi-k3","choices":[{"index":0,"finish_reason":"stop","delta":{}}]}
+
+data: {"id":"43418274-8089-4137-b5b7-6a042278077f","object":"chat.completion.chunk","created":1793977065,"model":"kimi-k3","choices":[{"index":0,"finish_reason":"stop","delta":{}}],"usage":{"prompt_tokens":101,"completion_tokens":44,"total_tokens":145,"prompt_tokens_details":{"audio_tokens":0,"cached_tokens":0,"cache_write_tokens":0},"completion_tokens_details":{"audio_tokens":0,"reasoning_tokens":23},"cost":0,"opencode":{"billing_source":"go","list_cost":0.000963,"allowance":0.003852,"tokens":{"input":101,"output":44,"reasoning":23,"cache_read":0,"cache_write_5m":0,"cache_write_1h":0}}}}
+
+data: [DONE]
+

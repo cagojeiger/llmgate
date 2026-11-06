@@ -251,21 +251,26 @@ def field(obj, name):
     return (getattr(obj, "model_extra", None) or {}).get(name)
 
 
-def cassette_has_fixture(model: str) -> bool:
-    return (FIXTURES_DIR / "models" / model / "chat-completion.json").exists()
+def cassette_has_fixture_pair(model: str) -> bool:
+    model_dir = FIXTURES_DIR / "models" / model
+    has_json = (model_dir / "chat-completion.json").is_file()
+    has_sse = (model_dir / "chat-completion.sse").is_file()
+    if has_json != has_sse:
+        pytest.fail(f"cassette: incomplete fixture pair for {model}")
+    return has_json
 
 
 @pytest.fixture(autouse=True)
 def _skip_if_no_cassette_fixture(request: pytest.FixtureRequest) -> None:
-    """In cassette mode, skip parametrized tests whose ``model`` has no fixture."""
+    """In cassette mode, skip parametrized tests without a fixture pair."""
     if os.environ.get("LLMGATE_E2E_MODE", "live").lower() != "cassette":
         return
     callspec = getattr(request.node, "callspec", None)
     if callspec is None:
         return
     model = callspec.params.get("model")
-    if model and not cassette_has_fixture(model):
-        pytest.skip(f"cassette: no fixture for {model}")
+    if model and not cassette_has_fixture_pair(model):
+        pytest.skip(f"cassette: no fixture pair for {model}")
 
 
 def e2e_vendor_filter() -> str:

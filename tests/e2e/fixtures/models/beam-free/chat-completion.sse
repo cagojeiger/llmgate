@@ -1,0 +1,18 @@
+data: {"id":"chatcmpl-5dd39cba-095d-43e4-9a74-cc9668c61a89","object":"chat.completion.chunk","created":1793977013,"model":"beam-free","choices":[{"index":0,"finish_reason":null,"delta":{"role":"assistant"}}],"usage":null}
+
+data: {"id":"chatcmpl-5dd39cba-095d-43e4-9a74-cc9668c61a89","object":"chat.completion.chunk","created":1793977013,"model":"beam-free","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":"The user wants me to count"}}],"usage":null}
+
+data: {"id":"chatcmpl-5dd39cba-095d-43e4-9a74-cc9668c61a89","object":"chat.completion.chunk","created":1793977013,"model":"beam-free","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" from 1 to 5, one"}}],"usage":null}
+
+data: {"id":"chatcmpl-5dd39cba-095d-43e4-9a74-cc9668c61a89","object":"chat.completion.chunk","created":1793977013,"model":"beam-free","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" number per line. Simple request."}}],"usage":null}
+
+data: {"id":"chatcmpl-5dd39cba-095d-43e4-9a74-cc9668c61a89","object":"chat.completion.chunk","created":1793977013,"model":"beam-free","choices":[{"index":0,"finish_reason":null,"delta":{"content":"1\n2\n3\n4\n"}}],"usage":null}
+
+data: {"id":"chatcmpl-5dd39cba-095d-43e4-9a74-cc9668c61a89","object":"chat.completion.chunk","created":1793977013,"model":"beam-free","choices":[{"index":0,"finish_reason":null,"delta":{"content":"5"}}],"usage":null}
+
+data: {"id":"chatcmpl-5dd39cba-095d-43e4-9a74-cc9668c61a89","object":"chat.completion.chunk","created":1793977013,"model":"beam-free","choices":[{"index":0,"finish_reason":"stop","delta":{}}],"usage":null}
+
+data: {"id":"chatcmpl-5dd39cba-095d-43e4-9a74-cc9668c61a89","object":"chat.completion.chunk","created":1793977013,"model":"beam-free","choices":[],"usage":{"prompt_tokens":59,"completion_tokens":40,"total_tokens":99,"prompt_tokens_details":{"cached_tokens":0},"completion_tokens_details":{"reasoning_tokens":29},"cost":0,"opencode":{"billing_source":"go","list_cost":0,"allowance":0,"tokens":{"input":59,"output":40,"reasoning":29,"cache_read":0,"cache_write_5m":0,"cache_write_1h":0}}}}
+
+data: [DONE]
+

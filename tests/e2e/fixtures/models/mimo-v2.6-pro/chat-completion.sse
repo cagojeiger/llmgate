@@ -1,0 +1,18 @@
+data: {"id":"05524c2b-7d83-41b4-9dad-7817320fc79c_d403d1ece7084edd87e00a89edf29035","object":"chat.completion.chunk","created":1793977071,"model":"mimo-v2.6-pro","choices":[{"index":0,"finish_reason":null,"delta":{"role":"assistant","content":"","reasoning_content":null,"tool_calls":null}}]}
+
+data: {"id":"05524c2b-7d83-41b4-9dad-7817320fc79c_d403d1ece7084edd87e00a89edf29035","object":"chat.completion.chunk","created":1793977071,"model":"mimo-v2.6-pro","choices":[{"index":0,"finish_reason":null,"delta":{"role":null,"content":null,"reasoning_content":"Simple","tool_calls":null}}]}
+
+data: {"id":"05524c2b-7d83-41b4-9dad-7817320fc79c_d403d1ece7084edd87e00a89edf29035","object":"chat.completion.chunk","created":1793977071,"model":"mimo-v2.6-pro","choices":[{"index":0,"finish_reason":null,"delta":{"role":null,"content":null,"reasoning_content":" request","tool_calls":null}}]}
+
+data: {"id":"05524c2b-7d83-41b4-9dad-7817320fc79c_d403d1ece7084edd87e00a89edf29035","object":"chat.completion.chunk","created":1793977071,"model":"mimo-v2.6-pro","choices":[{"index":0,"finish_reason":null,"delta":{"role":null,"content":null,"reasoning_content":".","tool_calls":null}}]}
+
+data: {"id":"05524c2b-7d83-41b4-9dad-7817320fc79c_d403d1ece7084edd87e00a89edf29035","object":"chat.completion.chunk","created":1793977071,"model":"mimo-v2.6-pro","choices":[{"index":0,"finish_reason":null,"delta":{"role":null,"content":"1\n2\n3\n","reasoning_content":null,"tool_calls":null}}]}
+
+data: {"id":"05524c2b-7d83-41b4-9dad-7817320fc79c_d403d1ece7084edd87e00a89edf29035","object":"chat.completion.chunk","created":1793977071,"model":"mimo-v2.6-pro","choices":[{"index":0,"finish_reason":null,"delta":{"role":null,"content":"4\n5","reasoning_content":null,"tool_calls":null}}]}
+
+data: {"id":"05524c2b-7d83-41b4-9dad-7817320fc79c_d403d1ece7084edd87e00a89edf29035","object":"chat.completion.chunk","created":1793977071,"model":"mimo-v2.6-pro","choices":[{"index":0,"finish_reason":"stop","delta":{"role":null,"content":null,"reasoning_content":null,"tool_calls":null}}]}
+
+data: {"id":"05524c2b-7d83-41b4-9dad-7817320fc79c_d403d1ece7084edd87e00a89edf29035","object":"chat.completion.chunk","created":1793977071,"model":"mimo-v2.6-pro","choices":[],"usage":{"prompt_tokens":20,"completion_tokens":15,"total_tokens":35,"prompt_tokens_details":{"cached_tokens":0},"completion_tokens_details":{"reasoning_tokens":4},"cost":0,"opencode":{"billing_source":"go","list_cost":0.00002175,"allowance":0.000087,"tokens":{"input":20,"output":15,"reasoning":4,"cache_read":0,"cache_write_5m":0,"cache_write_1h":0}}}}
+
+data: [DONE]
+

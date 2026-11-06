@@ -1,0 +1,8 @@
+# GPT-5.6 Luna via OpenCode Go.
+# OpenCode translates its native API to Chat Completions.
+id: gpt-5.6-luna
+vendor: opencode
+protocol: openai
+base_url: https://opencode.ai/zen/go/v1
+auth_env: LLMGATE_OPENCODE_API_KEY
+auth_scheme: bearer

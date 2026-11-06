@@ -23,24 +23,27 @@ func buildResultSink(cfg *config.Server, log *slog.Logger) (llmresultsink.Sink, 
 	return wrapAsync(terminal, cfg, log), nil
 }
 
-func buildAuditTerminal(cfg *config.Server, log *slog.Logger) (llmresultsink.Sink, error) {
-	var store audit.ObjectStore
-	if cfg.AuditS3Endpoint != "" {
-		s, err := audit.NewS3Store(audit.S3Config{
-			Endpoint:  cfg.AuditS3Endpoint,
-			Bucket:    cfg.AuditS3Bucket,
-			Region:    cfg.AuditS3Region,
-			AccessKey: cfg.AuditS3AccessKey,
-			SecretKey: cfg.AuditS3SecretKey,
-			UseSSL:    cfg.AuditS3UseSSL,
-			PathStyle: cfg.AuditS3PathStyle,
-		}, log)
-		if err != nil {
-			return nil, fmt.Errorf("build audit s3 store: %w", err)
-		}
-		store = s
+func buildAuditStore(cfg *config.Server, log *slog.Logger) (audit.ObjectStore, error) {
+	if cfg.AuditS3Endpoint == "" {
+		return nil, nil
 	}
-	fileSink, err := audit.NewFileSink(audit.Config{
+	store, err := audit.NewS3Store(audit.S3Config{
+		Endpoint:  cfg.AuditS3Endpoint,
+		Bucket:    cfg.AuditS3Bucket,
+		Region:    cfg.AuditS3Region,
+		AccessKey: cfg.AuditS3AccessKey,
+		SecretKey: cfg.AuditS3SecretKey,
+		UseSSL:    cfg.AuditS3UseSSL,
+		PathStyle: cfg.AuditS3PathStyle,
+	}, log)
+	if err != nil {
+		return nil, fmt.Errorf("build audit s3 store: %w", err)
+	}
+	return store, nil
+}
+
+func auditConfig(cfg *config.Server) audit.Config {
+	return audit.Config{
 		Dir:               cfg.AuditDir,
 		RotateInterval:    cfg.AuditRotateInterval,
 		RotateMaxBytes:    cfg.AuditRotateMaxBytes,
@@ -49,7 +52,15 @@ func buildAuditTerminal(cfg *config.Server, log *slog.Logger) (llmresultsink.Sin
 		DiskCap:           cfg.AuditDiskCap,
 		Compression:       cfg.AuditCompression,
 		UploadConcurrency: cfg.AuditUploadConcurrency,
-	}, store, cfg.AuditS3Prefix, log)
+	}
+}
+
+func buildAuditTerminal(cfg *config.Server, log *slog.Logger) (llmresultsink.Sink, error) {
+	store, err := buildAuditStore(cfg, log)
+	if err != nil {
+		return nil, err
+	}
+	fileSink, err := audit.NewFileSink(auditConfig(cfg), store, cfg.AuditS3Prefix, log)
 	if err != nil {
 		return nil, fmt.Errorf("build audit file sink: %w", err)
 	}

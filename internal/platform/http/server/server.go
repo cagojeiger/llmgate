@@ -20,6 +20,7 @@ type ServerOptions struct {
 	Handler            http.Handler
 	AudioHandler       http.Handler
 	RealtimeHandler    http.Handler
+	SonioxHandler      http.Handler
 	EmbeddingHandler   http.Handler
 	SystemOneHandler   http.Handler
 	WorkerTokenHandler http.Handler
@@ -99,6 +100,9 @@ func NewWithOptions(opts ServerOptions) *http.Server {
 			// before the handler upgrades the connection.
 			if opts.RealtimeHandler != nil {
 				r.Get("/v1/realtime", opts.RealtimeHandler.ServeHTTP)
+			}
+			if opts.SonioxHandler != nil {
+				r.Get("/v1/soniox/realtime", opts.SonioxHandler.ServeHTTP)
 			}
 		})
 	})

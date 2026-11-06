@@ -60,3 +60,33 @@ best-effort 업로드한다. `LLMGATE_AUDIT_DIR` 이 비면 비활성. 설계는
 메트릭은 보류 상태라 관측은 **로그가 SLI** 다: 시작 시 `audit result sink enabled`(설정 요약,
 크레덴셜 제외), 부팅 복구 시 `audit recovered orphaned files on boot`, 활동이 있는 유지보수마다
 `audit maintenance`(compressed/uploaded/reaped/dropped/실패 카운트), 실패·유실은 `WARN`.
+
+## Soniox 실시간 전사
+
+`LLMGATE_SONIOX_REALTIME_ENABLED=true`로 `GET /v1/soniox/realtime`을
+켠다. `LLMGATE_SONIOX_API_KEY`와 `LLMGATE_AUDIT_DIR`가 필요하다.
+호출자는 업그레이드 요청에 llmgate Bearer 키를 보낸다.
+`allowed_aliases`가 설정된 호출자는 `stt-rt-v6`가 허용돼야 한다.
+
+첫 메시지는 `model: "stt-rt-v6"`가 포함된 Soniox 설정 JSON이다.
+예를 들어 PCM16 모노 16 kHz는 `audio_format: "pcm_s16le"`,
+`sample_rate: 16000`, `num_channels: 1`을 설정한다. 오디오는
+바이너리 메시지로 보내며, 빈 텍스트 메시지로 세션을 종료한다.
+공급자 키는 게이트웨이 설정에서 읽는다. 설정 메시지는 연결 후 15초
+안에 보내야 하며 64 KiB까지 허용한다. 이후 메시지 상한은 1 MiB이고,
+세션은 최대 1시간이다. 종료 메시지를 보내면 Soniox의 종료 응답을
+최대 10초 동안 기다린다.
+
+세션 원문은 `<LLMGATE_AUDIT_DIR>/soniox-realtime/` 아래에 기록한다.
+S3를 설정하면 기존 접두사 아래 `soniox-realtime/`에 업로드한다.
+`LLMGATE_SONIOX_ARCHIVE_DISK_CAP`은 이 원문 기록을 위한 별도 디스크
+예산이며 기본값은 1 GiB다. 결과 감사 레코드의 `soniox_capture_id`로
+파일을 찾을 수 있다. 파일의 마지막 레코드는 완료 여부, 프레임 수,
+방향별 바이트 수, 헤더와 프레임 행의 SHA-256을 담는다. 활성 세션마다
+최대 256 MiB를 예약하고, 압축 시 임시 파일의 여유 공간도 남긴다.
+공간이 부족하면 새 세션을 거부한다.
+
+세션 완료는 로컬 파일 봉인을 확인한 시점이다. S3 업로드는 백그라운드에서
+재시도하므로, 파드의 임시 볼륨은 업로드 전에 파드가 교체되면 파일을
+잃을 수 있다. 그 구간까지 보관해야 하는 배포에는 지속 볼륨이 필요하다.
+[ADR 014](adr/014-soniox-realtime-capture.md)

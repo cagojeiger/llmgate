@@ -34,6 +34,9 @@ type Server struct {
 	MaxRequestBytes int64
 	MetricsEnabled  bool
 
+	SonioxRealtimeEnabled bool
+	SonioxArchiveDiskCap  int64
+
 	// Finalized LLM result event publishing.
 	LLMResultAsyncQueueSize int
 	LLMResultAsyncBatchSize int
@@ -109,6 +112,14 @@ func LoadServer() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	sonioxRealtimeEnabled, err := boolValue("LLMGATE_SONIOX_REALTIME_ENABLED", "false")
+	if err != nil {
+		return nil, err
+	}
+	sonioxArchiveDiskCap, err := positiveInt64("LLMGATE_SONIOX_ARCHIVE_DISK_CAP", "1073741824")
+	if err != nil {
+		return nil, err
+	}
 	maxRequestBytes, err := positiveInt64("LLMGATE_MAX_REQUEST_BYTES", "10485760")
 	if err != nil {
 		return nil, err
@@ -181,6 +192,8 @@ func LoadServer() (*Server, error) {
 		StreamIdleTimeout:          streamIdleTimeout,
 		MaxRequestBytes:            maxRequestBytes,
 		MetricsEnabled:             metricsEnabled,
+		SonioxRealtimeEnabled:      sonioxRealtimeEnabled,
+		SonioxArchiveDiskCap:       sonioxArchiveDiskCap,
 		LLMResultAsyncQueueSize:    llmResultQueueSize,
 		LLMResultAsyncBatchSize:    llmResultBatchSize,
 		LLMResultAsyncFlush:        llmResultFlush,

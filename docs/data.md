@@ -19,15 +19,13 @@ catalog/                              consumers/
 ## 샘플
 
 ```yaml
-# catalog/models/deepseek-v4-flash.yaml
-id: deepseek-v4-flash
+# catalog/models/qwen3.8-flash.yaml
+id: qwen3.8-flash
 vendor: opencode
-protocol: openai
-base_url: https://api.opencode.example/v1
+protocol: anthropic
+base_url: https://opencode.ai/zen/go/v1
 auth_env: LLMGATE_OPENCODE_API_KEY
-auth_scheme: bearer
-extra_body:
-  reasoning_effort: low
+auth_scheme: x-api-key
 cost:                         # USD per 1M tokens
   input: 0.15
   output: 0.47
@@ -50,9 +48,9 @@ base_url: http://127.0.0.1:8001
 # catalog/aliases/smart.yaml
 alias: smart
 chain:
-  - kimi-k2.6
+  - kimi-k2.7-code
   - deepseek-v4-pro
-  - deepseek-v4-flash
+  - qwen3.8-flash
 ```
 
 ```yaml

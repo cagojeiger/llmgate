@@ -1,8 +1,10 @@
-# 긴 컨텍스트 + vision, tool calling 강점
-# context: 262,144 tokens / max output: 65,536 tokens
-id: kimi-k2.6
+id: mimo-v2.6-pro
 vendor: opencode
 protocol: openai
 base_url: https://opencode.ai/zen/go/v1
 auth_env: LLMGATE_OPENCODE_API_KEY
 auth_scheme: bearer
+cost:
+  input: 0.435
+  output: 0.87
+  cache_read: 0.003625

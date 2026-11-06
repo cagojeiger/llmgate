@@ -3,7 +3,8 @@
 #   --status   (default) — diff catalog vs fixture set, no mutation
 #   --prune              — delete fixture dirs for models removed from catalog
 #   --record             — call upstream and capture missing fixtures
-#                          (json + sse per model). Skips files that exist.
+#                          (json + sse per model). Skips files that exist
+#                          and returns nonzero if any capture fails.
 #                          Reads vendor key from .env. Defaults to
 #                          LLMGATE_E2E_VENDOR=opencode; set to all or a
 #                          comma-separated vendor list to record more.
@@ -108,14 +109,23 @@ record_one() {
         *) echo "  ✗ $id: unknown auth_scheme $auth_scheme"; return 1 ;;
     esac
 
+    local -a headers=(-H "$hdr" -H "Content-Type: application/json")
+    if [ "$vendor" = "opencode" ]; then
+        local session_id
+        # OpenCode Go requires affinity. Share one session across both captures
+        # for this model, without reusing it for unrelated models or runs.
+        session_id=$(python3 -c 'import uuid; print(uuid.uuid4())') || return 1
+        headers+=(-H "X-OpenCode-Session: $session_id")
+    fi
+
     local url="${base_url%/}$path" target="$FIXTURES_DIR/$id"
-    mkdir -p "$target"
+    mkdir -p "$target" || return 1
     local body='{"model":"'$id'","messages":[{"role":"user","content":"'$RECORD_PROMPT'"}],"max_tokens":'$RECORD_MAX_TOKENS'}'
     local stream_body='{"model":"'$id'","messages":[{"role":"user","content":"'$RECORD_PROMPT'"}],"max_tokens":'$RECORD_MAX_TOKENS',"stream":true}'
 
     local json_path="$target/chat-completion.json"
     if [ ! -f "$json_path" ]; then
-        if curl -fsS -X POST "$url" -H "$hdr" -H "Content-Type: application/json" \
+        if curl -fsS -X POST "$url" "${headers[@]}" \
                 -d "$body" -o "$json_path"; then
             echo "  ✓ $id non-stream"
         else
@@ -127,7 +137,7 @@ record_one() {
 
     local sse_path="$target/chat-completion.sse"
     if [ ! -f "$sse_path" ]; then
-        if curl -fsSN -X POST "$url" -H "$hdr" -H "Content-Type: application/json" \
+        if curl -fsSN -X POST "$url" "${headers[@]}" \
                 -H "Accept: text/event-stream" -d "$stream_body" -o "$sse_path"; then
             echo "  ✓ $id stream"
         else
@@ -163,11 +173,13 @@ case "$mode" in
         done <<< "$removed"
         ;;
     --record)
+        failed=0
         while IFS= read -r id; do
             [ -z "$id" ] && continue
             echo "recording $id:"
-            record_one "$id" || true
+            record_one "$id" || failed=1
         done <<< "$catalog_ids"
+        exit "$failed"
         ;;
     *)
         echo "usage: $0 [--status|--prune|--record]" >&2

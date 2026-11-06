@@ -1,0 +1,8 @@
+# DeepSeek V4.1 Flash requires Global in OpenCode workspace privacy settings.
+# The upstream rate varies by time of day, so there is no static cost estimate.
+id: deepseek-v4.1-flash
+vendor: opencode
+protocol: openai
+base_url: https://opencode.ai/zen/go/v1
+auth_env: LLMGATE_OPENCODE_API_KEY
+auth_scheme: bearer

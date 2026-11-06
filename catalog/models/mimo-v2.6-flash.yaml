@@ -1,7 +1,5 @@
-# 멀티모달 (text/image)
-# context: 1,000,000 tokens / max output: 128,000 tokens
-# image input: OK — verified by test 2026-07-04 (reads table/text/diagram PNG)
-id: mimo-v2.5
+# MiMo V2.6 Flash replaces MiMo V2.5 as the low-cost multimodal fallback.
+id: mimo-v2.6-flash
 vendor: opencode
 protocol: openai
 base_url: https://opencode.ai/zen/go/v1

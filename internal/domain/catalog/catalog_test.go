@@ -32,11 +32,11 @@ func TestLoadDir_RepoCatalog(t *testing.T) {
 	// Sampled invariants survive future deletions: skip when the
 	// sampled model is gone (catalog-sync removed it), but still catch
 	// protocol/auth_env regressions on whichever models remain.
-	if m, ok := cat.Models["minimax-m2.7"]; ok && m.Protocol != "anthropic" {
-		t.Fatalf("minimax-m2.7 protocol = %q, want anthropic", m.Protocol)
+	if m, ok := cat.Models["minimax-m3"]; ok && m.Protocol != "anthropic" {
+		t.Fatalf("minimax-m3 protocol = %q, want anthropic", m.Protocol)
 	}
-	if m, ok := cat.Models["deepseek-v4-flash"]; ok && m.AuthEnv != "LLMGATE_OPENCODE_API_KEY" {
-		t.Fatalf("deepseek-v4-flash auth_env = %q, want LLMGATE_OPENCODE_API_KEY", m.AuthEnv)
+	if m, ok := cat.Models["deepseek-v4.1-flash"]; ok && m.AuthEnv != "LLMGATE_OPENCODE_API_KEY" {
+		t.Fatalf("deepseek-v4.1-flash auth_env = %q, want LLMGATE_OPENCODE_API_KEY", m.AuthEnv)
 	}
 
 	// At least one alias must load; the specific sample is skip-when-gone

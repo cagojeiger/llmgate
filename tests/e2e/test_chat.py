@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 
 import pytest
@@ -10,6 +11,7 @@ from openai import OpenAI
 from conftest import (
     OPENCODE_SESSION_HEADERS,
     assert_streaming_progressive,
+    cassette_has_fixture_pair,
     discover_catalog_models,
     field,
     raw_consumer_key,
@@ -20,8 +22,12 @@ pytestmark = pytest.mark.timeout(120)
 
 _openai = discover_catalog_models("openai")
 _anthropic = discover_catalog_models("anthropic")
+if os.environ.get("LLMGATE_E2E_MODE", "live").lower() == "cassette":
+    # Newly listed models may not have a recording yet.
+    _openai = [model for model in _openai if cassette_has_fixture_pair(model)]
+    _anthropic = [model for model in _anthropic if cassette_has_fixture_pair(model)]
 if not _openai or not _anthropic:
-    pytest.skip("openai/anthropic protocol model missing from catalog", allow_module_level=True)
+    pytest.skip("no eligible model for one or both chat protocols", allow_module_level=True)
 MODEL = _openai[0]
 ANTHROPIC_MODEL = _anthropic[0]
 

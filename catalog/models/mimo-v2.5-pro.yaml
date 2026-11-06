@@ -1,8 +1,0 @@
-# 코드 특화 (최신)
-# context: 1,048,576 tokens / max output: 128,000 tokens
-id: mimo-v2.5-pro
-vendor: opencode
-protocol: openai
-base_url: https://opencode.ai/zen/go/v1
-auth_env: LLMGATE_OPENCODE_API_KEY
-auth_scheme: bearer

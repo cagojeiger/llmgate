@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -24,6 +25,7 @@ import (
 	httpprobe "llmgate/internal/platform/http/probe"
 	httprealtime "llmgate/internal/platform/http/realtime"
 	"llmgate/internal/platform/http/server"
+	httpsystemone "llmgate/internal/platform/http/systemone"
 	httpworkers "llmgate/internal/platform/http/workers"
 	"llmgate/internal/platform/relaytoken"
 	promtelemetry "llmgate/internal/platform/telemetry/prometheus"
@@ -201,6 +203,14 @@ func buildRuntime(ctx context.Context, in RuntimeInput, workerIssuer *relaytoken
 		LifecycleObserver: metricsRecorder,
 		ResultSink:        results,
 	})
+	systemOneHandler := httpsystemone.NewHandler(in.Logger, events, httpsystemone.HandlerConfig{
+		APIKey:              os.Getenv("LLMGATE_TYPESAFE_API_KEY"),
+		RequestTimeout:      min(in.Config.RequestTimeout, in.Config.CompleteTimeout),
+		MaxRequestBodyBytes: in.Config.MaxRequestBytes,
+		ServiceVersion:      in.Version,
+		Environment:         in.Config.Environment,
+		ResultSink:          results,
+	})
 	probe := httpprobe.NewState()
 	var metricsHandler http.Handler
 	if in.Config.MetricsEnabled {
@@ -220,6 +230,7 @@ func buildRuntime(ctx context.Context, in RuntimeInput, workerIssuer *relaytoken
 		AudioHandler:       audioHandler,
 		RealtimeHandler:    realtimeHandler,
 		EmbeddingHandler:   embeddingHandler,
+		SystemOneHandler:   systemOneHandler,
 		WorkerTokenHandler: workerHandler,
 		Consumers:          in.Consumers,
 		Probe:              probe,

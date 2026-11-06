@@ -21,6 +21,7 @@ type ServerOptions struct {
 	AudioHandler       http.Handler
 	RealtimeHandler    http.Handler
 	EmbeddingHandler   http.Handler
+	SystemOneHandler   http.Handler
 	WorkerTokenHandler http.Handler
 	Consumers          *consumers.Store
 	Probe              *httpprobe.State
@@ -76,11 +77,13 @@ func NewWithOptions(opts ServerOptions) *http.Server {
 	r.Group(func(r chi.Router) {
 		chain.Apply(r)
 
-		// Auth scope: chat and audio transcription both sit behind auth.
-		// Future auth-required routes go inside this inner Group.
+		// Keep provider calls inside the consumer-auth group.
 		r.Group(func(r chi.Router) {
 			r.Use(httpauth.Middleware(store))
 			r.Post("/v1/chat/completions", h.ServeHTTP)
+			if opts.SystemOneHandler != nil {
+				r.Post("/v1/systemone", opts.SystemOneHandler.ServeHTTP)
+			}
 			if opts.WorkerTokenHandler != nil {
 				r.Post("/v1/workers/token", opts.WorkerTokenHandler.ServeHTTP)
 			}

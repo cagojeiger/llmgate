@@ -25,6 +25,7 @@
 | `LLMGATE_LLMRESULT_ASYNC_CLOSE_TIMEOUT` | `60s` | shutdown 때 async worker 종료 대기 상한 |
 | `LLMGATE_CATALOG` | `./catalog` | catalog 디렉토리 (부재 → fail) |
 | `LLMGATE_CONSUMERS` | `./consumers` | consumers 디렉토리 (부재 → fail) |
+| `LLMGATE_TYPESAFE_API_KEY` | `` | `/v1/systemone`의 TypeSafe Jev 공급자 키 |
 | `LLMGATE_SHUTDOWN_DRAIN_TIMEOUT` | `5m` | drain 최대 wall-clock, 이후 force close |
 
 vendor 별 API 키는 `LLMGATE_<VENDOR>_API_KEY` 패턴이다. 현재 기본값은 catalog `vendor` 를

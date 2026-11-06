@@ -2,14 +2,25 @@ package audit
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
+
+type sonioxTestStoreFunc func(context.Context, string, string) error
+
+func (f sonioxTestStoreFunc) Put(ctx context.Context, key, file string) error {
+	return f(ctx, key, file)
+}
 
 func TestSonioxArchiveRoundTrip(t *testing.T) {
 	store := newFakeStore()
@@ -62,6 +73,203 @@ func TestSonioxArchiveRoundTrip(t *testing.T) {
 	if !footer.Complete || footer.Reason != "finished" || footer.Frames != uint64(len(want)) ||
 		footer.RequestBytes != int64(len(want[0].Payload)+len(want[1].Payload)) || footer.ResponseBytes != int64(len(want[3].Payload)) {
 		t.Fatalf("unexpected footer: %+v", footer)
+	}
+}
+
+func TestSonioxArchiveAwaitsConfirmedUpload(t *testing.T) {
+	store := newFakeStore()
+	started, release := make(chan struct{}, 1), make(chan struct{})
+	gate := sonioxTestStoreFunc(func(ctx context.Context, key, file string) error {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		select {
+		case <-release:
+			return store.Put(ctx, key, file)
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	a, err := NewSonioxArchive(Config{Dir: t.TempDir(), UploadInterval: time.Hour}, gate, "audit", logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	c := newSonioxTestCapture(t, a)
+	done := finishSonioxTestCapture(c)
+	waitSonioxTestSignal(t, started)
+	select {
+	case err := <-done:
+		t.Fatalf("Finish returned before object storage acknowledged the upload: %v", err)
+	default:
+	}
+	close(release)
+	if err := waitSonioxTestFinish(t, done); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
+	}
+	key, raw := sonioxStoredFile(t, store)
+	_, _, footer := sonioxReadFile(t, raw)
+	if !footer.Complete {
+		t.Fatal("uploaded capture is incomplete")
+	}
+	for _, want := range []string{`"msg":"soniox archive upload confirmed"`, `"request_id":"test-request"`,
+		`"capture_id":"` + c.ID() + `"`, `"object_key":"` + key + `"`} {
+		if !strings.Contains(logs.String(), want) {
+			t.Fatalf("missing upload confirmation metadata %q in %s", want, logs.String())
+		}
+	}
+}
+
+func TestSonioxArchiveKeepsCompleteLocalCaptureAfterUploadFailure(t *testing.T) {
+	store := newFakeStore()
+	var attempts atomic.Int32
+	failure := errors.New("synthetic upload failure")
+	flaky := sonioxTestStoreFunc(func(ctx context.Context, key, file string) error {
+		if attempts.Add(1) == 1 {
+			return failure
+		}
+		return store.Put(ctx, key, file)
+	})
+	cfg := Config{Dir: t.TempDir(), Compression: CompressionNone, UploadInterval: time.Hour}
+	a, err := NewSonioxArchive(cfg, flaky, "", slogDiscard())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	c := newSonioxTestCapture(t, a)
+	if err := c.Finish(true, "finished"); !errors.Is(err, failure) {
+		t.Fatalf("Finish = %v, want upload error", err)
+	}
+	local, err := os.ReadFile(filepath.Join(a.dirs.compressed, c.name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, footer := sonioxReadFile(t, local)
+	if !footer.Complete || store.count() != 0 {
+		t.Fatalf("local capture should be complete and upload pending: %+v", footer)
+	}
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, raw := sonioxStoredFile(t, store)
+	if attempts.Load() != 2 || !bytes.Equal(raw, local) {
+		t.Fatal("shipping retry did not preserve the exact sealed capture")
+	}
+}
+
+func TestSonioxArchiveWaitTimeoutDoesNotCancelUpload(t *testing.T) {
+	store := newFakeStore()
+	started, release, put := make(chan struct{}, 1), make(chan struct{}), make(chan struct{}, 1)
+	gate := sonioxTestStoreFunc(func(ctx context.Context, key, file string) error {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		select {
+		case <-release:
+			if err := store.Put(ctx, key, file); err != nil {
+				return err
+			}
+			put <- struct{}{}
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
+	a, err := NewSonioxArchive(Config{Dir: t.TempDir(), UploadInterval: time.Hour}, gate, "", slogDiscard())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	a.uploadWait = 100 * time.Millisecond
+	done := finishSonioxTestCapture(newSonioxTestCapture(t, a))
+	waitSonioxTestSignal(t, started)
+	if err := waitSonioxTestFinish(t, done); err == nil || !strings.Contains(err.Error(), "upload confirmation timed out") {
+		t.Fatalf("Finish = %v, want upload confirmation timeout", err)
+	}
+	close(release)
+	waitSonioxTestSignal(t, put)
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, raw := sonioxStoredFile(t, store)
+	_, _, footer := sonioxReadFile(t, raw)
+	if !footer.Complete {
+		t.Fatal("late upload should retain the complete capture")
+	}
+}
+
+func TestSonioxArchiveCloseUnblocksUploadWait(t *testing.T) {
+	store := newFakeStore()
+	started := make(chan struct{}, 1)
+	var attempts atomic.Int32
+	gate := sonioxTestStoreFunc(func(ctx context.Context, key, file string) error {
+		if attempts.Add(1) == 1 {
+			started <- struct{}{}
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		return store.Put(ctx, key, file)
+	})
+	a, err := NewSonioxArchive(Config{Dir: t.TempDir(), UploadInterval: time.Hour}, gate, "", slogDiscard())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	done := finishSonioxTestCapture(newSonioxTestCapture(t, a))
+	waitSonioxTestSignal(t, started)
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitSonioxTestFinish(t, done); err == nil {
+		t.Fatal("canceled upload incorrectly acknowledged completion")
+	}
+	if attempts.Load() != 2 || store.count() != 1 {
+		t.Fatal("shutdown flush did not retry the retained capture")
+	}
+}
+
+func newSonioxTestCapture(t *testing.T, a *SonioxArchive) *SonioxCapture {
+	t.Helper()
+	c, err := a.Begin("test-request", "stt-rt-v6")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Append("request", "binary", []byte{0, 0xff}); err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+func finishSonioxTestCapture(c *SonioxCapture) <-chan error {
+	done := make(chan error, 1)
+	go func() { done <- c.Finish(true, "finished") }()
+	return done
+}
+
+func waitSonioxTestSignal(t *testing.T, signal <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-signal:
+	case <-time.After(5 * time.Second):
+		t.Fatal("object storage operation did not start promptly")
+	}
+}
+
+func waitSonioxTestFinish(t *testing.T, done <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(5 * time.Second):
+		t.Fatal("capture did not finish promptly")
+		return nil
 	}
 }
 

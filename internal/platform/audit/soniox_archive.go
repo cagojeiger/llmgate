@@ -26,6 +26,7 @@ const (
 	sonioxFrameMax    = 16 << 20  // same as the realtime WebSocket read limit
 	sonioxFooterRoom  = 512
 	sonioxCodecRoom   = 1 << 20 // in addition to the largest possible input to the serial compressor
+	sonioxUploadWait  = 30 * time.Second
 )
 
 // SonioxArchive stores each session in a separate file so the normal audit
@@ -39,10 +40,14 @@ type SonioxArchive struct {
 	interval     time.Duration
 	limit        int64
 	admissionCap int64
+	compression  string
+	uploadWait   time.Duration
+	wake         chan struct{}
 
-	mu     sync.Mutex
-	closed bool
-	active map[string]*SonioxCapture
+	mu      sync.Mutex
+	closed  bool
+	active  map[string]*SonioxCapture
+	uploads map[string]chan sonioxUploadResult // keyed by the file the ObjectStore receives
 
 	cancel    context.CancelFunc
 	done      chan struct{}
@@ -81,10 +86,11 @@ type sonioxFooter struct {
 // SonioxCapture writes frames as they arrive without keeping the session in
 // memory. Append and Finish may be called from different relay goroutines.
 type SonioxCapture struct {
-	archive *SonioxArchive
-	id      string
-	name    string
-	started time.Time
+	archive   *SonioxArchive
+	id        string
+	name      string
+	requestID string
+	started   time.Time
 
 	mu        sync.Mutex
 	file      *os.File
@@ -127,20 +133,39 @@ func NewSonioxArchive(cfg Config, store ObjectStore, prefix string, log *slog.Lo
 	cfg.DiskCap = 0 // retention still applies, but only admission enforces a cap
 	log = log.With("archive", sonioxArchiveRoot)
 	a := &SonioxArchive{
-		dirs: d, shipper: newShipper(d, store, path.Join(prefix, sonioxArchiveRoot), cfg, log), log: log,
-		interval: cfg.RotateInterval, limit: limit, admissionCap: admissionCap,
+		dirs: d, log: log, interval: cfg.RotateInterval, limit: limit, admissionCap: admissionCap,
+		compression: cfg.Compression, uploadWait: sonioxUploadWait, wake: make(chan struct{}, 1),
 		active: make(map[string]*SonioxCapture), done: make(chan struct{}),
 	}
+	if store != nil {
+		a.uploads = make(map[string]chan sonioxUploadResult)
+		store = sonioxNotifyingStore{store: store, notify: a.notifyUpload}
+	}
+	a.shipper = newShipper(d, store, path.Join(prefix, sonioxArchiveRoot), cfg, log)
 	if err := a.recoverOrphans(); err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	a.cancel = cancel
-	go func() {
-		defer close(a.done)
-		a.shipper.run(ctx)
-	}()
+	go a.run(ctx, cfg.UploadInterval)
 	return a, nil
+}
+
+func (a *SonioxArchive) run(ctx context.Context, interval time.Duration) {
+	defer close(a.done)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		case <-a.wake:
+		}
+		if ctx.Err() == nil {
+			a.shipper.pass(ctx)
+		}
+	}
 }
 
 func (a *SonioxArchive) Begin(requestID, model string) (*SonioxCapture, error) {
@@ -166,7 +191,7 @@ func (a *SonioxArchive) Begin(requestID, model string) (*SonioxCapture, error) {
 	if err != nil {
 		return nil, fmt.Errorf("soniox archive: create capture: %w", err)
 	}
-	c := &SonioxCapture{archive: a, id: id, name: name, started: started, file: f, digest: sha256.New()}
+	c := &SonioxCapture{archive: a, id: id, name: name, requestID: requestID, started: started, file: f, digest: sha256.New()}
 	if err := c.writeLine(line); err != nil {
 		_ = f.Close()
 		_ = os.Remove(f.Name())
@@ -272,8 +297,9 @@ func validSonioxFrame(direction, kind string) bool {
 	return (direction == "request" || direction == "response") && (kind == "text" || kind == "binary")
 }
 
-// Finish seals the file only after its terminal record and contents reach the
-// filesystem. If sealing fails, the active file can only recover incomplete.
+// Finish seals the file after its terminal record and contents are synced. A
+// complete capture also awaits the configured object store. A failed or
+// unconfirmed upload leaves the sealed file available for background retries.
 func (c *SonioxCapture) Finish(complete bool, reason string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -292,16 +318,87 @@ func (c *SonioxCapture) Finish(complete bool, reason string) error {
 	sealErr := writeSonioxFooter(c.file, c.size, c.footer)
 	closeErr := c.file.Close()
 	c.file = nil
-
-	a := c.archive
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	delete(a.active, c.name)
-	if sealErr == nil && closeErr == nil {
-		sealErr = a.publish(c.name)
+	object, publishErr := c.archive.release(c.name, sealErr == nil && closeErr == nil, complete)
+	c.finishErr = errors.Join(c.appendErr, sealErr, closeErr, publishErr)
+	if object != "" {
+		c.archive.log.Info("soniox archive upload confirmed", "request_id", c.requestID, "capture_id", c.id, "object_key", object)
 	}
-	c.finishErr = errors.Join(c.appendErr, sealErr, closeErr)
 	return c.finishErr
+}
+
+type sonioxUploadResult struct {
+	key string
+	err error
+}
+
+// Notify from Put itself: an uploaded file is durable even if moving its local
+// copy into uploaded/ fails. Only this archive's ObjectStore is wrapped.
+type sonioxNotifyingStore struct {
+	store  ObjectStore
+	notify func(name string, result sonioxUploadResult)
+}
+
+func (s sonioxNotifyingStore) Put(ctx context.Context, key, file string) error {
+	err := s.store.Put(ctx, key, file)
+	s.notify(filepath.Base(file), sonioxUploadResult{key: key, err: err})
+	return err
+}
+
+func (a *SonioxArchive) notifyUpload(name string, result sonioxUploadResult) {
+	a.mu.Lock()
+	waiter := a.uploads[name]
+	delete(a.uploads, name)
+	a.mu.Unlock()
+	if waiter != nil {
+		waiter <- result
+	}
+}
+
+func (a *SonioxArchive) release(name string, sealed, complete bool) (string, error) {
+	a.mu.Lock()
+	delete(a.active, name)
+	if !sealed {
+		a.mu.Unlock()
+		return "", nil
+	}
+	var waiter chan sonioxUploadResult
+	objectName := name + compressedExt(a.compression)
+	if complete && a.uploads != nil {
+		// Register before making the sealed file visible to the shipper.
+		waiter = make(chan sonioxUploadResult, 1)
+		a.uploads[objectName] = waiter
+	}
+	err := a.publish(name)
+	a.mu.Unlock()
+	if waiter == nil {
+		return "", err
+	}
+	defer func() {
+		a.mu.Lock()
+		delete(a.uploads, objectName)
+		a.mu.Unlock()
+	}()
+	if err != nil {
+		return "", err
+	}
+	select {
+	case a.wake <- struct{}{}:
+	default:
+	}
+
+	timer := time.NewTimer(a.uploadWait)
+	defer timer.Stop()
+	select {
+	case result := <-waiter:
+		if result.err != nil {
+			return "", fmt.Errorf("soniox archive: upload failed: %w", result.err)
+		}
+		return result.key, nil
+	case <-timer.C:
+		return "", errors.New("soniox archive: upload confirmation timed out")
+	case <-a.done:
+		return "", errors.New("soniox archive: closed before upload confirmation")
+	}
 }
 
 // Reasons are labels, never messages from either WebSocket or a raw error.

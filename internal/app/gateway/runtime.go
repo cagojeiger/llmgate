@@ -205,7 +205,8 @@ func buildRuntime(ctx context.Context, in RuntimeInput, workerIssuer *relaytoken
 	})
 	systemOneHandler := httpsystemone.NewHandler(in.Logger, events, httpsystemone.HandlerConfig{
 		APIKey:              os.Getenv("LLMGATE_TYPESAFE_API_KEY"),
-		RequestTimeout:      min(in.Config.RequestTimeout, in.Config.CompleteTimeout),
+		RequestTimeout:      in.Config.RequestTimeout,
+		CompleteTimeout:     in.Config.CompleteTimeout,
 		MaxRequestBodyBytes: in.Config.MaxRequestBytes,
 		ServiceVersion:      in.Version,
 		Environment:         in.Config.Environment,

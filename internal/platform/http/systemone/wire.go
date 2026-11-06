@@ -9,6 +9,7 @@ import (
 	"math"
 	"mime"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -33,54 +34,58 @@ type decisionRequest struct {
 
 type requestProblem struct {
 	status  int
+	kind    llmtypes.ErrorKind
 	message string
 }
 
 func decodeRequest(w http.ResponseWriter, r *http.Request, limit int64) (decisionRequest, *requestProblem) {
 	if encoding := r.Header.Get("Content-Encoding"); encoding != "" && !strings.EqualFold(encoding, "identity") {
-		return decisionRequest{}, &requestProblem{http.StatusUnsupportedMediaType, "request content encoding is unsupported"}
+		return decisionRequest{}, &requestProblem{http.StatusUnsupportedMediaType, llmtypes.KindBadRequest, "request content encoding is unsupported"}
 	}
 	if contentType := r.Header.Get("Content-Type"); contentType != "" {
 		if mediaType, _, err := mime.ParseMediaType(contentType); err != nil || mediaType != "application/json" {
-			return decisionRequest{}, &requestProblem{http.StatusUnsupportedMediaType, "request content type must be application/json"}
+			return decisionRequest{}, &requestProblem{http.StatusUnsupportedMediaType, llmtypes.KindBadRequest, "request content type must be application/json"}
 		}
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
 	if err != nil {
 		var large *http.MaxBytesError
 		if errors.As(err, &large) {
-			return decisionRequest{}, &requestProblem{http.StatusRequestEntityTooLarge, "request body exceeds the limit"}
+			return decisionRequest{}, &requestProblem{http.StatusRequestEntityTooLarge, llmtypes.KindBadRequest, "request body exceeds the limit"}
 		}
-		return decisionRequest{}, &requestProblem{http.StatusBadRequest, "could not read request body"}
+		if errors.Is(err, os.ErrDeadlineExceeded) {
+			return decisionRequest{}, &requestProblem{http.StatusBadGateway, llmtypes.KindTimeout, "request timed out"}
+		}
+		return decisionRequest{}, &requestProblem{http.StatusBadRequest, llmtypes.KindBadRequest, "could not read request body"}
 	}
 	var fields map[string]json.RawMessage
 	if !utf8.Valid(body) || json.Unmarshal(body, &fields) != nil || fields == nil {
-		return decisionRequest{}, &requestProblem{http.StatusBadRequest, "request body must be a UTF-8 JSON object"}
+		return decisionRequest{}, &requestProblem{http.StatusBadRequest, llmtypes.KindBadRequest, "request body must be a UTF-8 JSON object"}
 	}
 	var model string
 	if json.Unmarshal(fields["model"], &model) != nil || model != Model {
-		return decisionRequest{}, &requestProblem{http.StatusBadRequest, "model must be " + Model}
+		return decisionRequest{}, &requestProblem{http.StatusBadRequest, llmtypes.KindBadRequest, "model must be " + Model}
 	}
 	state := bytes.TrimSpace(fields["state"])
 	if len(state) == 0 || (state[0] != '"' && state[0] != '{' && state[0] != '[') {
-		return decisionRequest{}, &requestProblem{http.StatusUnprocessableEntity, "state must be a string, object, or array"}
+		return decisionRequest{}, &requestProblem{http.StatusUnprocessableEntity, llmtypes.KindBadRequest, "state must be a string, object, or array"}
 	}
 	var questions map[string]json.RawMessage
 	if json.Unmarshal(fields["questions"], &questions) != nil || len(questions) == 0 {
-		return decisionRequest{}, &requestProblem{http.StatusUnprocessableEntity, "questions must be a nonempty object"}
+		return decisionRequest{}, &requestProblem{http.StatusUnprocessableEntity, llmtypes.KindBadRequest, "questions must be a nonempty object"}
 	}
 	for name, question := range questions {
 		if len(question) == 0 || question[0] != '{' || name == "" {
-			return decisionRequest{}, &requestProblem{http.StatusUnprocessableEntity, "each named question must be an object"}
+			return decisionRequest{}, &requestProblem{http.StatusUnprocessableEntity, llmtypes.KindBadRequest, "each named question must be an object"}
 		}
 	}
 	if len(fields) != 3 {
-		return decisionRequest{}, &requestProblem{http.StatusUnprocessableEntity, "only model, state, and questions are supported"}
+		return decisionRequest{}, &requestProblem{http.StatusUnprocessableEntity, llmtypes.KindBadRequest, "only model, state, and questions are supported"}
 	}
 	// Send the same model we authorized even if the input repeats a JSON key.
 	wire, err := json.Marshal(fields)
 	if err != nil {
-		return decisionRequest{}, &requestProblem{http.StatusBadRequest, "could not encode request body"}
+		return decisionRequest{}, &requestProblem{http.StatusBadRequest, llmtypes.KindBadRequest, "could not encode request body"}
 	}
 	return decisionRequest{body: wire, questions: questions, inputBytes: int64(len(body))}, nil
 }
@@ -141,11 +146,9 @@ func decodeResponse(body []byte, questions map[string]json.RawMessage) (string, 
 		return "", nil
 	}
 	var result struct {
-		Model   string `json:"model"`
-		Answers map[string]struct {
-			Type string `json:"type"`
-		} `json:"answers"`
-		Usage struct {
+		Model   string                     `json:"model"`
+		Answers map[string]json.RawMessage `json:"answers"`
+		Usage   struct {
 			InputTokens  *int `json:"input_tokens"`
 			OutputTokens *int `json:"output_tokens"`
 		} `json:"usage"`
@@ -154,11 +157,22 @@ func decodeResponse(body []byte, questions map[string]json.RawMessage) (string, 
 		return "", nil
 	}
 	for name, raw := range questions {
-		var question struct {
+		var question, answer struct {
 			Type string `json:"type"`
 		}
-		if json.Unmarshal(raw, &question) != nil || question.Type == "" || result.Answers[name].Type != question.Type {
+		rawAnswer := result.Answers[name]
+		if json.Unmarshal(raw, &question) != nil || question.Type == "" ||
+			json.Unmarshal(rawAnswer, &answer) != nil || answer.Type != question.Type {
 			return "", nil
+		}
+		if answer.Type == "noul" {
+			// A map enforces the exact key spelling that clients read from the raw response.
+			var fields map[string]json.RawMessage
+			var probability *float64
+			if json.Unmarshal(rawAnswer, &fields) != nil || json.Unmarshal(fields["noul"], &probability) != nil ||
+				probability == nil || *probability < 0 || *probability > 1 {
+				return "", nil
+			}
 		}
 	}
 	if result.Usage.InputTokens == nil || result.Usage.OutputTokens == nil {

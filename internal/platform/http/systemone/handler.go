@@ -31,6 +31,7 @@ type HandlerConfig struct {
 	ServiceVersion      string
 	Environment         string
 	RequestTimeout      time.Duration
+	CompleteTimeout     time.Duration
 	MaxRequestBodyBytes int64
 	ResultSink          llmresultsink.Sink
 }
@@ -60,6 +61,9 @@ func NewHandler(log *slog.Logger, events telemetry.EventSink, cfg HandlerConfig)
 	}
 	if cfg.RequestTimeout <= 0 {
 		cfg.RequestTimeout = 5 * time.Minute
+	}
+	if cfg.CompleteTimeout <= 0 {
+		cfg.CompleteTimeout = time.Minute
 	}
 	if cfg.MaxRequestBodyBytes <= 0 {
 		cfg.MaxRequestBodyBytes = 10 << 20
@@ -132,14 +136,24 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	decoded, problem := decodeRequest(w, r, h.cfg.MaxRequestBodyBytes)
-	if problem != nil {
-		fail(w, rec, problem.status, llmtypes.KindBadRequest, problem.message)
+	// A socket read timeout can also cause net/http to cancel the request context.
+	switch requestErr := ctx.Err(); {
+	case problem != nil && problem.kind == llmtypes.KindTimeout, requestErr == context.DeadlineExceeded:
+		fail(w, rec, http.StatusBadGateway, llmtypes.KindTimeout, "request timed out")
+		return
+	case requestErr == context.Canceled:
+		fail(w, rec, 499, llmtypes.KindClientClosed, "client closed the request")
+		return
+	case problem != nil:
+		fail(w, rec, problem.status, problem.kind, problem.message)
 		return
 	}
 	request = decoded.body
 	call = telemetry.NewCallEvent(common, Model, decoded.inputBytes)
+	attemptCtx, cancelAttempt := context.WithTimeout(ctx, h.cfg.CompleteTimeout)
 	// Keep the completed decision even if the caller disconnects during delivery.
-	result = h.evaluate(w, ctx, rec, call, decoded)
+	result = h.evaluate(w, attemptCtx, rec, call, decoded)
+	cancelAttempt()
 	if result == nil {
 		return
 	}

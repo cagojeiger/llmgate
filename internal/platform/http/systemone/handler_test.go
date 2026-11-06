@@ -236,3 +236,43 @@ func TestSystemOneUpstreamFailuresRetainRequestOnly(t *testing.T) {
 		})
 	}
 }
+
+func TestSystemOneValidatesNoulProbability(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		field string
+		valid bool
+	}{
+		{name: "missing"},
+		{name: "uppercase key", field: `,"NOUL":0.5`},
+		{name: "null", field: `,"noul":null`},
+		{name: "string", field: `,"noul":"0.5"`},
+		{name: "below zero", field: `,"noul":-0.01`},
+		{name: "above one", field: `,"noul":1.01`},
+		{name: "zero", field: `,"noul":0`, valid: true},
+		{name: "one", field: `,"noul":1`, valid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := strings.Replace(answer, `,"noul":0.98`, tc.field, 1)
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = io.WriteString(w, body)
+			}))
+			defer upstream.Close()
+			resultSink := &resultCapture{}
+			h := NewHandler(nil, nil, HandlerConfig{APIKey: "key", Endpoint: upstream.URL, ResultSink: resultSink})
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, systemOneRequest(inputBody, httpauth.ConsumerInfo{Name: "consumer"}))
+			if len(resultSink.events) != 1 || len(resultSink.events[0].DecisionRequest) == 0 {
+				t.Fatalf("expected a recorded decision request, got %+v", resultSink.events)
+			}
+			result := resultSink.events[0]
+			if tc.valid {
+				if w.Code != http.StatusOK || w.Body.String() != body || string(result.DecisionResponse) != body {
+					t.Fatalf("valid probability changed or rejected: %d %s, result response %s", w.Code, w.Body, result.DecisionResponse)
+				}
+			} else if w.Code != http.StatusBadGateway || result.ErrorKind != llmtypes.KindUpstream || len(result.DecisionResponse) != 0 {
+				t.Fatalf("invalid probability should return 502 and record no decision response: %d %s, result %+v", w.Code, w.Body, result)
+			}
+		})
+	}
+}

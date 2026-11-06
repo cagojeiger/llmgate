@@ -50,6 +50,10 @@ type Event struct {
 	EmbeddingRequest      *llmtypes.EmbeddingRequest      `json:"embedding_request,omitempty"`
 	EmbeddingResponse     *llmtypes.EmbeddingResponse     `json:"embedding_response,omitempty"`
 
+	// Preserve arbitrary state and named answers in their original JSON shape.
+	DecisionRequest  json.RawMessage `json:"decision_request,omitempty"`
+	DecisionResponse json.RawMessage `json:"decision_response,omitempty"`
+
 	// Realtime* carry the session-level summary for the /v1/realtime WebSocket
 	// surface. A realtime session is brokered frame-by-frame and its per-turn
 	// audio is never buffered, so — unlike the transcription surface — there is

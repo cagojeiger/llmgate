@@ -50,10 +50,11 @@ type Runtime struct {
 	Server *http.Server
 	Probe  *httpprobe.State
 
-	cfg     *config.Server
-	log     *slog.Logger
-	events  telemetry.EventSink
-	results llmresultsink.Sink
+	cfg         *config.Server
+	log         *slog.Logger
+	events      telemetry.EventSink
+	results     llmresultsink.Sink
+	closeSoniox func() error
 }
 
 func LoadRuntime(ctx context.Context, in LoadInput) (*Runtime, error) {
@@ -212,6 +213,12 @@ func buildRuntime(ctx context.Context, in RuntimeInput, workerIssuer *relaytoken
 		Environment:         in.Config.Environment,
 		ResultSink:          results,
 	})
+	sonioxHandler, closeSoniox, err := buildSonioxHandler(in, events, results) //nolint:contextcheck // the archive owns its worker lifecycle
+	if err != nil {
+		_ = results.Close()
+		_ = events.Close()
+		return nil, err
+	}
 	probe := httpprobe.NewState()
 	var metricsHandler http.Handler
 	if in.Config.MetricsEnabled {
@@ -230,6 +237,7 @@ func buildRuntime(ctx context.Context, in RuntimeInput, workerIssuer *relaytoken
 		Handler:            handler,
 		AudioHandler:       audioHandler,
 		RealtimeHandler:    realtimeHandler,
+		SonioxHandler:      sonioxHandler,
 		EmbeddingHandler:   embeddingHandler,
 		SystemOneHandler:   systemOneHandler,
 		WorkerTokenHandler: workerHandler,
@@ -239,11 +247,12 @@ func buildRuntime(ctx context.Context, in RuntimeInput, workerIssuer *relaytoken
 	})
 
 	return &Runtime{
-		Server:  srv,
-		Probe:   probe,
-		cfg:     in.Config,
-		log:     in.Logger,
-		events:  events,
-		results: results,
+		Server:      srv,
+		Probe:       probe,
+		cfg:         in.Config,
+		log:         in.Logger,
+		events:      events,
+		results:     results,
+		closeSoniox: closeSoniox,
 	}, nil
 }

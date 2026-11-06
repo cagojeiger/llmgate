@@ -65,6 +65,10 @@ type Event struct {
 	RealtimeTurns       int      `json:"realtime_turns,omitempty"`
 	RealtimeTranscripts []string `json:"realtime_transcripts,omitempty"`
 
+	// The sidecar stores the native Soniox frames separately from the summary.
+	SonioxCaptureID       string `json:"soniox_capture_id,omitempty"`
+	SonioxCaptureComplete *bool  `json:"soniox_capture_complete,omitempty"`
+
 	ModelRequested string `json:"model_requested,omitempty"`
 	ModelUsed      string `json:"model_used,omitempty"`
 	Vendor         string `json:"vendor,omitempty"`

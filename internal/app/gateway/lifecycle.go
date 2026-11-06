@@ -45,10 +45,19 @@ func (r *Runtime) Close() error {
 	}
 	log := r.logger()
 	var first error
+	// Close the hijacked Soniox sessions while their capture and result sinks are still available.
+	if r.closeSoniox != nil {
+		if err := r.closeSoniox(); err != nil {
+			log.Warn("soniox archive close failed", slog.String("err", err.Error()))
+			first = err
+		}
+	}
 	if r.results != nil {
 		if err := r.results.Close(); err != nil {
 			log.Warn("llm result sink close failed", slog.String("err", err.Error()))
-			first = err
+			if first == nil {
+				first = err
+			}
 		}
 	}
 	if r.events != nil {

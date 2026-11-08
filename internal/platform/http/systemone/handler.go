@@ -23,6 +23,9 @@ const (
 	Model           = "jev-1.14.0"
 	vendor          = "typesafe"
 	defaultEndpoint = "https://api.typesafe.ai/v1/systemone"
+
+	defaultRequestBytes = 10 << 20
+	guardedRequestBytes = 1 << 20
 )
 
 type HandlerConfig struct {
@@ -34,13 +37,16 @@ type HandlerConfig struct {
 	CompleteTimeout     time.Duration
 	MaxRequestBodyBytes int64
 	ResultSink          llmresultsink.Sink
+	RecordResult        func(context.Context, *llmresultschema.Event) error
 }
 
 type Handler struct {
-	cfg     HandlerConfig
-	client  *http.Client
-	events  telemetry.EventSink
-	results llmresultsink.Sink
+	cfg          HandlerConfig
+	log          *slog.Logger
+	client       *http.Client
+	events       telemetry.EventSink
+	results      llmresultsink.Sink
+	payloadSlots chan struct{}
 }
 
 func NewHandler(log *slog.Logger, events telemetry.EventSink, cfg HandlerConfig) *Handler {
@@ -66,13 +72,18 @@ func NewHandler(log *slog.Logger, events telemetry.EventSink, cfg HandlerConfig)
 		cfg.CompleteTimeout = time.Minute
 	}
 	if cfg.MaxRequestBodyBytes <= 0 {
-		cfg.MaxRequestBodyBytes = 10 << 20
+		cfg.MaxRequestBodyBytes = defaultRequestBytes
 	}
 	cfg.MaxRequestBodyBytes = min(cfg.MaxRequestBodyBytes, maxTypeSafeRequestBytes)
 	client := upstream.DefaultClient()
 	// Even a same-host redirect can re-submit a billable POST.
 	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
-	return &Handler{cfg: cfg, client: client, events: telemetry.NewRecoveringSink(events, log), results: results}
+	return &Handler{
+		cfg: cfg, log: log, client: client, events: telemetry.NewRecoveringSink(events, log), results: results,
+		// Decoding and recording one image can require several copies of
+		// its payload. Limit that work independently of ordinary requests.
+		payloadSlots: make(chan struct{}, 1),
+	}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -94,8 +105,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// The server's recovery middleware handles panics after this defer runs.
 	rec.StatusCode, rec.Kind = http.StatusInternalServerError, llmtypes.KindPanic
 	var call *telemetry.CallEvent
-	var request, result json.RawMessage
+	var decoded decisionRequest
+	var result json.RawMessage
+	var admitted, recordAttempted bool
 	defer func() {
+		if admitted {
+			defer func() { <-h.payloadSlots }()
+		}
 		telemetry.FinishAuditEvent(rec, rec.StatusCode, rec.Kind, time.Since(start).Milliseconds())
 		h.events.Emit(ctx, rec)
 		if !telemetry.CallAttempted(call) {
@@ -103,12 +119,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		telemetry.FinishCallFromAudit(call, rec)
 		h.events.Emit(ctx, call)
-		if h.results != nil {
-			if ev, ok := llmresultschema.FromDecision(llmresultschema.DecisionBuildInput{
-				Audit: rec, Call: call, Request: request, Response: result,
-			}); ok {
-				h.results.Emit(ctx, ev)
-			}
+		if !recordAttempted {
+			_ = h.recordResult(ctx, rec, call, decoded, result, admitted)
 		}
 	}()
 
@@ -135,7 +147,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(w, rec, http.StatusServiceUnavailable, llmtypes.KindUpstream, "TypeSafe is unavailable")
 		return
 	}
-	decoded, problem := decodeRequest(w, r, h.cfg.MaxRequestBodyBytes)
+	if needsPayloadSlot(r) {
+		select {
+		case h.payloadSlots <- struct{}{}:
+			admitted = true
+		default:
+			w.Header().Set("Retry-After", "1")
+			fail(w, rec, http.StatusTooManyRequests, llmtypes.KindRateLimit, "TypeSafe request capacity is busy")
+			return
+		}
+	}
+	var problem *requestProblem
+	decoded, problem = decodeRequest(w, r, h.cfg.MaxRequestBodyBytes)
 	// A socket read timeout can also cause net/http to cancel the request context.
 	switch requestErr := ctx.Err(); {
 	case problem != nil && problem.kind == llmtypes.KindTimeout, requestErr == context.DeadlineExceeded:
@@ -148,7 +171,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(w, rec, problem.status, problem.kind, problem.message)
 		return
 	}
-	request = decoded.body
 	call = telemetry.NewCallEvent(common, Model, decoded.inputBytes)
 	attemptCtx, cancelAttempt := context.WithTimeout(ctx, h.cfg.CompleteTimeout)
 	// Keep the completed decision even if the caller disconnects during delivery.
@@ -157,15 +179,54 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if result == nil {
 		return
 	}
+	rec.StatusCode, rec.Kind = http.StatusOK, ""
+	if admitted && h.cfg.RecordResult != nil {
+		// A successful decision must reach the local audit file before the
+		// response. Delivery failures still appear in the operational audit.
+		recordAttempted = true
+		telemetry.FinishAuditEvent(rec, rec.StatusCode, rec.Kind, time.Since(start).Milliseconds())
+		if err := h.recordResult(ctx, rec, call, decoded, result, true); err != nil {
+			fail(w, rec, http.StatusServiceUnavailable, llmtypes.KindUnknown, "could not save the TypeSafe result")
+			return
+		}
+	}
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = http.NewResponseController(w).SetWriteDeadline(deadline)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	rec.StatusCode, rec.Kind = http.StatusOK, ""
 	if _, err := w.Write(result); err != nil {
 		rec.Kind = llmtypes.KindClientClosed
 	}
+}
+
+func needsPayloadSlot(r *http.Request) bool {
+	encoding := r.Header.Get("Content-Encoding")
+	return r.ContentLength < 0 || r.ContentLength > guardedRequestBytes ||
+		(encoding != "" && !strings.EqualFold(encoding, "identity")) ||
+		strings.HasPrefix(strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Type"))), "multipart/") ||
+		r.Header.Get("TypeSafe-Danger-Zone-Images") == "true"
+}
+
+func (h *Handler) recordResult(ctx context.Context, rec *telemetry.AuditEvent, call *telemetry.CallEvent, request decisionRequest, response json.RawMessage, acknowledged bool) error {
+	if h.results == nil && (!acknowledged || h.cfg.RecordResult == nil) {
+		return nil
+	}
+	event, ok := llmresultschema.FromDecision(llmresultschema.DecisionBuildInput{
+		Audit: rec, Call: call, Request: request.auditBody(), RequestHeaders: request.headers, Response: response,
+	})
+	if !ok {
+		return nil
+	}
+	if acknowledged && h.cfg.RecordResult != nil {
+		if err := h.cfg.RecordResult(ctx, event); err != nil {
+			h.log.WarnContext(ctx, "system one audit record failed", "request_id", rec.RequestID, "err", err.Error())
+			return err
+		}
+	} else {
+		h.results.Emit(ctx, event)
+	}
+	return nil
 }
 
 func fail(w http.ResponseWriter, rec *telemetry.AuditEvent, status int, kind llmtypes.ErrorKind, message string) {

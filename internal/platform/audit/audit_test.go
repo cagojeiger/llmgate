@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -126,6 +127,126 @@ func TestFileSink_EmitCloseUploads(t *testing.T) {
 	}
 	if got := len(listFiles(s.dirs.uploaded)); got != 1 {
 		t.Fatalf("uploaded files = %d, want 1 (retained locally)", got)
+	}
+}
+
+func TestFileSink_RecordCommitsBeforeReturningAndLogsObjectKey(t *testing.T) {
+	store := newFakeStore()
+	var logs bytes.Buffer
+	log := slog.New(slog.NewJSONHandler(&logs, nil))
+	s, err := NewFileSink(Config{Dir: t.TempDir(), RotateMaxBytes: 1, UploadInterval: time.Hour}, store, "audit", log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	decision := event("jev-record")
+	decision.DecisionRequest = json.RawMessage(`{"assets":{"photo":{"data_base64":"image-content"}}}`)
+	decision.DecisionResponse = json.RawMessage(`{"answers":{"photo":{"type":"box"}}}`)
+	if err := s.Record(context.Background(), decision); err != nil {
+		t.Fatal(err)
+	}
+	pending := listFiles(s.dirs.pending)
+	if len(pending) != 1 {
+		t.Fatalf("pending files before shutdown = %d, want one already sealed", len(pending))
+	}
+	raw, err := os.ReadFile(pending[0].path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got result.Event
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.RequestID != decision.RequestID || !bytes.Equal(got.DecisionRequest, decision.DecisionRequest) ||
+		!bytes.Equal(got.DecisionResponse, decision.DecisionResponse) {
+		t.Fatal("sealed result did not retain its request and response")
+	}
+	var receipt struct {
+		Message   string `json:"msg"`
+		RequestID string `json:"request_id"`
+		File      string `json:"file"`
+		ObjectKey string `json:"object_key"`
+	}
+	if err := json.Unmarshal(logs.Bytes(), &receipt); err != nil {
+		t.Fatal(err)
+	}
+	if receipt.Message != "audit result recorded locally" || receipt.RequestID != decision.RequestID ||
+		receipt.File != pending[0].name || receipt.ObjectKey == "" || strings.Contains(logs.String(), "image-content") {
+		t.Fatalf("unexpected audit receipt: %+v", receipt)
+	}
+	s.shipper.pass(context.Background())
+	if stored, ok := store.puts[receipt.ObjectKey]; !ok || !bytes.Equal(stored, raw) {
+		t.Fatal("logged object key did not match the stored result")
+	}
+}
+
+func TestFileSink_RecordReturnsWriteFailureAndRetainsPriorResult(t *testing.T) {
+	store := newFakeStore()
+	s, err := NewFileSink(Config{Dir: t.TempDir(), UploadInterval: time.Hour}, store, "", slogDiscard())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	ctx := context.Background()
+	if err := s.Record(ctx, event("first")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.w.f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Record(ctx, event("failed")); !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("Record after failed write = %v, want a closed-file error", err)
+	}
+	if err := s.Record(ctx, event("next")); err != nil {
+		t.Fatal(err)
+	}
+	s.w.rotate()
+	s.shipper.pass(ctx)
+	if store.totalLines() != 2 {
+		t.Fatalf("uploaded lines = %d, want just first and next", store.totalLines())
+	}
+	for _, data := range store.puts {
+		if bytes.Contains(data, []byte(`"request_id":"failed"`)) {
+			t.Fatal("failed decision was shipped")
+		}
+	}
+}
+
+func TestWriter_RollsBackOnlyUnacknowledgedSuffix(t *testing.T) {
+	d := newDirs(t)
+	w := newWriter(d, "inst", 0, time.Hour, slogDiscard())
+	ctx := context.Background()
+	first := []byte(`{"request_id":"first"}` + "\n")
+	w.appendLine(ctx, first)
+
+	// Simulate a completed write followed by a sync failure. The previously
+	// recorded line remains publishable, but the new success must disappear.
+	w.mu.Lock()
+	before := w.size
+	n, err := w.f.Write([]byte(`{"request_id":"failed","status":200}` + "\n"))
+	w.size += int64(n)
+	if err != nil {
+		w.mu.Unlock()
+		t.Fatal(err)
+	}
+	syncErr := errors.New("simulated sync failure")
+	err = w.recoverAppendLocked(ctx, before, syncErr)
+	w.mu.Unlock()
+	if !errors.Is(err, syncErr) {
+		t.Fatalf("rollback error = %v, want sync failure", err)
+	}
+
+	pending := listFiles(d.pending)
+	if len(pending) != 1 {
+		t.Fatalf("pending files = %d, want one with the first record", len(pending))
+	}
+	data, err := os.ReadFile(pending[0].path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(data, first) {
+		t.Fatalf("rollback produced %q, want only %q", data, first)
 	}
 }
 

@@ -61,7 +61,10 @@ func TestSystemOneRecordsRequestAndResponse(t *testing.T) {
 			t.Error("upstream did not receive its own bearer credential")
 		}
 		if r.Header.Get("TypeSafe-Danger-Zone-Images") != "" {
-			t.Error("caller feature headers reached upstream")
+			t.Error("false image opt-in reached upstream")
+		}
+		if r.Header.Get("TypeSafe-Danger-Zone-Long-Context") != "" {
+			t.Error("ambiguous long-context opt-in reached upstream")
 		}
 		var wire map[string]json.RawMessage
 		if err := json.NewDecoder(r.Body).Decode(&wire); err != nil {
@@ -83,7 +86,9 @@ func TestSystemOneRecordsRequestAndResponse(t *testing.T) {
 		Name: "consumer", KeyID: "key-id", AllowedAliases: []string{Model},
 	})
 	r.Header.Set("Authorization", "Bearer caller-key")
-	r.Header.Set("TypeSafe-Danger-Zone-Images", "true")
+	r.Header.Set("TypeSafe-Danger-Zone-Images", "false")
+	r.Header.Add("TypeSafe-Danger-Zone-Long-Context", "true")
+	r.Header.Add("TypeSafe-Danger-Zone-Long-Context", "false")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	if w.Code != http.StatusOK || w.Body.String() != answer {

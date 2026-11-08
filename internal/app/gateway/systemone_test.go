@@ -64,7 +64,7 @@ func TestSystemOne_WritesAuditAndDecisionResult(t *testing.T) {
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logs, nil))
 	cfg := &config.Server{AuditDir: t.TempDir(), AuditCompression: "none", RequestTimeout: 5 * time.Second}
-	results, err := buildResultSink(cfg, logger)
+	results, record, err := buildResultSink(cfg, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,6 +74,7 @@ func TestSystemOne_WritesAuditAndDecisionResult(t *testing.T) {
 		Endpoint:       upstream.URL + "/v1/systemone",
 		RequestTimeout: cfg.RequestTimeout,
 		ResultSink:     results,
+		RecordResult:   record,
 	})
 	gateway := server.NewWithOptions(server.ServerOptions{
 		Config:           cfg,

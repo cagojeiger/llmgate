@@ -2,12 +2,18 @@ package audit
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
+
+const repairSuffix = ".repair"
 
 // writer turns events into sealed files: it appends lines to the active
 // file and rotates it (fsync + atomic rename into pending/) on a size
@@ -59,6 +65,9 @@ func bucketStartOf(t time.Time, interval time.Duration) time.Time {
 func (w *writer) recoverOrphans() {
 	var recovered, droppedEmpty int
 	for _, f := range listFiles(w.dir.active) {
+		if strings.HasSuffix(f.name, repairSuffix) {
+			continue
+		}
 		if f.size == 0 {
 			_ = os.Remove(f.path)
 			droppedEmpty++
@@ -82,23 +91,64 @@ func (w *writer) recoverOrphans() {
 // events start clean, rather than interleaving good lines after a partial
 // one in the same growing file.
 func (w *writer) appendLine(ctx context.Context, line []byte) {
+	_, _ = w.append(ctx, line, false)
+}
+
+// An acknowledged append syncs before releasing the writer lock. The file
+// can then rotate without changing the name returned to the caller.
+func (w *writer) append(ctx context.Context, line []byte, acknowledged bool) (string, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if err := w.ensureOpenLocked(); err != nil {
 		w.log.LogAttrs(ctx, slog.LevelWarn, "audit open failed", slog.String("err", err.Error()))
-		return
+		return "", fmt.Errorf("open audit file: %w", err)
 	}
+	before := w.size
 	n, err := w.f.Write(line)
 	w.size += int64(n)
+	if err == nil && n != len(line) {
+		err = io.ErrShortWrite
+	}
 	if err != nil {
+		if acknowledged {
+			return "", w.recoverAppendLocked(ctx, before, fmt.Errorf("write audit line: %w", err))
+		}
 		w.log.LogAttrs(ctx, slog.LevelWarn, "audit write failed; sealing to contain partial line",
 			slog.Int("wrote", n), slog.String("err", err.Error()))
 		w.rotateLocked()
-		return
+		return "", err
 	}
+	if acknowledged {
+		if err := w.f.Sync(); err != nil {
+			return "", w.recoverAppendLocked(ctx, before, fmt.Errorf("sync audit line: %w", err))
+		}
+	}
+	name := w.activeName
 	if w.rotateMaxBytes > 0 && w.size >= w.rotateMaxBytes {
 		w.rotateLocked()
 	}
+	return name, nil
+}
+
+// Undo only the failed append. If the filesystem refuses truncation, keep
+// the file for repair and do not let the shipper or orphan recovery publish
+// a possibly complete-looking, unacknowledged result.
+func (w *writer) recoverAppendLocked(ctx context.Context, before int64, cause error) error {
+	if w.size > before {
+		if err := w.f.Truncate(before); err != nil {
+			f := w.f
+			w.f, w.size, w.activeName = nil, 0, ""
+			closeErr := f.Close()
+			repairErr := os.Rename(f.Name(), f.Name()+repairSuffix)
+			w.log.LogAttrs(ctx, slog.LevelError, "audit file requires repair",
+				slog.String("file", filepath.Base(f.Name())),
+				slog.Any("truncate_err", err), slog.Any("close_err", closeErr), slog.Any("rename_err", repairErr))
+			return errors.Join(cause, err, closeErr, repairErr)
+		}
+		w.size = before
+	}
+	w.rotateLocked()
+	return cause
 }
 
 func (w *writer) ensureOpenLocked() error {

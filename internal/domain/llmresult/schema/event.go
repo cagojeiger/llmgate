@@ -50,9 +50,11 @@ type Event struct {
 	EmbeddingRequest      *llmtypes.EmbeddingRequest      `json:"embedding_request,omitempty"`
 	EmbeddingResponse     *llmtypes.EmbeddingResponse     `json:"embedding_response,omitempty"`
 
-	// Preserve arbitrary state and named answers in their original JSON shape.
-	DecisionRequest  json.RawMessage `json:"decision_request,omitempty"`
-	DecisionResponse json.RawMessage `json:"decision_response,omitempty"`
+	// Preserve named answers and the replayable request. Multipart requests
+	// wrap the forwarded bytes and their content type in a JSON object.
+	DecisionRequest        json.RawMessage   `json:"decision_request,omitempty"`
+	DecisionRequestHeaders map[string]string `json:"decision_request_headers,omitempty"`
+	DecisionResponse       json.RawMessage   `json:"decision_response,omitempty"`
 
 	// Realtime* carry the session-level summary for the /v1/realtime WebSocket
 	// surface. A realtime session is brokered frame-by-frame and its per-turn

@@ -90,7 +90,7 @@ func TestSonioxRealtime_ArchivesExactSession(t *testing.T) {
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logs, nil))
 	cfg := &config.Server{AuditDir: t.TempDir(), AuditCompression: audit.CompressionNone, RequestTimeout: 5 * time.Second}
-	results, err := buildResultSink(cfg, logger)
+	results, _, err := buildResultSink(cfg, logger)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,26 +1,27 @@
 package gateway
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 
+	llmresultschema "llmgate/internal/domain/llmresult/schema"
 	llmresultsink "llmgate/internal/domain/llmresult/sink"
 	"llmgate/internal/platform/audit"
 	"llmgate/internal/platform/config"
 )
 
-// buildResultSink builds the finalized-result sink: the audit file sink
-// wrapped in the shared AsyncSink so writes stay off the request path.
-// A nil cfg or empty AuditDir disables it (NopSink).
-func buildResultSink(cfg *config.Server, log *slog.Logger) (llmresultsink.Sink, error) {
+// buildResultSink returns the shared async sink and the acknowledged
+// decision recorder. The async sink owns their shared file sink's lifetime.
+func buildResultSink(cfg *config.Server, log *slog.Logger) (llmresultsink.Sink, func(context.Context, *llmresultschema.Event) error, error) {
 	if cfg == nil || cfg.AuditDir == "" {
-		return llmresultsink.NopSink{}, nil
+		return llmresultsink.NopSink{}, nil, nil
 	}
 	terminal, err := buildAuditTerminal(cfg, log)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return wrapAsync(terminal, cfg, log), nil
+	return wrapAsync(terminal, cfg, log), terminal.Record, nil
 }
 
 func buildAuditStore(cfg *config.Server, log *slog.Logger) (audit.ObjectStore, error) {
@@ -55,7 +56,7 @@ func auditConfig(cfg *config.Server) audit.Config {
 	}
 }
 
-func buildAuditTerminal(cfg *config.Server, log *slog.Logger) (llmresultsink.Sink, error) {
+func buildAuditTerminal(cfg *config.Server, log *slog.Logger) (*audit.FileSink, error) {
 	store, err := buildAuditStore(cfg, log)
 	if err != nil {
 		return nil, err

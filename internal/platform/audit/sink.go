@@ -10,6 +10,7 @@ package audit
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -101,6 +102,29 @@ func (s *FileSink) Emit(ctx context.Context, event *result.Event) {
 		return
 	}
 	s.w.appendLine(ctx, append(line, '\n'))
+}
+
+// Record acknowledges a local append before the caller returns success.
+// Object storage is still advanced by the normal rotation and shipper.
+func (s *FileSink) Record(ctx context.Context, event *result.Event) error {
+	if s == nil || event == nil {
+		return errors.New("audit record requires a sink and an event")
+	}
+	line, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("encode audit record: %w", err)
+	}
+	name, err := s.w.append(ctx, append(line, '\n'), true)
+	if err != nil {
+		return err
+	}
+	fields := []slog.Attr{slog.String("request_id", event.RequestID), slog.String("file", name)}
+	if s.shipper.store != nil {
+		object := fileInfo{name: name + compressedExt(s.shipper.cfg.Compression)}
+		fields = append(fields, slog.String("object_key", objectKey(s.shipper.prefix, sealTimeOf(object), object.name)))
+	}
+	s.log.LogAttrs(ctx, slog.LevelInfo, "audit result recorded locally", fields...)
+	return nil
 }
 
 // rotateLoop seals the active file at each clock boundary aligned to

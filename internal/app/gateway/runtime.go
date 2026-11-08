@@ -165,7 +165,7 @@ func buildRuntime(ctx context.Context, in RuntimeInput, workerIssuer *relaytoken
 	)
 
 	//nolint:contextcheck // the audit sink's background workers and its one-shot S3 bucket probe detach from the build ctx by design
-	results, err := buildResultSink(in.Config, in.Logger)
+	results, recordDecision, err := buildResultSink(in.Config, in.Logger)
 	if err != nil {
 		_ = events.Close()
 		return nil, err
@@ -212,6 +212,7 @@ func buildRuntime(ctx context.Context, in RuntimeInput, workerIssuer *relaytoken
 		ServiceVersion:      in.Version,
 		Environment:         in.Config.Environment,
 		ResultSink:          results,
+		RecordResult:        recordDecision,
 	})
 	sonioxHandler, closeSoniox, err := buildSonioxHandler(in, events, results) //nolint:contextcheck // the archive owns its worker lifecycle
 	if err != nil {

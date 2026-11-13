@@ -1,4 +1,3 @@
-# ops — OpenClaw의 기본 대화·실행·운영 역할.
 alias: ops
 chain:
-  - glm-5.3-flash
+  - z-ai/glm-5.3-flash

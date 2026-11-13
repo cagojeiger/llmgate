@@ -72,9 +72,10 @@ model_file_for_id() {
 catalog_ids=$(catalog_ids_for_vendor)
 catalog_ids_all=$(all_catalog_ids)
 
-# Existing fixture dirs (skip dotfiles — .omc scratch etc.).
-fixture_ids=$(find "$FIXTURES_DIR" -mindepth 1 -maxdepth 1 -type d \
-    -not -name '.*' -exec basename {} \; 2>/dev/null | sort -u || true)
+# Preserve namespaced model IDs when finding recorded fixtures.
+fixture_ids=$(find "$FIXTURES_DIR" -type f -name 'chat-completion.json' \
+    -not -path '*/.*' -exec dirname {} \; 2>/dev/null \
+    | sed "s|^$FIXTURES_DIR/||" | sort -u || true)
 
 added=$(comm -23 <(echo "$catalog_ids") <(echo "$fixture_ids" || echo ""))
 removed=$(comm -13 <(echo "$catalog_ids_all") <(echo "$fixture_ids" || echo ""))

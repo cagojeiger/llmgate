@@ -1,4 +1,3 @@
-# research — OpenClaw의 웹·브라우저·장기 조사 역할.
 alias: research
 chain:
-  - minimax-m3
+  - z-ai/glm-5.3-flash

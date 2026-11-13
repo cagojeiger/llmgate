@@ -178,6 +178,7 @@ def gate_base_url(tmp_path_factory) -> Iterator[str]:
         )
         # gate factory requires the env to exist; cassette doesn't validate it.
         env.setdefault("LLMGATE_OPENCODE_API_KEY", "dummy-cassette-key")
+        env.setdefault("LLMGATE_OPENROUTER_API_KEY", "dummy-cassette-key")
     elif mode == "live":
         load_dotenv(REPO_ROOT / ".env")
         selected_vendor = e2e_vendor_filter()

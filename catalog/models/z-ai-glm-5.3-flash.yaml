@@ -1,0 +1,11 @@
+# Pricing and capabilities: https://openrouter.ai/z-ai/glm-5.3-flash
+id: z-ai/glm-5.3-flash
+vendor: openrouter
+protocol: openai
+base_url: https://openrouter.ai/api/v1
+auth_env: LLMGATE_OPENROUTER_API_KEY
+auth_scheme: bearer
+cost:
+  input: 0.0399
+  output: 0.0784
+  cache_read: 0.03

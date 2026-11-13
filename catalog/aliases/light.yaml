@@ -1,13 +1,3 @@
-# light — 최저가·고속·대량 티어 (멀티모달). 사이즈 사다리: light < medium < heavy.
-# 권장:  context 256K  /  output 64K        (호출 측 등록 권장값; 512K 컨텍스트도 실측 수용)
-# 상한:  context 1M     /  output 131,072    (체인 min = 실제 천장)
-# 이미지: 전 체인에서 JPEG와 PNG 지원.
-#   qwen3.8-flash context 1,000,000 / output 131,072 / image ✔ (text,image,video)   — 저가·고속 주력
-#   glm-5.3-flash context 1,000,000 / output 131,072 / image ✔ (text,image,video) — 저가 폴백
-#   mimo-v2.6-flash context 1,048,576 / output 131,072 / image ✔ (text,image,a/v)   — 저가 최종 폴백
-# 한도 출처: https://opencode.ai/inference/go/v1/models
 alias: light
 chain:
-  - qwen3.8-flash
-  - glm-5.3-flash
-  - mimo-v2.6-flash
+  - z-ai/glm-5.3-flash

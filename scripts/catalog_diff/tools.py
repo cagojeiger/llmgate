@@ -264,7 +264,8 @@ def analyze_and_build_manifest(source_url: str, remote: list[dict]) -> dict:
             refs.setdefault(mid, []).append(alias)
 
     stale = sorted(local_ids - remote_ids)
-    fresh = sorted(remote_ids - local_ids)
+    # An operator alias may deliberately replace a provider's raw model ID.
+    fresh = sorted(remote_ids - local_ids - aliases.keys())
     actions: list[dict] = []
     warnings: list[dict] = []
 

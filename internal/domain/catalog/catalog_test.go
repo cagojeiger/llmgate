@@ -45,23 +45,26 @@ func TestLoadDir_RepoCatalog(t *testing.T) {
 	if len(cat.Aliases) == 0 {
 		t.Fatal("no aliases loaded")
 	}
-	if a, ok := cat.Aliases["medium"]; ok {
-		if len(a.Chain) < 1 || a.Chain[0] != "minimax-m3" {
-			t.Fatalf("medium.Chain = %v, want chain starting with minimax-m3", a.Chain)
-		}
+	model, ok := cat.Models["z-ai/glm-5.3-flash"]
+	if !ok || model.Vendor != "openrouter" || model.Protocol != "openai" ||
+		model.BaseURL != "https://openrouter.ai/api/v1" || model.AuthEnv != "LLMGATE_OPENROUTER_API_KEY" {
+		t.Fatal("GLM chat aliases must use the OpenRouter model and credential")
 	}
 
-	// These task-intent aliases are the stable caller contract. Their exact
-	// order is operational policy, so catalog drift must not silently rewrite it.
+	// Alias names are stable caller contracts; catalog sync must preserve routing.
 	for _, tc := range []struct {
 		name string
 		want []string
 	}{
-		{name: "general", want: []string{"minimax-m3", "kimi-k2.7-code", "glm-5.3-flash"}},
-		{name: "coding", want: []string{"kimi-k2.7-code", "minimax-m3", "glm-5.3-flash"}},
-		{name: "ops", want: []string{"glm-5.3-flash"}},
-		{name: "code", want: []string{"kimi-k2.7-code"}},
-		{name: "research", want: []string{"minimax-m3"}},
+		{name: "general", want: []string{"z-ai/glm-5.3-flash"}},
+		{name: "coding", want: []string{"z-ai/glm-5.3-flash"}},
+		{name: "ops", want: []string{"z-ai/glm-5.3-flash"}},
+		{name: "code", want: []string{"z-ai/glm-5.3-flash"}},
+		{name: "research", want: []string{"z-ai/glm-5.3-flash"}},
+		{name: "light", want: []string{"z-ai/glm-5.3-flash"}},
+		{name: "medium", want: []string{"z-ai/glm-5.3-flash"}},
+		{name: "heavy", want: []string{"z-ai/glm-5.3-flash"}},
+		{name: "glm-5.3-flash", want: []string{"z-ai/glm-5.3-flash"}},
 	} {
 		a, ok := cat.Aliases[tc.name]
 		if !ok {
